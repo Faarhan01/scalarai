@@ -3,9 +3,15 @@ import { TradeConfig } from "../types";
 /**
  * Generates the complete MQL5 Expert Advisor file content with custom server endpoint injection.
  */
-export function generateMql5Code(appUrl: string, config: TradeConfig): string {
-  // Strip trailing slash if present
-  const clientUrl = appUrl.replace(/\/$/, "");
+export function generateMql5Code(appUrl?: string, config?: Partial<TradeConfig>): string {
+  // Strip trailing slash if present, default to http://127.0.0.1:3000
+  const clientUrl = (appUrl && appUrl.trim() !== "") ? appUrl.trim().replace(/\/$/, "") : "http://127.0.0.1:3000";
+  const lotSize = config?.lotSize ?? 0.1;
+  const maxTrades = config?.maxTrades ?? 3;
+  const takeProfitPoints = config?.takeProfitPoints ?? 300;
+  const stopLossPoints = config?.stopLossPoints ?? 150;
+  const useTrailingStop = config?.useTrailingStop ?? true;
+  const trailingStopPoints = config?.trailingStopPoints ?? 100;
 
   return `//+------------------------------------------------------------------+
 //|                                     StepIndex_AI_Scalper_EA.mq5   |
@@ -25,14 +31,14 @@ CTrade trade;
 
 //--- Expert Input Parameters
 input group "=== Risk Settings ==="
-input double   InpLotSize         = ${config.lotSize};        // Lot Size to Trade
-input int      InpMaxTrades       = ${config.maxTrades};       // Maximum open positions
-input double   InpTakeProfitPts   = ${config.takeProfitPoints};   // Take Profit (Points)
-input double   InpStopLossPts     = ${config.stopLossPoints};     // Stop Loss (Points)
+input double   InpLotSize         = ${lotSize};        // Lot Size to Trade
+input int      InpMaxTrades       = ${maxTrades};       // Maximum open positions
+input double   InpTakeProfitPts   = ${takeProfitPoints};   // Take Profit (Points)
+input double   InpStopLossPts     = ${stopLossPoints};     // Stop Loss (Points)
 
 input group "=== Trailing Settings ==="
-input bool     InpUseTrailing     = ${config.useTrailingStop};    // Enable Trailing Stop
-input double   InpTrailingStopPts = ${config.trailingStopPoints}; // Trailing Stop Distance (Pts)
+input bool     InpUseTrailing     = ${useTrailingStop};    // Enable Trailing Stop
+input double   InpTrailingStopPts = ${trailingStopPoints}; // Trailing Stop Distance (Pts)
 input double   InpTrailingStepPts = 50;                     // Trailing Step (Pts)
 
 input group "=== Trading Mode & Filters ==="

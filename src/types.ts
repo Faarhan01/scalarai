@@ -69,3 +69,19 @@ export interface EAConnectionDetails {
   accountNumber: string | null;
   balance: number | null;
 }
+
+export interface AiSynthesizedStrategy {
+  lastSynthesized: string;
+  strategyName: string;
+  rationale: string;
+  observationsUsed: string[];
+  compiledRules: {
+    minVelocityFilter: number;
+    slPointsMultiplier: number;
+    tpPointsMultiplier: number;
+    allowCounterTrend: boolean;
+    useEmaConfirmation: boolean;
+    maxAllowedPositionDivergence: number;
+  };
+}
+

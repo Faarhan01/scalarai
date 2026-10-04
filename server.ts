@@ -4,8 +4,9 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
+import { simpleGit } from "simple-git";
 import { generateMql5Code } from "./src/lib/mql5_generator";
-import { StrategyMode, TradeConfig, TradeRecord, SystemLog, Tick, EAConnectionDetails } from "./src/types";
+import { StrategyMode, TradeConfig, TradeRecord, SystemLog, Tick, EAConnectionDetails, AiSynthesizedStrategy } from "./src/types";
 
 // Load environment variables strictly in local dev
 import dotenv from "dotenv";
@@ -42,7 +43,7 @@ const tradeConfig: TradeConfig = {
   useTrailingStop: true,
   maxTrades: 3,
   mt5Path: "",
-  appEndpoint: "",
+  appEndpoint: "http://127.0.0.1:3000",
   tradingMode: "Scalping",
   selectedAssets: ["Step Index"],
   isAiModeEnabled: !!geminiKey
@@ -108,8 +109,41 @@ let aiKnowledgeBase: AiKnowledgeBase = {
   lastUpdated: ""
 };
 
+let aiSynthesizedStrategy: AiSynthesizedStrategy = {
+  lastSynthesized: new Date().toISOString(),
+  strategyName: "Adaptive Micro-Volatility Escalator",
+  rationale: "Initial structural preset. Regulates velocity noise components and aligns trades with secondary EMA moving averages.",
+  observationsUsed: [
+    "Awaiting micro-tick observation cycle. Click 'Synthesize AI Strategy' to scan live telemetry bounds."
+  ],
+  compiledRules: {
+    minVelocityFilter: 0.15,
+    slPointsMultiplier: 1.0,
+    tpPointsMultiplier: 1.0,
+    allowCounterTrend: false,
+    useEmaConfirmation: true,
+    maxAllowedPositionDivergence: 1.5
+  }
+};
+
 const KNOWLEDGE_FILE_PATH = path.join(process.cwd(), "ai_knowledge_profile.json");
+const STRATEGY_FILE_PATH = path.join(process.cwd(), "ai_synthesized_strategy.json");
 let lastProcessedTelemetryIndex = 0;
+
+function loadAiSynthesizedStrategy() {
+  try {
+    if (fs.existsSync(STRATEGY_FILE_PATH)) {
+      const fileData = fs.readFileSync(STRATEGY_FILE_PATH, "utf-8");
+      aiSynthesizedStrategy = JSON.parse(fileData);
+      addLog("AI", "SUCCESS", `Loaded persistent AI Synthesized Strategy. Name: '${aiSynthesizedStrategy.strategyName}'`);
+    } else {
+      fs.writeFileSync(STRATEGY_FILE_PATH, JSON.stringify(aiSynthesizedStrategy, null, 2), "utf-8");
+      addLog("AI", "INFO", "Initialized fresh 'ai_synthesized_strategy.json' persistent strategy file.");
+    }
+  } catch (error: any) {
+    console.error("Failed to load ai_synthesized_strategy.json:", error);
+  }
+}
 
 function loadAiKnowledgeBase() {
   try {
@@ -311,6 +345,57 @@ ${JSON.stringify(savedProfile, null, 2)}
 let pendingTrades: any[] = [];
 let lastBridgePoll: number | null = null;
 const mt5BridgeClients = new Set<WebSocket>();
+const webDashboardClients = new Set<WebSocket>();
+
+function getFullStatusPayload() {
+  const openPositions = tradesList.filter(t => t.status === "OPEN");
+  const closedPositions = tradesList.filter(t => t.status === "CLOSED");
+  const wins = closedPositions.filter(t => t.profit > 0).length;
+  
+  const totalProfit = closedPositions.reduce((sum, t) => sum + t.profit, 0);
+  const winRate = closedPositions.length > 0 ? (wins / closedPositions.length) * 100 : 0;
+  const isEaConnected = eaConnection.isEaConnected;
+  
+  return {
+    config: tradeConfig,
+    connection: eaConnection,
+    isBridgeConnected: mt5BridgeClients.size > 0 || (lastBridgePoll !== null && (Date.now() - lastBridgePoll < 6000)),
+    logs: systemLogs,
+    trades: tradesList,
+    history: isEaConnected ? tickHistory : [],
+    status: isEaConnected ? "active" : "waiting",
+    currentPrice,
+    hasGeminiKey: !!geminiKey,
+    aiSynthesizedStrategy,
+    stats: {
+      totalProfit: Number(totalProfit.toFixed(2)),
+      tradesCount: closedPositions.length,
+      winRate: Math.round(winRate),
+      activePositionsCount: openPositions.length,
+      lastHeartbeatTime: eaConnection.lastPing
+    },
+    webRequestStatus: webRequestTest
+  };
+}
+
+function broadcastToDashboards(payload: any) {
+  const message = JSON.stringify(payload);
+  webDashboardClients.forEach(client => {
+    if (client.readyState === 1) { // OPEN
+      try {
+        client.send(message);
+      } catch (err) {}
+    }
+  });
+}
+
+function broadcastTradesUpdate() {
+  broadcastToDashboards({
+    type: "trades",
+    trades: tradesList,
+    stats: getFullStatusPayload().stats
+  });
+}
 
 function broadcastToBridge(payload: any) {
   const message = JSON.stringify(payload);
@@ -335,14 +420,16 @@ addLog("SERVER", "INFO", "Step Index server initialisation complete.");
 addLog("AI", "INFO", "Built-in AI model ready. Waiting for MT5 client to pull latest weights.");
 
 function addLog(source: "SERVER" | "EA" | "AI", level: "INFO" | "SUCCESS" | "WARNING" | "ERROR", message: string) {
-  systemLogs.unshift({
+  const newLog: SystemLog = {
     id: Math.random().toString(36).substring(2, 9),
     timestamp: new Date().toLocaleTimeString(),
     level,
     source,
     message
-  });
+  };
+  systemLogs.unshift(newLog);
   if (systemLogs.length > 80) systemLogs.pop();
+  broadcastToDashboards({ type: "log", log: newLog });
 }
 
 // Background poller to monitor and update MT5 connection status heartbeat gracefully
@@ -558,7 +645,7 @@ async function evaluateSimulatedStrategy() {
       }
     }
   } else if (tradeConfig.selectedStrategy === StrategyMode.AI_ADAPTIVE) {
-    // Cognitive AI Strategy: Evaluates real-time market acceleration and velocity against historical baseline
+    // Cognitive AI Strategy governed by live AI Synthesized Strategy Rules & Observations!
     if (marketTelemetryData.length >= 2) {
       const currTelemetry = marketTelemetryData[marketTelemetryData.length - 1];
       const prevTelemetry = marketTelemetryData[marketTelemetryData.length - 2];
@@ -566,18 +653,36 @@ async function evaluateSimulatedStrategy() {
       const velocity = currTelemetry.velocity; // speed metric (points/sec)
       const acceleration = velocity - prevTelemetry.velocity; // acceleration velocity trend
       
-      const globAvgSpeed = aiKnowledgeBase.globalAverageSpeed;
-      const isHighMomentum = Math.abs(velocity) > globAvgSpeed * 1.5;
+      // We read and apply our dynamically formulated AI rules
+      const minSpeedFilter = aiSynthesizedStrategy.compiledRules.minVelocityFilter || 0.15;
+      const isHighMomentum = Math.abs(velocity) > minSpeedFilter;
       
-      if (isHighMomentum && Math.abs(acceleration) > 0.05) {
-        // High-conviction speed explosion! Align position with current directional flow
+      const globAvgSpeed = aiKnowledgeBase.globalAverageSpeed || 0.15;
+      const speedDivergence = Math.abs(velocity) / globAvgSpeed;
+      const withinDivergenceLimit = speedDivergence <= (aiSynthesizedStrategy.compiledRules.maxAllowedPositionDivergence || 2.0);
+      
+      // Direct EMA filter confirmation if specified in our active strategy template
+      let isEmaTrendConfirmed = true;
+      if (aiSynthesizedStrategy.compiledRules.useEmaConfirmation) {
+        isEmaTrendConfirmed = velocity > 0 ? (fastEma > slowEma) : (fastEma < slowEma);
+      }
+
+      // Check if counter-trend entries are disabled
+      let isDirectionAllowed = true;
+      if (!aiSynthesizedStrategy.compiledRules.allowCounterTrend) {
+        // If counter-trend entries are disallowed, only trade when velocity direction agrees with the EMA trend
+        isDirectionAllowed = velocity > 0 ? (fastEma >= slowEma) : (fastEma <= slowEma);
+      }
+
+      if (isHighMomentum && withinDivergenceLimit && isEmaTrendConfirmed && isDirectionAllowed && Math.abs(acceleration) > 0.02) {
+        // High-conviction AI breakout / breakdown synced with synthesized findings
         if (velocity > 0 && acceleration > 0) {
           if (!activeSellExists && !activeBuyExists) {
-            await openSimulatedPosition("BUY", `AI Breakout detected! Velocity: +${velocity.toFixed(3)} (Limit: ${globAvgSpeed}), Accel: +${acceleration.toFixed(4)}.`);
+            await openSimulatedPosition("BUY", `AI Synthesized Strategy Signal (Speed: +${velocity.toFixed(3)} > Filter: ${minSpeedFilter}, Speed Div: ${speedDivergence.toFixed(2)}x).`);
           }
         } else if (velocity < 0 && acceleration < 0) {
           if (!activeBuyExists && !activeSellExists) {
-            await openSimulatedPosition("SELL", `AI Breakdown detected! Velocity: ${velocity.toFixed(3)} (Limit: ${globAvgSpeed}), Accel: ${acceleration.toFixed(4)}.`);
+            await openSimulatedPosition("SELL", `AI Synthesized Strategy Signal (Speed: ${velocity.toFixed(3)} > Filter: ${minSpeedFilter}, Speed Div: ${speedDivergence.toFixed(2)}x).`);
           }
         }
       }
@@ -633,6 +738,13 @@ async function openSimulatedPosition(type: "BUY" | "SELL", reason: string) {
     }
   }
 
+  const slApplied = Math.round(
+    Number(tradeConfig.stopLossPoints || 0) * (aiSynthesizedStrategy.compiledRules.slPointsMultiplier || 1.0)
+  );
+  const tpApplied = Math.round(
+    Number(tradeConfig.takeProfitPoints || 0) * (aiSynthesizedStrategy.compiledRules.tpPointsMultiplier || 1.0)
+  );
+
   const tId = Math.random().toString(36).substring(2, 9);
   const newTrade: TradeRecord = {
     id: tId,
@@ -647,18 +759,19 @@ async function openSimulatedPosition(type: "BUY" | "SELL", reason: string) {
     reason
   };
   tradesList.unshift(newTrade);
-  addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} - ${type} at ${currentPrice}`);
+  addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} - ${type} at ${currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
 
   // Broadcast WebSocket execution bridge payload instantly, and queue for HTTP polling
   const orderPayload = {
     action: (type || "BUY").toUpperCase(),
     symbol: "Step Index",
     volume: Number(tradeConfig.lotSize || 0.1),
-    sl: Number(tradeConfig.stopLossPoints || 0),
-    tp: Number(tradeConfig.takeProfitPoints || 0)
+    sl: slApplied,
+    tp: tpApplied
   };
   broadcastToBridge(orderPayload);
   pendingTrades.push(orderPayload);
+  broadcastTradesUpdate();
 }
 
 function closeSimulatedPosition(trade: TradeRecord, reason: string) {
@@ -690,6 +803,7 @@ function closeSimulatedPosition(trade: TradeRecord, reason: string) {
   };
   broadcastToBridge(closePayload);
   pendingTrades.push(closePayload);
+  broadcastTradesUpdate();
 }
 
 // API MIDDLEWARES
@@ -710,24 +824,37 @@ app.use((req, res, next) => {
 
 // 1. Download EA Script
 app.get("/api/ea/download", (req: Request, res: Response) => {
-  const queryUrl = req.query.url as string;
-  let appUrl = tradeConfig.appEndpoint || queryUrl;
-  
-  if (!appUrl) {
-    const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-    const host = req.get("host") || "localhost:3000";
-    // Always prefer the exact APP_URL supplied by the environment variables if present
-    appUrl = process.env.APP_URL || `${protocol}://${host}`;
-  }
+  const queryUrl = (req.query.url as string)?.trim();
+  let appUrl = queryUrl || tradeConfig.appEndpoint || "http://127.0.0.1:3000";
   
   // Clean up potential trailing slashes for consistency
   appUrl = appUrl.replace(/\/$/, "");
+  if (!appUrl) {
+    appUrl = "http://127.0.0.1:3000";
+  }
   
   const mql5Code = generateMql5Code(appUrl, tradeConfig);
   
   res.setHeader("Content-Disposition", "attachment; filename=StepIndex_AI_Scalper_EA.mq5");
   res.setHeader("Content-Type", "text/plain");
   res.send(mql5Code);
+});
+
+// 1a. Download MQL5 Generator Source (mql5_generator.ts)
+app.get("/api/ea/generator-source", (req: Request, res: Response) => {
+  const possiblePaths = [
+    path.join(process.cwd(), "src", "lib", "mql5_generator.ts"),
+    path.join(process.cwd(), "src", "mql5_generator.ts"),
+    path.join(process.cwd(), "mql5_generator.ts")
+  ];
+  const foundPath = possiblePaths.find(p => fs.existsSync(p));
+  if (foundPath) {
+    res.setHeader("Content-Disposition", "attachment; filename=mql5_generator.ts");
+    res.setHeader("Content-Type", "text/plain");
+    res.sendFile(foundPath);
+  } else {
+    res.status(404).json({ error: "mql5_generator.ts file not found" });
+  }
 });
 
 // 1b. Download MT5 Chart Template
@@ -878,6 +1005,14 @@ app.post("/api/ea/tick", (req: Request, res: Response) => {
         direction
       });
       if (tickHistory.length > 150) tickHistory.shift();
+
+      broadcastToDashboards({
+        type: "tick",
+        tick: tickHistory[tickHistory.length - 1],
+        currentPrice,
+        connection: eaConnection,
+        stats: getFullStatusPayload().stats
+      });
     }
 
     // Capture floating profit for logs
@@ -986,6 +1121,14 @@ app.post("/api/update-market", async (req: Request, res: Response) => {
     balance: eaConnection.balance || 1000.0
   };
 
+  broadcastToDashboards({
+    type: "tick",
+    tick: tickHistory[tickHistory.length - 1],
+    currentPrice,
+    connection: eaConnection,
+    stats: getFullStatusPayload().stats
+  });
+
   // Move signal evaluations away from random tick noise. Validate strictly on structural boundaries / frames.
   const hasCandleTransition = current_time && String(current_time) !== lastCandleTime;
   const hasTimePassed = (Date.now() - lastEvaluationTime) >= 5000;
@@ -1039,6 +1182,7 @@ app.get("/api/ai-study-feed", (req: Request, res: Response) => {
       unprocessedCount: marketTelemetryData.length - lastProcessedTelemetryIndex,
       threshold: MIN_SAFETY_CALIBRATION_THRESHOLD,
       aiKnowledgeBase,
+      aiSynthesizedStrategy,
       candleStream: tickHistory,
       averageVelocity: calculatedAvg || aiKnowledgeBase.globalAverageSpeed
     });
@@ -1052,6 +1196,7 @@ app.get("/api/ai-study-feed", (req: Request, res: Response) => {
     status: "optimized",
     averageVelocity: averageVelocity || aiKnowledgeBase.globalAverageSpeed,
     aiKnowledgeBase,
+    aiSynthesizedStrategy,
     candleStream: tickHistory,
     count: marketTelemetryData.length,
     stream: marketTelemetryData
@@ -1116,35 +1261,9 @@ app.get("/api/get-pending-trades", (req: Request, res: Response) => {
   res.json(tradesToDispatch);
 });
 
-// 3. Global Status API (Frontend polls this to refresh UI indicators and data)
+// 3. Global Status API (Frontend polls this or receives it over WebSocket)
 app.get("/api/status", (req: Request, res: Response) => {
-  const openPositions = tradesList.filter(t => t.status === "OPEN");
-  const closedPositions = tradesList.filter(t => t.status === "CLOSED");
-  const wins = closedPositions.filter(t => t.profit > 0).length;
-  
-  const totalProfit = closedPositions.reduce((sum, t) => sum + t.profit, 0);
-  const winRate = closedPositions.length > 0 ? (wins / closedPositions.length) * 100 : 0;
-  
-  const isEaConnected = eaConnection.isEaConnected;
-  
-  res.json({
-    config: tradeConfig,
-    connection: eaConnection,
-    isBridgeConnected: mt5BridgeClients.size > 0 || (lastBridgePoll !== null && (Date.now() - lastBridgePoll < 6000)),
-    logs: systemLogs,
-    trades: tradesList,
-    history: isEaConnected ? tickHistory : [],
-    status: isEaConnected ? "active" : "waiting",
-    currentPrice,
-    hasGeminiKey: !!geminiKey,
-    stats: {
-      totalProfit: Number(totalProfit.toFixed(2)),
-      tradesCount: closedPositions.length,
-      winRate: Math.round(winRate),
-      activePositionsCount: openPositions.length,
-      lastHeartbeatTime: eaConnection.lastPing
-    }
-  });
+  res.json(getFullStatusPayload());
 });
 
 // 4. Update Strategy Settings from Frontend Control Center
@@ -1188,6 +1307,7 @@ app.post("/api/test-webrequest/report", (req: Request, res: Response) => {
   webRequestTest.triggerTest = false; // Reset trigger once reported
   
   addLog("SERVER", status === "success" ? "SUCCESS" : "WARNING", `WebRequest test completed. Result: ${String(status).toUpperCase()}. Details: ${details}`);
+  broadcastToDashboards({ type: "webrequest_test", testState: webRequestTest });
   res.json({ status: "ok" });
 });
 
@@ -1220,6 +1340,7 @@ app.post("/api/settings", (req: Request, res: Response) => {
   }
 
   addLog("SERVER", "WARNING", `Strategy configurations changed. Running parameters updated.`);
+  broadcastToDashboards({ type: "config", config: tradeConfig });
   res.json({ status: "ok", config: tradeConfig });
 });
 
@@ -1250,6 +1371,8 @@ app.post("/api/toggle-trade", (req: Request, res: Response) => {
     addLog("AI", "SUCCESS", `AI reinforcement activated on strategy model ${tradeConfig.selectedStrategy}`);
   }
 
+  broadcastToDashboards({ type: "config", config: tradeConfig });
+  broadcastTradesUpdate();
   res.json({ status: "ok", config: tradeConfig });
 });
 
@@ -1257,7 +1380,183 @@ app.post("/api/toggle-trade", (req: Request, res: Response) => {
 app.post("/api/reset-stats", (req: Request, res: Response) => {
   tradesList = [];
   addLog("SERVER", "SUCCESS", "User reset session statistics and trading history log.");
+  broadcastTradesUpdate();
   res.json({ status: "ok" });
+});
+
+// 5.6 GitHub OAuth Integration Support
+let storedGithubAccessToken: string | null = null;
+
+function getAuthenticatedRemoteUrl(originalUrl: string, token: string): string {
+  let cleanUrl = originalUrl;
+  
+  // Convert SSH URLs (e.g. git@github.com:owner/repo.git) to HTTPS form
+  if (cleanUrl.startsWith("git@github.com:")) {
+    cleanUrl = cleanUrl.replace("git@github.com:", "github.com/");
+  } else if (cleanUrl.startsWith("ssh://git@github.com/")) {
+    cleanUrl = cleanUrl.replace("ssh://git@github.com/", "github.com/");
+  }
+  
+  cleanUrl = cleanUrl.replace(/^https?:\/\//, "");
+  
+  // Remove user credentials if any exist (e.g. user:pass@github.com)
+  const atIndex = cleanUrl.indexOf("@");
+  if (atIndex !== -1) {
+    cleanUrl = cleanUrl.substring(atIndex + 1);
+  }
+  
+  if (cleanUrl.endsWith(".git")) {
+    cleanUrl = cleanUrl.substring(0, cleanUrl.length - 4);
+  }
+  
+  return `https://x-access-token:${token}@${cleanUrl}`;
+}
+
+// Route to handle standard Web Application Flow Callback
+app.get("/api/auth/github/callback", async (req: Request, res: Response) => {
+  const { code } = req.query;
+  if (!code) {
+    addLog("SERVER", "WARNING", "GitHub OAuth invoked without a temporary authorization code.");
+    return res.status(400).send("Missing temporary code parameter");
+  }
+
+  const clientId = process.env.GITHUB_CLIENT_ID || "Ov231i1UE0j2FgaM9tP3";
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET || "b2bd9097c8c301fc623b441ff75c2f9fcc46074e";
+
+  try {
+    addLog("SERVER", "INFO", "Exchanging temporary OAuth code for safe GitHub access token...");
+    
+    const response = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: code,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub token exchange failed: ${response.statusText}`);
+    }
+
+    const data: any = await response.json();
+    if (data.error) {
+      throw new Error(`GitHub OAuth error: ${data.error_description || data.error}`);
+    }
+
+    if (data.access_token) {
+      storedGithubAccessToken = data.access_token;
+      addLog("SERVER", "SUCCESS", "GitHub OAuth authentication successful!");
+
+      res.send(`
+        <html>
+          <body style="background: #0b1329; color: #f1f5f9; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
+            <div style="text-align: center; background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #334155; max-width: 400px; width: 90%;">
+              <h2 style="color: #6366f1; margin: 0 0 0.5rem 0; font-size: 1.5rem;">Connection Successful</h2>
+              <p style="color: #94a3b8; font-size: 0.9rem; line-height: 1.5; margin-bottom: 1.5rem;">
+                Your GitHub access token has been safely stored in secure server session memory.
+              </p>
+              <div style="display: inline-block; width: 1.5rem; height: 1.5rem; border: 3px solid #6366f1; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+              <style>
+                @keyframes spin { to { transform: rotate(360deg); } }
+              </style>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${data.access_token}' }, '*');
+                  setTimeout(() => window.close(), 1500);
+                } else {
+                  setTimeout(() => { window.location.href = '/?github_auth=success'; }, 2000);
+                }
+              </script>
+            </div>
+          </body>
+        </html>
+      `);
+    } else {
+      res.status(400).send("Did not receive an access_token from GitHub.");
+    }
+  } catch (error: any) {
+    addLog("SERVER", "WARNING", `GitHub OAuth failed: ${error.message}`);
+    res.status(500).send(`Authentication failed: ${error.message}`);
+  }
+});
+
+// Endpoint to retrieve active connection status and details
+app.get("/api/github-status", (req: Request, res: Response) => {
+  res.json({
+    authenticated: !!storedGithubAccessToken,
+    clientId: process.env.GITHUB_CLIENT_ID || "Ov231i1UE0j2FgaM9tP3"
+  });
+});
+
+// Endpoint to log out or clear stored token
+app.post("/api/auth/github/logout", (req: Request, res: Response) => {
+  storedGithubAccessToken = null;
+  addLog("SERVER", "INFO", "User cleared active GitHub access token from secure server memory.");
+  res.json({ success: true, message: "Disconnected successfully" });
+});
+
+// Programmatic Repository Update endpoint using simple-git
+app.all("/api/sync-from-github", async (req: Request, res: Response) => {
+  const token = (req.query.token as string) || (req.body && req.body.token) || storedGithubAccessToken;
+  
+  if (!token) {
+    addLog("SERVER", "WARNING", "Synchronization triggered but no active GitHub token was found.");
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required",
+      message: "Please log in with GitHub first to retrieve an access token."
+    });
+  }
+
+  try {
+    const git = simpleGit();
+    
+    // Check if it's a valid git repository
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("The application path is not a valid git repository.");
+    }
+
+    // Read configured owner and repo from environment variables
+    const owner = process.env.GITHUB_REPO_OWNER || "Faarhan01";
+    const repo = process.env.GITHUB_REPO_NAME || "Scalarai";
+
+    // Get current branch name
+    const branch = await git.revparse(["--abbrev-ref", "HEAD"]);
+    addLog("SERVER", "INFO", `Sync initiated: targeting repository ${owner}/${repo} on branch ${branch}...`);
+
+    // Dynamically build authenticated https repository URL using credentials
+    const authUrl = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
+
+    addLog("SERVER", "INFO", `Executing simple-git pull operation securely for ${owner}/${repo}...`);
+    
+    // Perform programmatic pull from explicit url on active branch
+    const pullResult = await git.pull(authUrl, branch);
+    
+    const summaryMsg = `Successfully synchronized with GitHub. Changes pulled: Files (${pullResult.files.length}), Insertions (${pullResult.summary.insertions}), Deletions (${pullResult.summary.deletions}).`;
+    addLog("SERVER", "SUCCESS", summaryMsg);
+
+    res.json({
+      success: true,
+      branch,
+      summary: pullResult.summary,
+      files: pullResult.files,
+      message: `Repository ${owner}/${repo} pulled and synchronized successfully!`
+    });
+  } catch (error: any) {
+    const errorMsg = `Programmatic synchronization failed: ${error.message}`;
+    addLog("SERVER", "ERROR", errorMsg);
+    res.status(500).json({
+      success: false,
+      error: error.message || error,
+      message: "A failure condition occurred while programmatically pulling updates."
+    });
+  }
 });
 
 // 6. Gemini Core AI integration: Generate professional Step Index trading reinforcement summaries
@@ -1411,14 +1710,159 @@ Example structure:
   }
 });
 
+// 8. Dynamic AI Strategy & Observational Synthesis from tick and knowledge findings
+app.post("/api/gemini/synthesize-strategy", async (req: Request, res: Response) => {
+  if (!ai) {
+    return res.status(200).json({
+      error: "Gemini API key is not configured inside server configurations. To activate Gemini, insert a value into the SECRETS panel."
+    });
+  }
+
+  try {
+    const historicalTicks = tickHistory.slice(-40).map(t => ({
+      price: t.price,
+      direction: t.direction,
+      open: t.open,
+      high: t.high,
+      low: t.low,
+      close: t.close,
+      time: t.time
+    }));
+
+    const savedProfile = {
+      globalAverageSpeed: aiKnowledgeBase.globalAverageSpeed,
+      peakVelocityRegistered: aiKnowledgeBase.peakVelocityRegistered,
+      timeOfDayPatterns: aiKnowledgeBase.timeOfDayPatterns,
+      totalObservations: aiKnowledgeBase.totalObservations
+    };
+
+    const closedPositions = tradesList.filter(t => t.status === "CLOSED");
+    const wins = closedPositions.filter(t => t.profit > 0).length;
+    const statsSummary = {
+      totalTrades: closedPositions.length,
+      winRate: closedPositions.length > 0 ? Math.round((wins / closedPositions.length) * 100) : 0,
+      totalProfit: Number(closedPositions.reduce((sum, t) => sum + t.profit, 0).toFixed(2))
+    };
+
+    const systemPrompt = `You are a professional quantitative AI analyst and algorithmic systems designer for synthetic index trading.
+Your task is to analyze the provided long-term knowledge profiles, recent micro-tick logs, and overall trading performance to synthesize a tailored, highly specific, and reactive execution strategy.
+
+Identify key observational findings (e.g., peak/average velocity patterns, current hour speed vs global speed, trend persistence, trade success rate) and formulate concrete rules for our engine.
+
+You must respond with a STRICT, unformatted JSON block. Do NOT include markdown tags like \`\`\`json or \`\`\`. No leading/trailing conversational text.
+Your entire response must be a single parsable JSON object matching this structure:
+{
+  "strategyName": "A descriptive, professional quantitative name",
+  "rationale": "A comprehensive operational explanation citing specific observations from findings (e.g. average velocity of historical timings, or recent direction distributions)",
+  "observationsUsed": [
+    "Observation 1 (e.g., peak registered tick speed of X pt/s demands a tight filter)",
+    "Observation 2 (e.g., Hour Y shows Z avg velocity indicating high activity windows)",
+    "Observation 3 (e.g., trend following performance indicates we should enforce trade boundaries)"
+  ],
+  "compiledRules": {
+    "minVelocityFilter": 0.15,
+    "slPointsMultiplier": 1.0,
+    "tpPointsMultiplier": 1.0,
+    "allowCounterTrend": false,
+    "useEmaConfirmation": true,
+    "maxAllowedPositionDivergence": 2.0
+  }
+}
+`;
+
+    const modelInput = `
+Recent Tick History Summary:
+${JSON.stringify(historicalTicks, null, 2)}
+
+Historical Knowledge Profile:
+${JSON.stringify(savedProfile, null, 2)}
+
+Trading Performance Stats:
+${JSON.stringify(statsSummary, null, 2)}
+    `;
+
+    addLog("AI", "INFO", "Initiating quantitative strategy synthesis based on tick history and database findings...");
+
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: modelInput,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.2,
+          responseMimeType: "application/json"
+        }
+      });
+    } catch (primaryErr: any) {
+      console.warn("Primary Gemini model failed on strategy synthesis, trying fallback. Error:", primaryErr.message || primaryErr);
+      response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: modelInput,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.2,
+          responseMimeType: "application/json"
+        }
+      });
+    }
+
+    const rawText = response.text?.trim() || "{}";
+    let cleanText = rawText;
+    if (cleanText.includes("```")) {
+      cleanText = cleanText.replace(/```json/g, "").replace(/```/g, "").trim();
+    }
+
+    const parsed = JSON.parse(cleanText);
+    
+    // Validate rules to keep execution stable
+    const minVelocityFilter = typeof parsed.compiledRules?.minVelocityFilter === "number" ? parsed.compiledRules.minVelocityFilter : 0.15;
+    const slPointsMultiplier = typeof parsed.compiledRules?.slPointsMultiplier === "number" ? parsed.compiledRules.slPointsMultiplier : 1.0;
+    const tpPointsMultiplier = typeof parsed.compiledRules?.tpPointsMultiplier === "number" ? parsed.compiledRules.tpPointsMultiplier : 1.0;
+    const allowCounterTrend = typeof parsed.compiledRules?.allowCounterTrend === "boolean" ? parsed.compiledRules.allowCounterTrend : false;
+    const useEmaConfirmation = typeof parsed.compiledRules?.useEmaConfirmation === "boolean" ? parsed.compiledRules.useEmaConfirmation : true;
+    const maxAllowedPositionDivergence = typeof parsed.compiledRules?.maxAllowedPositionDivergence === "number" ? parsed.compiledRules.maxAllowedPositionDivergence : 2.0;
+
+    aiSynthesizedStrategy = {
+      lastSynthesized: new Date().toISOString(),
+      strategyName: parsed.strategyName || "Quantum Velocity Escalator",
+      rationale: parsed.rationale || "Formulated default quantitative fallback parameters to safeguard capital boundaries.",
+      observationsUsed: Array.isArray(parsed.observationsUsed) ? parsed.observationsUsed : ["General micro-tick velocity distribution balanced successfully."],
+      compiledRules: {
+        minVelocityFilter,
+        slPointsMultiplier,
+        tpPointsMultiplier,
+        allowCounterTrend,
+        useEmaConfirmation,
+        maxAllowedPositionDivergence
+      }
+    };
+
+    // Save to disk
+    fs.writeFileSync(STRATEGY_FILE_PATH, JSON.stringify(aiSynthesizedStrategy, null, 2), "utf-8");
+    addLog("AI", "SUCCESS", `Synthesizing strategy complete. New design: '${aiSynthesizedStrategy.strategyName}'. Rules written to disk.`);
+
+    res.json({ success: true, strategy: aiSynthesizedStrategy });
+  } catch (err: any) {
+    console.error("AI strategy synthesis failed: ", err);
+    res.status(500).json({ error: "Strategy synthesis error: " + err.message });
+  }
+});
+
 // Implement Vite static and fallback route parameters
 async function startServer() {
   loadAiKnowledgeBase();
+  loadAiSynthesizedStrategy();
 
   // Run automated background analysis worker every 5 minutes (300,000 ms)
   setInterval(() => {
     runBackgroundAnalysisWorker();
   }, 300000);
+
+  // Return JSON 404 for unhandled API endpoints to prevent Vite from returning index.html
+  app.all("/api/*", (req: Request, res: Response) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+  });
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -1438,19 +1882,30 @@ async function startServer() {
     console.log(`Step Index Scalper full-stack server running on http://localhost:${PORT}`);
   });
 
-  // Create WebSocket Server attached to server upgrade events on /mt5-bridge
-  const wss = new WebSocketServer({ noServer: true });
+  // Create WebSocket Servers: one for desktop MT5 bridge, one for web dashboard real-time stream
+  const wssBridge = new WebSocketServer({ noServer: true });
+  const wssDashboard = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
-    const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
-    if (urlObj.pathname === "/mt5-bridge") {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit("connection", ws, request);
-      });
+    try {
+      const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
+      if (urlObj.pathname === "/mt5-bridge") {
+        wssBridge.handleUpgrade(request, socket, head, (ws) => {
+          wssBridge.emit("connection", ws, request);
+        });
+      } else if (urlObj.pathname === "/ws/live" || urlObj.pathname === "/ws" || urlObj.pathname === "/live-feed") {
+        wssDashboard.handleUpgrade(request, socket, head, (ws) => {
+          wssDashboard.emit("connection", ws, request);
+        });
+      } else {
+        socket.destroy();
+      }
+    } catch {
+      socket.destroy();
     }
   });
 
-  wss.on("connection", (ws: WebSocket) => {
+  wssBridge.on("connection", (ws: WebSocket) => {
     mt5BridgeClients.add(ws);
     addLog("SERVER", "SUCCESS", "Local MetaTrader 5 WebSocket Bridge connection established.");
 
@@ -1482,6 +1937,54 @@ async function startServer() {
       clearInterval(pingInterval);
       mt5BridgeClients.delete(ws);
       addLog("SERVER", "ERROR", `MT5 Bridge WebSocket error: ${err.message || err}`);
+    });
+  });
+
+  // Web Dashboard Real-Time Live Stream connection handling
+  wssDashboard.on("connection", (ws: WebSocket) => {
+    webDashboardClients.add(ws);
+    // Send immediate comprehensive snapshot
+    try {
+      ws.send(JSON.stringify({ type: "init", payload: getFullStatusPayload() }));
+    } catch {}
+
+    ws.on("message", (rawMsg) => {
+      try {
+        const msg = JSON.parse(rawMsg.toString());
+        if (msg.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong", clientTime: msg.clientTime, serverTime: Date.now() }));
+        } else if (msg.type === "toggle_trade") {
+          tradeConfig.isActive = !tradeConfig.isActive;
+          const statusLabel = tradeConfig.isActive ? "STARTED" : "STOPPED";
+          addLog("SERVER", "INFO", `Trading remote state toggled to: ${statusLabel}`);
+          if (!tradeConfig.isActive) {
+            const openTrades = tradesList.filter(t => t.status === "OPEN");
+            if (openTrades.length > 0) {
+              openTrades.forEach(t => closeSimulatedPosition(t, "Forced termination from remote dashboard."));
+            }
+          }
+          broadcastToDashboards({ type: "config", config: tradeConfig });
+          broadcastTradesUpdate();
+        } else if (msg.type === "close_all") {
+          tradesList.forEach(t => {
+            if (t.status === "OPEN") {
+              closeSimulatedPosition(t, "Closed from remote web dashboard.");
+            }
+          });
+          broadcastTradesUpdate();
+        } else if (msg.type === "reset_stats") {
+          tradesList = [];
+          broadcastTradesUpdate();
+        }
+      } catch {}
+    });
+
+    ws.on("close", () => {
+      webDashboardClients.delete(ws);
+    });
+
+    ws.on("error", () => {
+      webDashboardClients.delete(ws);
     });
   });
 }

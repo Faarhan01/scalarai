@@ -29,7 +29,11 @@ import {
   Database,
   Lock,
   Zap,
-  RotateCcw
+  RotateCcw,
+  Github,
+  Code2,
+  Menu,
+  X
 } from "lucide-react";
 import { StrategyMode, TradeConfig, TradeRecord, SystemLog, Tick, EAConnectionDetails } from "./types";
 
@@ -95,7 +99,7 @@ export default function App() {
     maxTrades: "3",
     useTrailingStop: true,
     mt5Path: "",
-    appEndpoint: "",
+    appEndpoint: "http://127.0.0.1:3000",
     tradingMode: "Scalping" as "Scalping" | "Swing",
     selectedAssets: ["Step Index"] as string[],
     isAiModeEnabled: false
@@ -104,6 +108,7 @@ export default function App() {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [activeTab, setActiveTab] = useState<"visuals" | "tutorial">("visuals");
   const [currentNavTab, setCurrentNavTab] = useState<"home" | "downloads" | "logs" | "risk" | "settings">("home");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [webRequestStatus, setWebRequestStatus] = useState<{
@@ -114,6 +119,21 @@ export default function App() {
   } | null>(null);
   const [suggestedUrl, setSuggestedUrl] = useState<string>("");
   const [isVerifyingWebRequest, setIsVerifyingWebRequest] = useState<boolean>(false);
+  const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [pingLatency, setPingLatency] = useState<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  const sendWsMessage = (msg: any): boolean => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify(msg));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
 
   // Time elapsed counter
   const [elapsedTime, setElapsedTime] = useState<string>("00:00:00");
@@ -130,7 +150,34 @@ export default function App() {
     timeOfDayPatterns: Record<string, { count: number; avgSpeed: number }>;
     lastUpdated: string;
   } | null>(null);
+  const [aiSynthesizedStrategy, setAiSynthesizedStrategy] = useState<{
+    lastSynthesized: string;
+    strategyName: string;
+    rationale: string;
+    observationsUsed: string[];
+    compiledRules: {
+      minVelocityFilter: number;
+      slPointsMultiplier: number;
+      tpPointsMultiplier: number;
+      allowCounterTrend: boolean;
+      useEmaConfirmation: boolean;
+      maxAllowedPositionDivergence: number;
+    };
+  } | null>(null);
+  const [isSynthesizingStrategy, setIsSynthesizingStrategy] = useState<boolean>(false);
   const [telemetryStream, setTelemetryStream] = useState<any[]>([]);
+
+  // GitHub integration states
+  const [isGithubConnected, setIsGithubConnected] = useState<boolean>(false);
+  const [githubClientId, setGithubClientId] = useState<string>("");
+  const [isSyncingFromGithub, setIsSyncingFromGithub] = useState<boolean>(false);
+  const [githubSyncResult, setGithubSyncResult] = useState<{
+    success: boolean;
+    message: string;
+    branch?: string;
+    summary?: any;
+    files?: string[];
+  } | null>(null);
 
   // Connection checking
   useEffect(() => {
@@ -159,7 +206,8 @@ export default function App() {
   const fetchAiStudyFeed = async () => {
     try {
       const response = await fetch("/api/ai-study-feed");
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("application/json")) {
         const data = await response.json();
         setAiStudyStatus(data.status);
         if (data.stream) {
@@ -174,9 +222,12 @@ export default function App() {
           setAverageVelocity(data.averageVelocity);
           setAiKnowledgeBase(data.aiKnowledgeBase || null);
         }
+        if (data.aiSynthesizedStrategy) {
+          setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
+        }
       }
-    } catch (err) {
-      console.error("Error pulling AI study telemetry feed:", err);
+    } catch {
+      // Quietly ignore transient network/json errors during startup/polling
     }
   };
 
@@ -187,7 +238,8 @@ export default function App() {
       fetchWebRequestStatus(); // Parallel call to verify WebRequest test state
       fetchAiStudyFeed();     // Dynamic AI speed metrics feed call
       const response = await fetch("/api/status");
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("application/json")) {
         const data = await response.json();
         setConfig(data.config);
         setConnection(data.connection);
@@ -198,39 +250,218 @@ export default function App() {
         setCurrentPrice(data.currentPrice);
         setStats(data.stats);
         setHasGeminiKey(!!data.hasGeminiKey);
+        if (data.aiSynthesizedStrategy) {
+          setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
+        }
         
         // Calculate latency
         const endTick = Date.now();
         setLatency(Math.max(3, endTick - startTick));
       }
-    } catch (e) {
-      console.error("Network communication offline with local web server: ", e);
+    } catch {
       // Simulate low latency drop
       setLatency(999);
     }
   };
 
   const handleResetStats = async () => {
-    try {
-      const response = await fetch("/api/reset-stats", { method: "POST" });
-      if (response.ok) {
-        fetchStatus();
+    const sent = sendWsMessage({ type: "reset_stats" });
+    if (!sent) {
+      try {
+        const response = await fetch("/api/reset-stats", { method: "POST" });
+        if (response.ok) {
+          fetchStatus();
+        }
+      } catch (e) {
+        console.error("Failed to reset stats:", e);
       }
-    } catch (e) {
-      console.error("Failed to reset stats:", e);
     }
   };
 
-  useEffect(() => {
-    fetchStatus();
-    const statusInterval = setInterval(() => {
+  const handleCloseAllPositions = async () => {
+    const sent = sendWsMessage({ type: "close_all" });
+    if (!sent) {
+      try {
+        await fetch("/api/toggle-trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive: false })
+        });
+        fetchStatus();
+      } catch (err) {}
+    }
+  };
+
+  const fetchGithubStatus = async () => {
+    try {
+      const response = await fetch("/api/github-status");
+      if (response.ok) {
+        const data = await response.json();
+        setIsGithubConnected(data.authenticated);
+        setGithubClientId(data.clientId || "");
+      }
+    } catch (e) {
+      console.error("Failed to fetch Github status:", e);
+    }
+  };
+
+  const handleSyncFromGithub = async () => {
+    setIsSyncingFromGithub(true);
+    setGithubSyncResult(null);
+    try {
+      const response = await fetch("/api/sync-from-github", { method: "POST" });
+      const data = await response.json();
+      setGithubSyncResult({
+        success: response.ok && data.success,
+        message: data.message || data.error || "Unknown response from sync operation.",
+        branch: data.branch,
+        summary: data.summary,
+        files: data.files
+      });
       fetchStatus();
-    }, 1500);
-    return () => clearInterval(statusInterval);
+    } catch (e: any) {
+      setGithubSyncResult({
+        success: false,
+        message: e.message || "Failed to communicate with local workspace server."
+      });
+    } finally {
+      setIsSyncingFromGithub(false);
+    }
+  };
+
+  const handleGithubLogout = async () => {
+    try {
+      await fetch("/api/auth/github/logout", { method: "POST" });
+      setIsGithubConnected(false);
+      setGithubSyncResult(null);
+    } catch (e) {
+      console.error("Failed to request GitHub session logoff: ", e);
+    }
+  };
+
+  // Real-Time WebSocket Connection & Lifecycle Management
+  useEffect(() => {
+    let reconnectTimeout: any = null;
+    let pingInterval: any = null;
+    let isUnmounted = false;
+
+    function connectWs() {
+      if (isUnmounted) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      const wsUrl = `${protocol}//${host}/ws/live`;
+      
+      try {
+        const socket = new WebSocket(wsUrl);
+        wsRef.current = socket;
+
+        socket.onopen = () => {
+          if (isUnmounted) return;
+          setWsConnected(true);
+          if (pingInterval) clearInterval(pingInterval);
+          pingInterval = setInterval(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: "ping", clientTime: Date.now() }));
+            }
+          }, 8000);
+        };
+
+        socket.onmessage = (event) => {
+          if (isUnmounted) return;
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "pong" && msg.clientTime) {
+              const rtt = Math.max(1, Date.now() - msg.clientTime);
+              setPingLatency(rtt);
+              setLatency(rtt);
+            } else if (msg.type === "init" && msg.payload) {
+              const data = msg.payload;
+              if (data.config) setConfig(data.config);
+              if (data.connection) setConnection(data.connection);
+              if (data.isBridgeConnected !== undefined) setIsBridgeConnected(!!data.isBridgeConnected);
+              if (data.logs) setLogs(data.logs);
+              if (data.trades) setTradesList(data.trades);
+              if (data.history) setHistory(data.history);
+              if (data.currentPrice !== undefined) setCurrentPrice(data.currentPrice);
+              if (data.stats) setStats(data.stats);
+              if (data.hasGeminiKey !== undefined) setHasGeminiKey(!!data.hasGeminiKey);
+              if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
+              if (data.webRequestStatus) setWebRequestStatus(data.webRequestStatus);
+            } else if (msg.type === "tick") {
+              if (msg.currentPrice !== undefined) setCurrentPrice(msg.currentPrice);
+              if (msg.tick) {
+                setHistory(prev => {
+                  const next = [...prev, msg.tick];
+                  return next.length > 100 ? next.slice(-100) : next;
+                });
+              }
+              if (msg.stats) setStats(msg.stats);
+              if (msg.connection) setConnection(msg.connection);
+            } else if (msg.type === "trades") {
+              if (msg.trades) setTradesList(msg.trades);
+              if (msg.stats) setStats(msg.stats);
+            } else if (msg.type === "log" && msg.log) {
+              setLogs(prev => [msg.log, ...prev.slice(0, 79)]);
+            } else if (msg.type === "config" && msg.config) {
+              setConfig(msg.config);
+            } else if (msg.type === "connection") {
+              if (msg.connection) setConnection(msg.connection);
+              if (msg.isBridgeConnected !== undefined) setIsBridgeConnected(!!msg.isBridgeConnected);
+            } else if (msg.type === "webrequest_test" && msg.testState) {
+              setWebRequestStatus(msg.testState);
+            } else if (msg.type === "ai_strategy" && msg.aiSynthesizedStrategy) {
+              setAiSynthesizedStrategy(msg.aiSynthesizedStrategy);
+            }
+          } catch {}
+        };
+
+        socket.onclose = () => {
+          if (isUnmounted) return;
+          setWsConnected(false);
+          setPingLatency(null);
+          if (pingInterval) clearInterval(pingInterval);
+          reconnectTimeout = setTimeout(connectWs, 2500);
+        };
+
+        socket.onerror = () => {
+          try { socket.close(); } catch {}
+        };
+      } catch {
+        reconnectTimeout = setTimeout(connectWs, 3000);
+      }
+    }
+
+    connectWs();
+    fetchStatus();
+
+    // Gentle fallback polling
+    const fallbackInterval = setInterval(() => {
+      fetchStatus();
+    }, 4000);
+
+    return () => {
+      isUnmounted = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (pingInterval) clearInterval(pingInterval);
+      clearInterval(fallbackInterval);
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch {}
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    fetchGithubStatus();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github_auth") === "success") {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      fetchGithubStatus();
+    }
   }, []);
 
   // Initialize input fields when config is pulled
   useEffect(() => {
+    const savedEndpoint = (typeof window !== "undefined" && localStorage.getItem("mt5_webrequest_endpoint")) || "";
     setParamInput({
       lotSize: config.lotSize.toString(),
       takeProfitPoints: config.takeProfitPoints.toString(),
@@ -239,7 +470,7 @@ export default function App() {
       maxTrades: config.maxTrades.toString(),
       useTrailingStop: config.useTrailingStop,
       mt5Path: config.mt5Path || "",
-      appEndpoint: config.appEndpoint || "",
+      appEndpoint: config.appEndpoint || savedEndpoint || "http://127.0.0.1:3000",
       tradingMode: config.tradingMode || "Scalping",
       selectedAssets: config.selectedAssets || ["Step Index"],
       isAiModeEnabled: !!config.isAiModeEnabled
@@ -255,6 +486,12 @@ export default function App() {
     selectedAssetsOverride?: string[],
     isAiModeEnabledOverride?: boolean
   ) => {
+    const finalEndpoint = appEndpointOverride !== undefined ? appEndpointOverride : (paramInput.appEndpoint || "http://127.0.0.1:3000");
+    if (finalEndpoint) {
+      try {
+        localStorage.setItem("mt5_webrequest_endpoint", finalEndpoint);
+      } catch {}
+    }
     try {
       const response = await fetch("/api/settings", {
         method: "POST",
@@ -268,7 +505,7 @@ export default function App() {
           useTrailingStop: paramInput.useTrailingStop,
           maxTrades: parseInt(paramInput.maxTrades) || 3,
           mt5Path: mt5PathOverride !== undefined ? mt5PathOverride : paramInput.mt5Path,
-          appEndpoint: appEndpointOverride !== undefined ? appEndpointOverride : paramInput.appEndpoint,
+          appEndpoint: finalEndpoint,
           tradingMode: tradingModeOverride !== undefined ? tradingModeOverride : paramInput.tradingMode,
           selectedAssets: selectedAssetsOverride !== undefined ? selectedAssetsOverride : paramInput.selectedAssets,
           isAiModeEnabled: isAiModeEnabledOverride !== undefined ? isAiModeEnabledOverride : paramInput.isAiModeEnabled
@@ -291,18 +528,27 @@ export default function App() {
       console.warn("Automated trade execution blocked: AI Speed dynamic baseline study is currently pending.");
       return;
     }
-    try {
-      const targetState = !config.isActive;
-      const response = await fetch("/api/toggle-trade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: targetState })
-      });
-      if (response.ok) {
-        fetchStatus();
+    const targetState = !config.isActive;
+    // Optimistic UI feedback
+    setConfig(prev => ({ ...prev, isActive: targetState }));
+
+    const sent = sendWsMessage({ type: "toggle_trade" });
+    if (!sent) {
+      try {
+        const response = await fetch("/api/toggle-trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive: targetState })
+        });
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          const data = await response.json();
+          if (data && data.config) setConfig(data.config);
+        }
+      } catch (e) {
+        console.error("Error attempting to toggle remote executor state", e);
+        setConfig(prev => ({ ...prev, isActive: !targetState }));
       }
-    } catch (e) {
-      console.error("Error attempting to toggle remote executor state", e);
     }
   };
 
@@ -361,18 +607,44 @@ export default function App() {
     }
   };
 
+  const synthesizeStrategy = async () => {
+    setIsSynthesizingStrategy(true);
+    try {
+      const response = await fetch("/api/gemini/synthesize-strategy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.strategy) {
+          setAiSynthesizedStrategy(data.strategy);
+          fetchStatus();
+        } else if (data.error) {
+          console.error("Strategy synthesis failed:", data.error);
+        }
+      }
+    } catch (e: any) {
+      console.error("Failed to synthesize strategy:", e);
+    } finally {
+      setIsSynthesizingStrategy(false);
+    }
+  };
+
   const fetchWebRequestStatus = async () => {
     try {
       const res = await fetch("/api/test-webrequest/status");
-      const data = await res.json();
-      if (data && data.testState) {
-        setWebRequestStatus(data.testState);
+      const contentType = res.headers.get("content-type") || "";
+      if (res.ok && contentType.includes("application/json")) {
+        const data = await res.json();
+        if (data && data.testState) {
+          setWebRequestStatus(data.testState);
+        }
+        if (data && data.suggestedUrl) {
+          setSuggestedUrl(data.suggestedUrl);
+        }
       }
-      if (data && data.suggestedUrl) {
-        setSuggestedUrl(data.suggestedUrl);
-      }
-    } catch (e) {
-      console.error("Error fetching WebRequest status: ", e);
+    } catch {
+      // Quietly ignore transient poll errors
     }
   };
 
@@ -382,7 +654,8 @@ export default function App() {
       const response = await fetch("/api/test-webrequest/trigger", {
         method: "POST"
       });
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("application/json")) {
         const data = await response.json();
         if (data && data.testState) {
           setWebRequestStatus(data.testState);
@@ -395,7 +668,8 @@ export default function App() {
         attempts++;
         try {
           const statusRes = await fetch("/api/test-webrequest/status");
-          if (statusRes.ok) {
+          const sContentType = statusRes.headers.get("content-type") || "";
+          if (statusRes.ok && sContentType.includes("application/json")) {
             const statusData = await statusRes.json();
             if (statusData && statusData.testState) {
               setWebRequestStatus(statusData.testState);
@@ -406,13 +680,12 @@ export default function App() {
               }
             }
           }
-        } catch (e) {
+        } catch {
           clearInterval(interval);
           setIsVerifyingWebRequest(false);
         }
       }, 1000);
-    } catch (error) {
-      console.error("Error initiating connection verification: ", error);
+    } catch {
       setIsVerifyingWebRequest(false);
     }
   };
@@ -743,115 +1016,343 @@ setInterval(pollTrades, 1500);
   const priceRange = maxPrice - minPrice || 1.0;
 
   return (
-    <div id="app-container" className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col selection:bg-indigo-500 selection:text-white antialiased">
+    <div id="app-container" className="min-h-screen bg-slate-900 text-slate-100 font-sans flex flex-col selection:bg-indigo-500 selection:text-white antialiased">
       
       {/* Sleek Top Header Controls */}
-      <header className="h-20 border-b border-slate-900 flex items-center justify-between px-6 sm:px-8 bg-slate-900/40 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-600/30">
-            <TrendingUp className="w-6 h-6 text-white" />
+      <header className="h-16 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+        {/* Brand / Logo */}
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-md shadow-indigo-600/25 shrink-0">
+            <TrendingUp className="w-4.5 h-4.5 text-white" />
           </div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg sm:text-xl font-black tracking-tight text-white uppercase">Scalar AI</h1>
-            <span className="text-[10px] sm:text-xs font-mono px-2 py-0.5 bg-indigo-500/15 border border-indigo-500/30 rounded text-indigo-400 font-semibold tracking-wider">
-              STEP INDEX EA
+            <span className="text-base font-bold tracking-tight text-white">Scalar AI</span>
+            <span className="hidden xs:inline-block text-[10px] font-mono px-1.5 py-0.5 bg-indigo-500/15 border border-indigo-500/30 rounded text-indigo-300 font-medium">
+              STEP INDEX
             </span>
           </div>
         </div>
 
-        {/* Real-time Web App Connection Indicators */}
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="hidden md:flex items-center gap-3 px-4 py-2 bg-slate-900 border border-slate-800 rounded-full text-[11px] sm:text-xs text-slate-300">
-            {/* Internet Status Toggler */}
+        {/* Desktop Controls (Hidden on Mobile) */}
+        <div className="hidden md:flex items-center gap-3">
+          <div className="flex items-center gap-3 px-3.5 py-1.5 bg-slate-800/80 border border-slate-700/60 rounded-full text-xs text-slate-300">
+            {/* WebSocket Real-time Stream Indicator */}
             <div className="flex items-center gap-2">
-              {isInternetOnline ? (
+              {wsConnected ? (
                 <>
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <span className="font-semibold text-emerald-400 flex items-center gap-1">
-                    <Wifi className="w-3 h-3 inline" /> INTERNET
+                  <span className="font-semibold text-emerald-400 font-mono text-[10px] tracking-wide flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-emerald-400 inline" />
+                    LIVE STREAM {pingLatency !== null ? `(${pingLatency}ms)` : ""}
                   </span>
                 </>
               ) : (
                 <>
-                  <span className="h-2 w-2 rounded-full bg-red-500"></span>
-                  <span className="font-semibold text-red-500 flex items-center gap-1">
-                    <WifiOff className="w-3 h-3 inline" /> OFFLINE
+                  <span className="h-2 w-2 rounded-full bg-amber-500"></span>
+                  <span className="font-semibold text-amber-400 font-mono text-[10px] tracking-wide flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3 text-amber-400 inline" />
+                    POLL MODE ({latency}ms)
                   </span>
                 </>
+              )}
+            </div>
+
+            <div className="h-3 w-px bg-slate-700"></div>
+
+            {/* Internet Status */}
+            <div className="flex items-center gap-1">
+              {isInternetOnline ? (
+                <span className="font-semibold text-emerald-400 flex items-center gap-1 text-[10px]">
+                  <Wifi className="w-3 h-3 inline" /> ONLINE
+                </span>
+              ) : (
+                <span className="font-semibold text-red-400 flex items-center gap-1 text-[10px]">
+                  <WifiOff className="w-3 h-3 inline" /> OFFLINE
+                </span>
               )}
             </div>
             
-            <div className="h-3 w-px bg-slate-800"></div>
+            <div className="h-3 w-px bg-slate-700"></div>
 
             {/* EA Online Sync Indicator */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {connection.isEaConnected ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
-                  <span className="font-semibold text-blue-400">EA ONLINE</span>
-                  <span className="text-[9px] text-slate-500 font-mono">#{connection.accountNumber}</span>
+                  <span className="font-semibold text-blue-400 text-[10px]">EA ONLINE</span>
+                  <span className="text-[9px] text-slate-400 font-mono">#{connection.accountNumber}</span>
                 </>
               ) : (
                 <>
-                  <span className="h-2 w-2 rounded-full bg-slate-600"></span>
-                  <span className="font-semibold text-slate-400 uppercase">EA DISCONNECTED</span>
+                  <span className="h-2 w-2 rounded-full bg-slate-500"></span>
+                  <span className="font-semibold text-slate-400 uppercase text-[10px]">EA OFFLINE</span>
                 </>
               )}
             </div>
 
-            <div className="h-3 w-px bg-slate-800"></div>
+            <div className="h-3 w-px bg-slate-700"></div>
 
-            {/* Python Bridge Status Indicator */}
-            <div className="flex items-center gap-2">
-              {isBridgeConnected ? (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="font-semibold text-emerald-400 uppercase">BRIDGE ONLINE</span>
-                </>
-              ) : (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-rose-500"></span>
-                  <span className="font-semibold text-rose-500 uppercase">BRIDGE OFFLINE</span>
-                </>
-              )}
+            {/* Desktop Bridge Status Indicator */}
+            <div className="flex items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ${isBridgeConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}></span>
+              <span className={`font-semibold uppercase text-[10px] ${isBridgeConnected ? "text-emerald-400" : "text-rose-400"}`}>
+                {isBridgeConnected ? "BRIDGE ON" : "BRIDGE OFF"}
+              </span>
             </div>
           </div>
+
+          {/* Quick Header Execution Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleTradingExecution}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+              config.isActive
+                ? "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20"
+                : "bg-emerald-600 hover:bg-emerald-550 text-white shadow-emerald-600/20"
+            }`}
+            title={config.isActive ? "Pause automated trade execution" : "Start automated trade execution"}
+          >
+            {config.isActive ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-white" />
+                <span>Pause</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Start</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Mobile Screen Controls (Quick Start Mini Button + Hamburger Menu Toggle) */}
+        <div className="flex md:hidden items-center gap-2">
+          {/* Quick Start/Pause Mini Button for immediate one-tap mobile control */}
+          <button
+            type="button"
+            onClick={toggleTradingExecution}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+              config.isActive
+                ? "bg-rose-600/90 text-white"
+                : "bg-emerald-600/90 text-white"
+            }`}
+          >
+            {config.isActive ? (
+              <>
+                <Square className="w-3 h-3 fill-white" />
+                <span>Pause</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3 h-3 fill-white" />
+                <span>Start</span>
+              </>
+            )}
+          </button>
+
+          {/* Mobile Menu Icon Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700/80 border border-slate-700/80 text-slate-200 transition-colors cursor-pointer"
+            aria-label="Toggle navigation menu"
+          >
+            {isMobileMenuOpen ? (
+              <X className="w-5 h-5 text-indigo-400" />
+            ) : (
+              <Menu className="w-5 h-5 text-slate-200" />
+            )}
+          </button>
         </div>
       </header>
 
-      {/* Dynamic Tabbed Navigation Menu */}
-      <div className="bg-slate-900/60 border-b border-slate-900 sticky top-20 z-[40] backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          <div className="flex space-x-1 sm:space-x-2 py-3 overflow-x-auto scrollbar-none">
-            {[
-              { id: "home", label: "Home Page", icon: Home },
-              { id: "risk", label: "Risk & Strategy", icon: Sliders },
-              { id: "downloads", label: "Downloads Center", icon: Download },
-              { id: "logs", label: "System Logs", icon: Terminal },
-              { id: "settings", label: "Settings", icon: Settings },
-            ].map((tab) => {
-              const IconComponent = tab.icon;
-              const isActive = currentNavTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  id={`tab-btn-${tab.id}`}
-                  onClick={() => setCurrentNavTab(tab.id as any)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? "bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 shadow-lg shadow-indigo-500/5"
-                      : "text-slate-400 hover:text-slate-200 border border-transparent"
-                  }`}
-                >
-                  <IconComponent className="w-4 h-4" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+      {/* Mobile Drawer Overlay & Panel (Includes Menu under header, Start Button, and Statuses) */}
+      {isMobileMenuOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 top-16 bg-slate-950/70 backdrop-blur-xs z-40 md:hidden animate-fade-in"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+          {/* Slide-down Mobile Menu */}
+          <div className="fixed top-16 left-0 right-0 max-h-[calc(100vh-4rem)] overflow-y-auto bg-slate-900 border-b border-slate-800 shadow-2xl p-4 sm:p-5 flex flex-col gap-4 z-40 md:hidden animate-fade-in">
+            
+            {/* 1. Mobile Start / Pause Action Card */}
+            <div className="p-3.5 bg-slate-800/90 border border-slate-700/70 rounded-xl flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Trading Engine</span>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                  config.isActive ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-slate-700 text-slate-400"
+                }`}>
+                  {config.isActive ? "Executing" : "Idle"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  toggleTradingExecution();
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full py-3 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
+                  config.isActive
+                    ? "bg-rose-600 hover:bg-rose-500 text-white"
+                    : "bg-emerald-600 hover:bg-emerald-550 text-white"
+                }`}
+              >
+                {config.isActive ? (
+                  <>
+                    <Square className="w-4 h-4 fill-white" />
+                    <span>Pause Automated Trading</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Start Automated Trading</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* 2. Mobile Real-Time Statuses Hub */}
+            <div className="p-3.5 bg-slate-800/90 border border-slate-700/70 rounded-xl flex flex-col gap-2.5">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">System & Network Status</span>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {/* Live Stream / Polling */}
+                <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">Feed Mode</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 rounded-full ${wsConnected ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                    <span className={`font-mono text-[11px] font-bold ${wsConnected ? "text-emerald-400" : "text-amber-400"}`}>
+                      {wsConnected ? `STREAM (${pingLatency ?? 0}ms)` : `POLL (${latency}ms)`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Internet */}
+                <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">Internet</span>
+                  <div className="flex items-center gap-1.5">
+                    {isInternetOnline ? (
+                      <>
+                        <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="font-mono text-[11px] font-bold text-emerald-400">ONLINE</span>
+                      </>
+                    ) : (
+                      <>
+                        <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+                        <span className="font-mono text-[11px] font-bold text-rose-400">OFFLINE</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* MT5 EA */}
+                <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">MT5 EA</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 rounded-full ${connection.isEaConnected ? "bg-blue-400 animate-pulse" : "bg-slate-500"}`} />
+                    <span className={`font-mono text-[11px] font-bold ${connection.isEaConnected ? "text-blue-400" : "text-slate-400"}`}>
+                      {connection.isEaConnected ? `#${connection.accountNumber || "Connected"}` : "OFFLINE"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bridge */}
+                <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">Desktop Bridge</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 rounded-full ${isBridgeConnected ? "bg-emerald-400 animate-pulse" : "bg-rose-400"}`} />
+                    <span className={`font-mono text-[11px] font-bold ${isBridgeConnected ? "text-emerald-400" : "text-rose-400"}`}>
+                      {isBridgeConnected ? "CONNECTED" : "OFFLINE"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Mobile Navigation Menu Links */}
+            <div className="p-3.5 bg-slate-800/90 border border-slate-700/70 rounded-xl flex flex-col gap-2">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Navigation</span>
+              {[
+                { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
+                { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy === StrategyMode.AI_ADAPTIVE ? "AI" : config.selectedStrategy === StrategyMode.MEAN_REVERSION ? "REVERT" : "TREND" },
+                { id: "downloads", label: "Downloads Center", icon: Download },
+                { id: "logs", label: "System Logs", icon: Terminal, badge: `${logs.length}` },
+                { id: "settings", label: "Settings", icon: Settings },
+              ].map((tab) => {
+                const IconComponent = tab.icon;
+                const isActive = currentNavTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setCurrentNavTab(tab.id as any);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      isActive
+                        ? "bg-indigo-600 text-white shadow-sm"
+                        : "text-slate-300 hover:text-white hover:bg-slate-700/60"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <IconComponent className="w-4 h-4" />
+                      <span>{tab.label}</span>
+                    </div>
+                    {tab.badge && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                        isActive ? "bg-indigo-700 text-indigo-100" : "bg-slate-700 text-slate-300"
+                      }`}>
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+        </>
+      )}
+
+      {/* Desktop Sub-Navigation Menu (Separated from Header, Not Fixed, Clean Sizing) */}
+      <div className="hidden md:block max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 mt-5 mb-1">
+        <div className="inline-flex items-center gap-1.5 p-1 bg-slate-800/80 border border-slate-700/60 rounded-xl shadow-xs overflow-x-auto scrollbar-none">
+          {[
+            { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
+            { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy === StrategyMode.AI_ADAPTIVE ? "AI" : config.selectedStrategy === StrategyMode.MEAN_REVERSION ? "REVERT" : "TREND" },
+            { id: "downloads", label: "Downloads Center", icon: Download },
+            { id: "logs", label: "System Logs", icon: Terminal, badge: `${logs.length}` },
+            { id: "settings", label: "Settings", icon: Settings },
+          ].map((tab) => {
+            const IconComponent = tab.icon;
+            const isActive = currentNavTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                id={`tab-btn-${tab.id}`}
+                onClick={() => setCurrentNavTab(tab.id as any)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                  isActive
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+                }`}
+              >
+                <IconComponent className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+                {tab.badge && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                    isActive ? "bg-indigo-700 text-indigo-100" : "bg-slate-700/70 text-slate-300"
+                  }`}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -862,12 +1363,12 @@ setInterval(pollTrades, 1500);
         {currentNavTab === "risk" && (
           <div className="max-w-2xl mx-auto w-full flex flex-col gap-6 animate-fade-in">
             {/* MULTI-INDEX ASSET SELECTION GRID */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-3">
+            <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-3 shadow-sm">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-indigo-400" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Multi-Index Selector</h3>
+                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Multi-Index Selector</h3>
               </div>
-              <p className="text-[11px] text-slate-400 leading-normal -mt-1">
+              <p className="text-[11px] text-slate-350 leading-normal -mt-1">
                 Deploys concurrent signal scrapers over linked MT5 charts.
               </p>
               <div className="grid grid-cols-2 gap-2 mt-1">
@@ -891,12 +1392,12 @@ setInterval(pollTrades, 1500);
                       }}
                       className={`py-2 px-2.5 text-[11px] font-extrabold font-mono rounded-xl border flex items-center justify-between transition-all duration-200 cursor-pointer ${
                         isSelected
-                          ? "bg-indigo-600/20 border-indigo-500 text-indigo-200 shadow-sm shadow-indigo-500/10"
-                          : "bg-slate-950/60 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                          ? "bg-indigo-600/25 border-indigo-500 text-indigo-200 shadow-sm shadow-indigo-500/10"
+                          : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:border-slate-600 hover:text-white"
                       }`}
                     >
                       <span>{asset}</span>
-                      <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-indigo-400 animate-pulse" : "bg-slate-800"}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-indigo-400 animate-pulse" : "bg-slate-700"}`} />
                     </button>
                   );
                 })}
@@ -904,12 +1405,12 @@ setInterval(pollTrades, 1500);
             </div>
 
             {/* STRATEGY OPTIONS: EXECUTION STYLE */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-3">
+            <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-3 shadow-sm">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-indigo-400" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Execution Profile</h3>
+                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Execution Profile</h3>
               </div>
-              <p className="text-[11px] text-slate-400 leading-normal -mt-1">
+              <p className="text-[11px] text-slate-350 leading-normal -mt-1">
                 Define frequency parameters for incoming market speed spikes.
               </p>
               <div className="grid grid-cols-2 gap-2 mt-1">
@@ -922,7 +1423,7 @@ setInterval(pollTrades, 1500);
                   className={`py-2 px-3 text-xs font-extrabold font-mono rounded-xl border transition-all duration-200 uppercase tracking-wider cursor-pointer text-center ${
                     paramInput.tradingMode === "Scalping"
                       ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-lg shadow-indigo-500/10"
-                      : "bg-slate-950/60 border-slate-800/80 text-slate-400 hover:border-slate-750"
+                      : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:border-slate-600 hover:text-white"
                   }`}
                 >
                   Scalping
@@ -935,8 +1436,8 @@ setInterval(pollTrades, 1500);
                   }}
                   className={`py-2 px-3 text-xs font-extrabold font-mono rounded-xl border transition-all duration-200 uppercase tracking-wider cursor-pointer text-center ${
                     paramInput.tradingMode === "Swing"
-                      ? "bg-indigo-600/30 border-indigo-500 text-indigo-205 shadow-lg shadow-indigo-500/10"
-                      : "bg-slate-950/60 border-slate-800/80 text-slate-400 hover:border-slate-755"
+                      ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-lg shadow-indigo-500/10"
+                      : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:border-slate-600 hover:text-white"
                   }`}
                 >
                   Swing
@@ -945,14 +1446,14 @@ setInterval(pollTrades, 1500);
             </div>
 
             {/* Control & Parameters Card */}
-            <div className="p-5 bg-slate-900 border border-slate-800/80 rounded-2xl flex flex-col">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+            <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col shadow-sm">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-700/70">
                 <div className="flex items-center gap-2">
                   <Sliders className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Risk & Strategy</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Risk & Strategy</h3>
                 </div>
                 {saveSuccess && (
-                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/20 rounded-full flex items-center gap-1 animate-pulse">
+                  <span className="text-[10px] text-emerald-400 bg-emerald-500/15 px-2 py-0.5 border border-emerald-500/30 rounded-full flex items-center gap-1 animate-pulse">
                     <CheckCircle2 className="w-2.5 h-2.5" /> Updated
                   </span>
                 )}
@@ -963,18 +1464,18 @@ setInterval(pollTrades, 1500);
 
                 {/* Active Strategy Mode selection */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Trading Algorithm</label>
-                  <div className="grid grid-cols-3 gap-1">
+                  <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Trading Algorithm</label>
+                  <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
                       onClick={() => {
                         setConfig(prev => ({ ...prev, selectedStrategy: StrategyMode.TREND_FOLLOWING }));
                         applySettings(StrategyMode.TREND_FOLLOWING);
                       }}
-                      className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all ${
+                      className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all cursor-pointer ${
                         config.selectedStrategy === StrategyMode.TREND_FOLLOWING
-                          ? "bg-indigo-600/20 border-indigo-500 text-indigo-300"
-                          : "bg-slate-955 border-slate-800 text-slate-400 hover:text-slate-200"
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                          : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:text-white hover:border-slate-600"
                       }`}
                     >
                       Trend Following
@@ -985,10 +1486,10 @@ setInterval(pollTrades, 1500);
                         setConfig(prev => ({ ...prev, selectedStrategy: StrategyMode.MEAN_REVERSION }));
                         applySettings(StrategyMode.MEAN_REVERSION);
                       }}
-                      className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all ${
+                      className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all cursor-pointer ${
                         config.selectedStrategy === StrategyMode.MEAN_REVERSION
-                          ? "bg-indigo-600/20 border-indigo-500 text-indigo-300"
-                          : "bg-slate-955 border-slate-800 text-slate-400 hover:text-slate-200"
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                          : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:text-white hover:border-slate-600"
                       }`}
                     >
                       Mean Reversion
@@ -999,10 +1500,10 @@ setInterval(pollTrades, 1500);
                         setConfig(prev => ({ ...prev, selectedStrategy: StrategyMode.AI_ADAPTIVE }));
                         applySettings(StrategyMode.AI_ADAPTIVE);
                       }}
-                      className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all ${
+                      className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all cursor-pointer ${
                         config.selectedStrategy === StrategyMode.AI_ADAPTIVE
-                          ? "bg-indigo-600/20 border-indigo-500 text-indigo-300"
-                          : "bg-slate-955 border-slate-800 text-slate-400 hover:text-slate-200"
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                          : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:text-white hover:border-slate-600"
                       }`}
                     >
                       AI Adaptive
@@ -1012,13 +1513,13 @@ setInterval(pollTrades, 1500);
 
                 {/* Lot size */}
                 <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-[11px] text-slate-400 uppercase font-semibold">
+                  <div className="flex justify-between items-center text-[11px] text-slate-300 uppercase font-semibold">
                     <span>Lot Allocation</span>
                     <span className="text-white font-mono">{paramInput.lotSize} Lots</span>
                   </div>
                   <input
                     type="range"
-                    className="w-full accent-indigo-500 h-1.5 rounded-lg bg-slate-950 cursor-pointer"
+                    className="w-full accent-indigo-500 h-1.5 rounded-lg bg-slate-900 cursor-pointer"
                     min="0.01"
                     max="2.0"
                     step="0.01"
@@ -1027,16 +1528,16 @@ setInterval(pollTrades, 1500);
                     onMouseUp={() => applySettings()}
                     onTouchEnd={() => applySettings()}
                   />
-                  <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                  <div className="flex justify-between text-[9px] text-slate-400 font-mono">
                     <span>0.01 Min</span>
                     <span>2.0 Max</span>
                   </div>
                 </div>
 
                 {/* Target Trailing Configuration slider */}
-                <div className="p-3 bg-slate-955 border border-slate-800/80 rounded-xl space-y-3">
+                <div className="p-3 bg-slate-900/90 border border-slate-700/70 rounded-xl space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1">
                       Trailing Stop-Loss
                     </span>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -1052,19 +1553,19 @@ setInterval(pollTrades, 1500);
                           setTimeout(() => applySettings(), 50);
                         }}
                       />
-                      <div className="w-8 h-4 bg-slate-805 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-350 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+                      <div className="w-8 h-4 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-200 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
                     </label>
                   </div>
 
                   {paramInput.useTrailingStop && (
-                    <div className="space-y-1 pt-1.5 border-t border-slate-900">
-                      <div className="flex justify-between text-[10px] text-slate-400">
+                    <div className="space-y-1 pt-1.5 border-t border-slate-800">
+                      <div className="flex justify-between text-[10px] text-slate-300">
                         <span>Trailing Distance</span>
                         <span className="text-indigo-400 font-mono font-bold">{paramInput.trailingStopPoints} Points</span>
                       </div>
                       <input
                         type="range"
-                        className="w-full accent-indigo-500 h-1 bg-slate-900 cursor-pointer"
+                        className="w-full accent-indigo-500 h-1 bg-slate-800 cursor-pointer"
                         min="20"
                         max="500"
                         step="10"
@@ -1080,32 +1581,32 @@ setInterval(pollTrades, 1500);
                 {/* Take Profit & Stop loss parameters */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase block text-slate-400">Take Profit (Pts)</label>
+                    <label className="text-[10px] font-bold uppercase block text-slate-300">Take Profit (Pts)</label>
                     <input
                       type="number"
                       value={paramInput.takeProfitPoints}
                       onChange={(e) => setParamInput(p => ({ ...p, takeProfitPoints: e.target.value }))}
                       onBlur={() => applySettings()}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-600 text-center"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 text-center"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase block text-slate-400">Stop Loss (Pts)</label>
+                    <label className="text-[10px] font-bold uppercase block text-slate-300">Stop Loss (Pts)</label>
                     <input
                       type="number"
                       value={paramInput.stopLossPoints}
                       onChange={(e) => setParamInput(p => ({ ...p, stopLossPoints: e.target.value }))}
                       onBlur={() => applySettings()}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-xs font-mono font-bold text-red-400 focus:outline-none focus:border-red-600 text-center"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono font-bold text-rose-400 focus:outline-none focus:border-rose-500 text-center"
                     />
                   </div>
                 </div>
 
                 {/* Max Open trades */}
                 <div className="space-y-1">
-                  <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase">
+                  <div className="flex justify-between items-center text-[10px] text-slate-300 font-bold uppercase">
                     <span>Max Concurrent Trades</span>
-                    <span className="text-slate-200 font-mono">{paramInput.maxTrades}</span>
+                    <span className="text-white font-mono">{paramInput.maxTrades}</span>
                   </div>
                   <input
                     type="range"
@@ -1128,14 +1629,14 @@ setInterval(pollTrades, 1500);
         {currentNavTab === "settings" && (
           <div className="max-w-2xl mx-auto w-full animate-fade-in">
             {/* System Settings Panel (No longer collapsible) */}
-            <div className="p-5 bg-slate-900 border border-slate-800/80 rounded-2xl flex flex-col">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+            <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col shadow-sm">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-700/70">
                 <div className="flex items-center gap-2">
                   <Settings className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest text-left">System Settings</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest text-left">System Settings</h3>
                 </div>
                 {saveSuccess && (
-                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/20 rounded-full flex items-center gap-1 animate-pulse">
+                  <span className="text-[10px] text-emerald-400 bg-emerald-500/15 px-2 py-0.5 border border-emerald-500/30 rounded-full flex items-center gap-1 animate-pulse">
                     <CheckCircle2 className="w-2.5 h-2.5" /> Updated
                   </span>
                 )}
@@ -1145,10 +1646,10 @@ setInterval(pollTrades, 1500);
                 {/* MT5 File Path Input */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
                       MT5 terminal64.exe Path
                     </label>
-                    <span className="text-[9px] text-indigo-400 border border-indigo-400/20 px-1.5 py-0.5 rounded bg-indigo-500/5 font-mono">
+                    <span className="text-[9px] text-indigo-400 border border-indigo-400/20 px-1.5 py-0.5 rounded bg-indigo-500/10 font-mono">
                       Auto-detected if empty
                     </span>
                   </div>
@@ -1157,9 +1658,9 @@ setInterval(pollTrades, 1500);
                     placeholder="e.g. C:\Program Files\Deriv MT5\terminal64.exe"
                     value={paramInput.mt5Path}
                     onChange={(e) => setParamInput(p => ({ ...p, mt5Path: e.target.value }))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-xs font-mono text-slate-350 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
                   />
-                  <p className="text-[10px] text-slate-500 leading-normal">
+                  <p className="text-[10px] text-slate-400 leading-normal">
                     Leave blank to run smart auto-detection scanning the Program Files directory for foldernames containing 'Deriv' or 'MetaTrader'.
                   </p>
                 </div>
@@ -1167,7 +1668,7 @@ setInterval(pollTrades, 1500);
                 {/* App Link/Server Endpoint */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
                       App Link / Server Endpoint
                     </label>
                     <button
@@ -1186,18 +1687,18 @@ setInterval(pollTrades, 1500);
                     placeholder={`e.g. ${getAppBaseUrl()}`}
                     value={paramInput.appEndpoint}
                     onChange={(e) => setParamInput(p => ({ ...p, appEndpoint: e.target.value }))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-xs font-mono text-slate-350 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
                   />
-                  <p className="text-[10px] text-slate-500 leading-normal">
+                  <p className="text-[10px] text-slate-400 leading-normal">
                     Used by mt5_bridge.js to poll for signals. Automatically detects window origin, but can be manually overridden.
                   </p>
                 </div>
 
                 {/* AI Core Execution Mode Toggle */}
-                <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-3">
+                <div className="p-4 bg-slate-900/90 border border-slate-700/70 rounded-xl space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col text-left">
-                      <span className="text-xs font-bold text-slate-300">
+                      <span className="text-xs font-bold text-slate-200">
                         AI Core Execution Mode
                       </span>
                       <span className="text-[10px] text-slate-400">
@@ -1225,11 +1726,11 @@ setInterval(pollTrades, 1500);
                   </div>
 
                   {!hasGeminiKey ? (
-                    <div className="p-2 border border-amber-500/10 bg-amber-500/5 rounded text-[10px] text-amber-400/90 leading-relaxed text-left">
+                    <div className="p-2 border border-amber-500/20 bg-amber-500/10 rounded text-[10px] text-amber-300 leading-relaxed text-left">
                       ⚠️ <strong>AI verification client is inactive:</strong> No <code>GEMINI_API_KEY</code> detected in Environment Secrets. Configure the API key in the Platform Settings to enable intelligent trading validation.
                     </div>
                   ) : (
-                    <p className="text-[10px] text-slate-500 leading-normal text-left">
+                    <p className="text-[10px] text-slate-400 leading-normal text-left">
                       💡 When <strong>ON</strong>, standard rule-based executions will route through the Gemini Cognitive AI Engine for velocity divergence audits and risk validation.
                     </p>
                   )}
@@ -1240,27 +1741,27 @@ setInterval(pollTrades, 1500);
                   <button
                     type="button"
                     onClick={() => applySettings()}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-lg transition-all cursor-pointer"
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-lg transition-all cursor-pointer shadow-sm"
                   >
                     Save System Settings
                   </button>
                 </div>
 
                 {/* WebRequest Verification System Section */}
-                <div className="mt-4 pt-4 border-t border-slate-800/60 space-y-3">
+                <div className="mt-4 pt-4 border-t border-slate-700/60 space-y-3">
                   <div className="flex items-center gap-1.5 justify-between">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
                       MT5 WebRequest Permission
                     </span>
                     {webRequestStatus ? (
                       <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${
                         webRequestStatus.status === "success" 
-                          ? "text-emerald-400 border-emerald-500/20 bg-emerald-500/5"
+                          ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
                           : webRequestStatus.status === "failed" 
-                          ? "text-rose-400 border-rose-500/20 bg-rose-500/5"
+                          ? "text-rose-400 border-rose-500/30 bg-rose-500/10"
                           : webRequestStatus.status === "pending"
-                          ? "text-amber-400 border-amber-500/20 bg-amber-500/5 animate-pulse"
-                          : "text-slate-400 border-slate-800 bg-slate-950"
+                          ? "text-amber-400 border-amber-500/30 bg-amber-500/10 animate-pulse"
+                          : "text-slate-400 border-slate-700 bg-slate-900"
                       }`}>
                         {webRequestStatus.status === "success" && "● WORKING"}
                         {webRequestStatus.status === "failed" && "● FAILED"}
@@ -1268,31 +1769,68 @@ setInterval(pollTrades, 1500);
                         {webRequestStatus.status === "idle" && "● NOT TESTED"}
                       </span>
                     ) : (
-                      <span className="text-[9px] font-bold text-slate-400 border border-slate-800 px-2 py-0.5 rounded bg-slate-950 uppercase">
+                      <span className="text-[9px] font-bold text-slate-400 border border-slate-700 px-2 py-0.5 rounded bg-slate-900 uppercase">
                         ● UNKNOWN
                       </span>
                     )}
                   </div>
 
-                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2 font-mono">
-                    <div className="text-[10px] text-slate-400 font-sans leading-relaxed">
-                      MetaTrader 5 requires adding the allowed WebRequest URL so our Expert Advisor can synchronize ticks & execute trades. Put this URL in MT5 under <span className="text-slate-200">Tools → Options → Expert Advisors → Allow WebRequest for listed URL</span>:
+                  <div className="bg-slate-900/90 border border-slate-700/70 rounded-xl p-3.5 space-y-2.5 font-mono">
+                    <div className="text-[10px] text-slate-300 font-sans leading-relaxed">
+                      MetaTrader 5 requires adding the allowed WebRequest URL so our Expert Advisor can synchronize ticks & execute trades. Configure and save the MT5 WebRequest link below, then add it inside MT5:
                     </div>
-                    <div className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-800/50 rounded p-1.5">
-                      <span className="text-[11px] text-indigo-400 select-all overflow-x-auto whitespace-pre truncate font-mono">
-                        {suggestedUrl || paramInput.appEndpoint || getAppBaseUrl()}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(suggestedUrl || paramInput.appEndpoint || getAppBaseUrl());
-                          setCopiedUrl(true);
-                          setTimeout(() => setCopiedUrl(false), 2000);
-                        }}
-                        className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase px-1.5 py-0.5 hover:bg-indigo-500/10 rounded transition-colors cursor-pointer"
-                      >
-                        {copiedUrl ? "Copied" : "Copy"}
-                      </button>
+                    <div className="space-y-2 font-sans text-left">
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={paramInput.appEndpoint}
+                          onChange={(e) => setParamInput(p => ({ ...p, appEndpoint: e.target.value }))}
+                          placeholder="e.g. http://127.0.0.1:3000"
+                          className="flex-1 bg-slate-850 border border-slate-700 rounded px-2.5 py-1.5 text-xs font-mono text-indigo-400 focus:outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(paramInput.appEndpoint);
+                            setCopiedUrl(true);
+                            setTimeout(() => setCopiedUrl(false), 2000);
+                          }}
+                          className="text-[10px] bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 font-bold uppercase px-2.5 py-1.5 rounded transition-all cursor-pointer whitespace-nowrap"
+                        >
+                          {copiedUrl ? "Copied" : "Copy"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applySettings(undefined, undefined, paramInput.appEndpoint)}
+                          className="text-[10px] bg-indigo-600 hover:bg-indigo-550 text-white font-bold uppercase px-3 py-1.5 rounded transition-all cursor-pointer whitespace-nowrap shadow-sm"
+                        >
+                          Save
+                        </button>
+                      </div>
+                      <div className="flex gap-2 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setParamInput(p => ({ ...p, appEndpoint: "http://127.0.0.1:3000" }));
+                            applySettings(undefined, undefined, "http://127.0.0.1:3000");
+                          }}
+                          className="text-slate-400 hover:text-slate-200 underline decoration-dotted transition-colors cursor-pointer"
+                        >
+                          Reset to localhost default (127.0.0.1)
+                        </button>
+                        <span className="text-slate-600 select-none">|</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const detected = getAppBaseUrl();
+                            setParamInput(p => ({ ...p, appEndpoint: detected }));
+                            applySettings(undefined, undefined, detected);
+                          }}
+                          className="text-slate-400 hover:text-slate-200 underline decoration-dotted transition-colors cursor-pointer"
+                        >
+                          Detect live web app origin
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -1302,8 +1840,8 @@ setInterval(pollTrades, 1500);
                     onClick={triggerWebRequestTest}
                     className={`w-full py-2 border rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
                       isVerifyingWebRequest
-                        ? "bg-slate-950 border-slate-800 text-slate-500 cursor-not-allowed"
-                        : "bg-slate-900 hover:bg-slate-800 border-indigo-500/20 hover:border-indigo-500/40 text-indigo-300"
+                        ? "bg-slate-900 border-slate-700 text-slate-400 cursor-not-allowed"
+                        : "bg-slate-800 hover:bg-slate-750 border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 shadow-sm"
                     }`}
                   >
                     {isVerifyingWebRequest ? (
@@ -1317,12 +1855,158 @@ setInterval(pollTrades, 1500);
                   </button>
 
                   {webRequestStatus && webRequestStatus.details && (
-                    <div className="text-[10px] text-slate-400 bg-slate-950 p-2 rounded border border-slate-800/50 leading-relaxed font-sans">
-                      <span className="font-semibold text-slate-300 font-mono text-[9px] uppercase tracking-wider block mb-0.5">Test Log:</span>
+                    <div className="text-[10px] text-slate-300 bg-slate-900 p-2.5 rounded-lg border border-slate-700/60 leading-relaxed font-sans">
+                      <span className="font-semibold text-slate-200 font-mono text-[9px] uppercase tracking-wider block mb-0.5">Test Log:</span>
                       {webRequestStatus.details}
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+
+            {/* Programmatic Git Synchronization Card */}
+            <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col shadow-sm">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-700/70">
+                <div className="flex items-center gap-2">
+                  <Github className="w-4 h-4 text-indigo-400" />
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest text-left">Workspace Sync</h3>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${
+                    isGithubConnected 
+                      ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                      : "text-amber-400 border-amber-500/30 bg-amber-500/10"
+                  }`}>
+                    {isGithubConnected ? "● SECURELY LINKED" : "● DISCONNECTED"}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-350 leading-normal text-left mb-4">
+                Enables secure, zero-touch synchronization to programmatically merge, pull, and update local workspace source files from your remote private GitHub repository.
+              </p>
+
+              <div className="space-y-4">
+                {/* Dynamic Connection / Action Button */}
+                <div className="p-4 bg-slate-900/90 border border-slate-700/70 rounded-xl space-y-3">
+                  <div className="flex flex-col text-left mb-1">
+                    <span className="text-xs font-bold text-slate-200">
+                      GitHub Integration Action
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {isGithubConnected 
+                        ? "Authentication active. Let's pull down repository updates safely with simple-git." 
+                        : "Connect a secure OAuth session token first to initiate automatic pulling."}
+                    </span>
+                  </div>
+
+                  {!isGithubConnected ? (
+                    /* STATE A: Unlinked - "Link to GitHub" which redirects window */
+                    <a
+                      href={`https://github.com/login/oauth/authorize?client_id=${githubClientId || "Ov231i1UE0j2FgaM9tP3"}&redirect_uri=${encodeURIComponent(window.location.origin + '/api/auth/github/callback')}&scope=repo`}
+                      className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm"
+                    >
+                      <Github className="w-3.5 h-3.5" />
+                      <span>Link to GitHub</span>
+                    </a>
+                  ) : (
+                    /* STATE B: Linked - "Sync with GitHub" with loading feedback */
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        disabled={isSyncingFromGithub}
+                        onClick={handleSyncFromGithub}
+                        className={`w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                          isSyncingFromGithub
+                            ? "bg-slate-900 border border-slate-700 text-slate-400 cursor-not-allowed"
+                            : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
+                        }`}
+                      >
+                        {isSyncingFromGithub ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-white/80" />
+                            <span>Syncing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Sync with GitHub</span>
+                          </>
+                        )}
+                      </button>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={handleGithubLogout}
+                          className="text-[10px] text-slate-400 hover:text-rose-400 transition-colors font-semibold cursor-pointer"
+                        >
+                          Clear Session Connection
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!isGithubConnected && (
+                    <div className="p-3 border border-indigo-500/20 bg-indigo-500/10 rounded-lg text-[10px] text-slate-300 leading-relaxed text-left space-y-2 pt-1.5 mt-2">
+                      <p>
+                        💡 <strong>Dev Environment Setup Instructions:</strong>
+                      </p>
+                      <p>
+                        Append the following environment variables to your local machine's <code>.env</code> file:
+                      </p>
+                      <pre className="p-2 rounded bg-slate-950 border border-slate-800 text-[10px] text-indigo-300 font-mono leading-relaxed select-all">
+                        GITHUB_REPO_OWNER=Faarhan01{"\n"}
+                        GITHUB_REPO_NAME=Scalarai
+                      </pre>
+                      <p className="text-[9px] text-slate-400 italic">
+                        The OAuth Application callback routes to: <code>http://localhost:3000/api/auth/github/callback</code>.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Git Synchronization Result Details */}
+                {isGithubConnected && githubSyncResult && (
+                  <div className={`p-4 border rounded-xl text-left space-y-2 text-xs font-sans ${
+                    githubSyncResult.success 
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                      : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                  }`}>
+                    <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
+                      {githubSyncResult.success ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Synchronization Successful</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                          <span>Synchronization Failed</span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-slate-200 leading-relaxed font-sans">{githubSyncResult.message}</p>
+                    {githubSyncResult.success && githubSyncResult.branch && (
+                      <div className="pt-2 border-t border-slate-700/50 mt-2 text-[10.5px] font-mono space-y-1.5 text-slate-300">
+                        <div><strong>Active Branch:</strong> <span className="text-white">{githubSyncResult.branch}</span></div>
+                        {githubSyncResult.files && githubSyncResult.files.length > 0 && (
+                          <div className="mt-2 font-sans">
+                            <span className="font-semibold text-slate-200 block text-[9.5px] uppercase tracking-wider mb-1">Modified Files:</span>
+                            <ul className="list-disc pl-4 space-y-0.5 text-slate-300 font-mono text-[10px]">
+                              {githubSyncResult.files.slice(0, 10).map((f) => (
+                                <li key={f}>{f}</li>
+                              ))}
+                              {githubSyncResult.files.length > 10 && (
+                                <li className="list-none text-slate-400 text-[9px] mt-1">And {githubSyncResult.files.length - 10} more files...</li>
+                              )}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1333,7 +2017,7 @@ setInterval(pollTrades, 1500);
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             
             {/* LEFT COLUMN: Controls & AI (lg:col-span-4) */}
-            <div className="lg:col-span-4 flex flex-col gap-6">
+            <div className="lg:col-span-4 flex flex-col gap-6 order-2 lg:order-1">
 
               {/* START / STOP TRADING BUTTON PANEL */}
               <div className={`p-5 rounded-2xl border flex flex-col justify-between transition-all duration-300 relative overflow-hidden ${
@@ -1403,33 +2087,33 @@ setInterval(pollTrades, 1500);
               </div>
 
               {/* Built-in AI Analyst card */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
                   <Cpu className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Built-in AI Analyst</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Built-in AI Analyst</h3>
                 </div>
 
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
                   <div className="space-y-3">
-                    <p className="text-xs text-slate-400 leading-relaxed">
+                    <p className="text-xs text-slate-350 leading-relaxed">
                       Analyze last 40 discrete step coordinates on the server using Gemini's LLM to generate reinforcement patterns.
                     </p>
                     
                     {isAiLoading && (
-                      <div className="flex flex-col items-center justify-center py-6 text-xs text-slate-500">
-                        <RefreshCw className="w-6 h-6 animate-spin text-indigo-500 mb-2" />
+                      <div className="flex flex-col items-center justify-center py-6 text-xs text-slate-400">
+                        <RefreshCw className="w-6 h-6 animate-spin text-indigo-400 mb-2" />
                         <span>Analyzing tick history...</span>
                       </div>
                     )}
 
                     {aiAnalysisResult && (
-                      <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 text-xs rounded-lg font-mono leading-relaxed max-h-48 overflow-y-auto whitespace-pre-line">
+                      <div className="p-3 bg-indigo-500/10 border border-indigo-500/25 text-indigo-200 text-xs rounded-lg font-mono leading-relaxed max-h-48 overflow-y-auto whitespace-pre-line">
                         {aiAnalysisResult}
                       </div>
                     )}
 
                     {!isAiLoading && !aiAnalysisResult && (
-                      <div className="text-center py-8 text-xs text-slate-500">
+                      <div className="text-center py-8 text-xs text-slate-400">
                         Neural engine idle. Hit key below to consult cognitive analyzer.
                       </div>
                     )}
@@ -1439,7 +2123,7 @@ setInterval(pollTrades, 1500);
                     type="button"
                     onClick={generateAiReport}
                     disabled={isAiLoading}
-                    className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-550 disabled:bg-indigo-850 disabled:text-indigo-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-550 disabled:bg-indigo-900 disabled:text-indigo-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
                   >
                     <Cpu className="w-3.5 h-3.5" />
                     <span>GENERATE COGNITIVE ANALYSIS</span>
@@ -1447,28 +2131,142 @@ setInterval(pollTrades, 1500);
                 </div>
               </div>
 
-              {/* Step Index EA Meta-Analysis Summary Card */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Step Index Summary</h3>
+              {/* Dynamic AI Synthesized Strategy Card */}
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
+                  <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">AI Synthesized Strategy</h3>
                 </div>
 
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
                   <div className="space-y-4">
-                    <p className="text-xs text-slate-400 leading-relaxed text-left">
+                    <p className="text-xs text-slate-350 leading-relaxed text-left">
+                      Triggers real-time synthesis of dynamic execution constraints based on historical profiles, current speed metrics, and raw tick flows.
+                    </p>
+
+                    {isSynthesizingStrategy && (
+                      <div className="flex flex-col items-center justify-center py-8 text-xs text-slate-400 space-y-2">
+                        <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
+                        <span className="font-mono font-medium text-slate-300">Synthesizing live algorithmic rules...</span>
+                      </div>
+                    )}
+
+                    {!isSynthesizingStrategy && aiSynthesizedStrategy && (
+                      <div className="space-y-4 text-left">
+                        {/* Strategy Identity Header */}
+                        <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-lg">
+                          <p className="text-[9px] font-bold text-amber-400 uppercase tracking-wider mb-1 font-mono">Active Paradigm</p>
+                          <h4 className="text-xs font-bold text-white uppercase tracking-tight">{aiSynthesizedStrategy.strategyName}</h4>
+                          <p className="text-[10px] text-slate-300 mt-1.5 leading-relaxed">
+                            {aiSynthesizedStrategy.rationale}
+                          </p>
+                          <p className="text-[9px] text-slate-400 font-mono mt-2 font-medium">
+                            Synthesized: {new Date(aiSynthesizedStrategy.lastSynthesized).toLocaleTimeString()}
+                          </p>
+                        </div>
+
+                        {/* Observations List */}
+                        {aiSynthesizedStrategy.observationsUsed && aiSynthesizedStrategy.observationsUsed.length > 0 && (
+                          <div className="space-y-1.5">
+                            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Underlying Observations</p>
+                            <ul className="space-y-1 pl-3 list-disc">
+                              {aiSynthesizedStrategy.observationsUsed.map((obs, oIdx) => (
+                                <li key={oIdx} className="text-[10px] text-slate-200 leading-normal">
+                                  {obs}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Compiled Live Rules Grid */}
+                        {aiSynthesizedStrategy.compiledRules && (
+                          <div className="space-y-2 pt-2 border-t border-slate-700/60">
+                            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Compiled Live Parameters</p>
+                            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
+                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">Min Velocity Filter</span>
+                                <span className="text-white font-bold">{aiSynthesizedStrategy.compiledRules.minVelocityFilter?.toFixed(3) || "0.150"} pt/s</span>
+                              </div>
+                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
+                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">Max Position Div.</span>
+                                <span className="text-white font-bold">{aiSynthesizedStrategy.compiledRules.maxAllowedPositionDivergence?.toFixed(2) || "2.00"}x</span>
+                              </div>
+                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
+                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">SL Points Scale</span>
+                                <span className="text-emerald-400 font-bold">{aiSynthesizedStrategy.compiledRules.slPointsMultiplier?.toFixed(2) || "1.00"}x</span>
+                              </div>
+                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
+                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">TP Points Scale</span>
+                                <span className="text-emerald-400 font-bold">{aiSynthesizedStrategy.compiledRules.tpPointsMultiplier?.toFixed(2) || "1.00"}x</span>
+                              </div>
+                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded col-span-2 flex justify-between items-center px-2 py-1.5">
+                                <span className="text-slate-400 text-[9px] uppercase tracking-wider">EMA Filter Confirmation</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase rounded ${
+                                  aiSynthesizedStrategy.compiledRules.useEmaConfirmation 
+                                    ? "bg-indigo-500/20 text-indigo-300" 
+                                    : "bg-slate-700 text-slate-400"
+                                }`}>
+                                  {aiSynthesizedStrategy.compiledRules.useEmaConfirmation ? "Enabled" : "Disabled"}
+                                </span>
+                              </div>
+                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded col-span-2 flex justify-between items-center px-2 py-1.5">
+                                <span className="text-slate-400 text-[9px] uppercase tracking-wider">Allow Counter-Trend Trades</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase rounded ${
+                                  aiSynthesizedStrategy.compiledRules.allowCounterTrend 
+                                    ? "bg-rose-500/20 text-rose-300" 
+                                    : "bg-emerald-500/20 text-emerald-300"
+                                }`}>
+                                  {aiSynthesizedStrategy.compiledRules.allowCounterTrend ? "Enabled" : "Disabled (Strict Flow)"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!isSynthesizingStrategy && !aiSynthesizedStrategy && (
+                      <div className="text-center py-6 text-[11px] text-slate-400 italic">
+                        No dynamic strategy synthesized yet. Click the button below to formulate active paradigms.
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={synthesizeStrategy}
+                    disabled={isSynthesizingStrategy}
+                    className="w-full mt-4 py-2.5 bg-amber-600 hover:bg-amber-550 disabled:bg-amber-900 disabled:text-amber-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    <Cpu className="w-3.5 h-3.5" />
+                    <span>SYNTHESIZE ACTIVE STRATEGY</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Step Index EA Meta-Analysis Summary Card */}
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Step Index Summary</h3>
+                </div>
+
+                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <p className="text-xs text-slate-350 leading-relaxed text-left">
                       Activate the <strong>Meta-Analysis Synthesis Agent</strong> to translate raw mathematical telemetry, execution variables, and historical logs into high-level plain-language operational summaries.
                     </p>
 
                     {isMetaAnalysisLoading && (
-                      <div className="flex flex-col items-center justify-center py-8 text-xs text-slate-500 space-y-2">
+                      <div className="flex flex-col items-center justify-center py-8 text-xs text-slate-400 space-y-2">
                         <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
-                        <span className="font-mono font-medium text-slate-450">Synthesizing telemetry data stream...</span>
+                        <span className="font-mono font-medium text-slate-300">Synthesizing telemetry data stream...</span>
                       </div>
                     )}
 
                     {metaAnalysisError && (
-                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-450 text-[11px] rounded-lg leading-normal text-left">
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-300 text-[11px] rounded-lg leading-normal text-left">
                         {metaAnalysisError}
                       </div>
                     )}
@@ -1478,26 +2276,26 @@ setInterval(pollTrades, 1500);
                         {metaAnalysisInsights.map((insight, idx) => {
                           const categoryLower = insight.category?.toLowerCase() || "";
                           const tagBg = categoryLower.includes("market")
-                            ? "bg-indigo-500/10 text-indigo-400 border-indigo-550/25"
+                            ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"
                             : categoryLower.includes("risk") || categoryLower.includes("adjust")
-                            ? "bg-rose-500/10 text-rose-450 border-rose-550/25"
-                            : "bg-amber-500/10 text-amber-400 border-amber-550/25";
+                            ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+                            : "bg-amber-500/15 text-amber-300 border-amber-500/30";
 
                           return (
-                            <div key={idx} className="p-3 bg-slate-900/80 border border-slate-800/60 rounded-xl space-y-2 text-left">
+                            <div key={idx} className="p-3 bg-slate-800/90 border border-slate-700/60 rounded-xl space-y-2 text-left">
                               <div className="flex items-center justify-between gap-2">
                                 <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border tracking-wider uppercase ${tagBg}`}>
                                   {insight.category}
                                 </span>
-                                <span className="text-[10px] font-mono text-slate-500 font-medium">
+                                <span className="text-[10px] font-mono text-slate-400 font-medium">
                                   {insight.metric}
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-300 leading-relaxed">
+                              <p className="text-[11px] text-slate-200 leading-relaxed">
                                 {insight.explanation}
                               </p>
-                              <div className="pt-2 border-t border-slate-800/40">
-                                <p className="text-[9px] font-mono text-slate-400 font-semibold bg-slate-950/40 px-2 py-1 rounded border border-slate-800/20 truncate" title={insight.summary}>
+                              <div className="pt-2 border-t border-slate-700/40">
+                                <p className="text-[9px] font-mono text-slate-300 font-semibold bg-slate-900/60 px-2 py-1 rounded border border-slate-700/30 truncate" title={insight.summary}>
                                   📝 {insight.summary}
                                 </p>
                               </div>
@@ -1508,7 +2306,7 @@ setInterval(pollTrades, 1500);
                     )}
 
                     {!isMetaAnalysisLoading && !metaAnalysisInsights && (
-                      <div className="text-center py-6 text-[11px] text-slate-500 italic">
+                      <div className="text-center py-6 text-[11px] text-slate-400 italic">
                         No telemetry synthesized yet. Run agent analysis below.
                       </div>
                     )}
@@ -1518,7 +2316,7 @@ setInterval(pollTrades, 1500);
                     type="button"
                     onClick={runMetaAnalysis}
                     disabled={isMetaAnalysisLoading}
-                    className="w-full mt-4 py-2.5 bg-emerald-600 hover:bg-emerald-550 disabled:bg-emerald-850 disabled:text-emerald-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full mt-4 py-2.5 bg-emerald-600 hover:bg-emerald-550 disabled:bg-emerald-900 disabled:text-emerald-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
                   >
                     <Cpu className="w-3.5 h-3.5" />
                     <span>RUN META-ANALYSIS SUMMARY</span>
@@ -1529,21 +2327,21 @@ setInterval(pollTrades, 1500);
             </div>
 
             {/* RIGHT COLUMN: Live Price Graph & Metrics (lg:col-span-8) */}
-            <div className="lg:col-span-8 flex flex-col gap-6">
+            <div className="lg:col-span-8 flex flex-col gap-6 order-1 lg:order-2">
               
               {/* Visualizer: Step Index Price Graph */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col">
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl overflow-hidden flex flex-col shadow-sm">
                   
                   {/* Graph Headers & Taps */}
-                  <div className="p-4 border-b border-slate-800/80 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-900/50">
-                    <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                  <div className="p-4 border-b border-slate-700/60 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-850/50">
+                    <span className="text-xs font-bold text-slate-200 flex items-center gap-2">
                       <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse"></span>
                       LIVE STEP INDEX REAL-TIME STREAM (M1)
                     </span>
-                    <div className="flex gap-4 font-mono text-[10px] text-slate-500">
+                    <div className="flex gap-4 font-mono text-[10px] text-slate-400">
                       <span>Index Value: <strong className="text-indigo-400">{currentPrice.toFixed(2)}</strong></span>
-                      <span>Tick Depth: <strong className="text-slate-300">{history.length}/150</strong></span>
-                      <span>Execution Speed: <strong className="text-slate-350">{latency}ms</strong></span>
+                      <span>Tick Depth: <strong className="text-slate-200">{history.length}/150</strong></span>
+                      <span>Execution Speed: <strong className="text-slate-300">{latency}ms</strong></span>
                     </div>
                   </div>
 
@@ -1642,10 +2440,10 @@ setInterval(pollTrades, 1500);
                         </svg>
                       </div>
                     ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs gap-1.5 py-12">
-                        <RefreshCw className="w-8 h-8 animate-spin mb-1 text-indigo-500" />
-                        <span className="font-bold text-slate-350">Waiting for MT5 EA Connection...</span>
-                        <span className="text-[11px] text-slate-500 max-w-sm text-center px-4">
+                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-xs gap-1.5 py-12">
+                        <RefreshCw className="w-8 h-8 animate-spin mb-1 text-indigo-400" />
+                        <span className="font-bold text-slate-200">Waiting for MT5 EA Connection...</span>
+                        <span className="text-[11px] text-slate-400 max-w-sm text-center px-4">
                           Launch your MetaTrader 5 terminal, verify that WebRequest is allowed for our address, and trigger active charts.
                         </span>
                       </div>
@@ -1653,20 +2451,20 @@ setInterval(pollTrades, 1500);
                   </div>
 
                   {/* Relocated Sub-Graph Statistics and AI Predictions panel (placed safely under the graph so it doesn't block the visual canvas) */}
-                  <div className="border-t border-slate-800 bg-slate-900 px-4 py-3.5 flex flex-col sm:flex-row justify-between items-center gap-3 animate-fade-in">
-                    <div className="flex items-center gap-2.5 text-xs text-slate-400">
-                      <span className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg font-mono flex items-center gap-1">
-                        <span className="text-slate-500 uppercase">Min:</span>
-                        <strong className="text-slate-200">{minPrice.toFixed(2)}</strong>
+                  <div className="border-t border-slate-700/60 bg-slate-850/80 px-4 py-3.5 flex flex-col sm:flex-row justify-between items-center gap-3 animate-fade-in">
+                    <div className="flex items-center gap-2.5 text-xs text-slate-300">
+                      <span className="px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg font-mono flex items-center gap-1">
+                        <span className="text-slate-400 uppercase">Min:</span>
+                        <strong className="text-white">{minPrice.toFixed(2)}</strong>
                       </span>
-                      <span className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg font-mono flex items-center gap-1">
-                        <span className="text-slate-500 uppercase">Max:</span>
-                        <strong className="text-slate-200">{maxPrice.toFixed(2)}</strong>
+                      <span className="px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg font-mono flex items-center gap-1">
+                        <span className="text-slate-400 uppercase">Max:</span>
+                        <strong className="text-white">{maxPrice.toFixed(2)}</strong>
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2.5">
-                      <div className="bg-indigo-950/45 border border-indigo-500/20 py-1 px-3 rounded-lg flex items-center gap-2">
+                      <div className="bg-indigo-950/60 border border-indigo-500/30 py-1 px-3 rounded-lg flex items-center gap-2">
                         <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></span>
                         <span className="text-[9px] text-indigo-300 font-semibold tracking-wider uppercase">AI Prediction:</span>
                         <span className="text-[11px] font-black text-white tracking-wide uppercase">
@@ -1685,14 +2483,14 @@ setInterval(pollTrades, 1500);
                 {/* AI Study / Baseline Check and Market Speed Indicator */}
                 <div className="mb-4">
                   {aiStudyStatus === "calibrating" || aiStudyStatus === "waiting" ? (
-                    <div className="bg-amber-950/15 border border-amber-500/20 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+                    <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400 shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-amber-500/15 flex items-center justify-center text-amber-400 shrink-0">
                           <Activity className="w-4 h-4 animate-pulse" />
                         </div>
                         <div>
                           <p className="text-xs font-bold text-amber-300 uppercase tracking-widest leading-none mb-1">AI Speed Baseline Study</p>
-                          <p className="text-[11px] text-amber-400/80 leading-normal">
+                          <p className="text-[11px] text-amber-200/80 leading-normal">
                             AI is analyzing market speed baseline... Awaiting sufficient expert data stream from MetaTrader 5 terminal.
                           </p>
                         </div>
@@ -1702,20 +2500,20 @@ setInterval(pollTrades, 1500);
                       </span>
                     </div>
                   ) : (
-                    <div className="bg-[#1a233a] border border-indigo-500/20 rounded-xl p-4 flex flex-col gap-3 shadow-md">
-                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pb-3 border-b border-indigo-500/10">
+                    <div className="bg-slate-800/90 border border-indigo-500/25 rounded-xl p-4 flex flex-col gap-3 shadow-sm">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pb-3 border-b border-indigo-500/15">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-indigo-500/15 flex items-center justify-center text-indigo-400 shrink-0">
                             <Gauge className="w-4 h-4" />
                           </div>
                           <div>
                             <p className="text-xs font-bold text-indigo-300 uppercase tracking-widest leading-none mb-1 font-mono">AI Speed Study: OPTIMIZED</p>
-                            <p className="text-[11px] text-slate-400 leading-normal">
+                            <p className="text-[11px] text-slate-350 leading-normal">
                               Index velocity baseline is locked. Market metrics telemetry stream is active and STUDYING speed variations.
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-950/45 border border-indigo-500/30 text-indigo-400 rounded-lg shrink-0">
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 rounded-lg shrink-0">
                           <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 leading-none">Market Speed:</span>
                           <strong className="text-xs sm:text-sm font-mono font-black leading-none text-indigo-300">{averageVelocity ? `${averageVelocity.toFixed(4)} pt/s` : "0.0000 pt/s"}</strong>
                         </div>
@@ -1725,7 +2523,7 @@ setInterval(pollTrades, 1500);
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                         <div className="flex items-center gap-2">
                           <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Market Acceleration:</span>
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300">Market Acceleration:</span>
                         </div>
                         <div className="flex items-center gap-1">
                           {/* Visual meter bars */}
@@ -1750,12 +2548,12 @@ setInterval(pollTrades, 1500);
                                       className={`w-3 h-4 rounded-sm transition-all duration-350 ${
                                         isActive 
                                           ? bar > 4 ? "bg-red-500 shadow-md shadow-red-500/20 animate-pulse" : bar > 2 ? "bg-orange-500" : "bg-emerald-500" 
-                                          : "bg-slate-800"
+                                          : "bg-slate-700"
                                       }`}
                                     />
                                   );
                                 })}
-                                <span className="text-xs font-mono font-black text-slate-300 ml-2">
+                                <span className="text-xs font-mono font-black text-slate-200 ml-2">
                                   {accelerationVal.toFixed(4)} pt/s²
                                 </span>
                               </>
@@ -1768,16 +2566,16 @@ setInterval(pollTrades, 1500);
                 </div>
 
                 {/* Unified Session Performance Card */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-700/70">
                     <div className="flex items-center gap-2">
                       <Gauge className="w-4 h-4 text-indigo-400" />
-                      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Session Performance</h3>
+                      <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Session Performance</h3>
                     </div>
                     <button
                       type="button"
                       onClick={handleResetStats}
-                      className="py-1 px-2.5 text-[10px] font-extrabold font-mono rounded bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200 transition-all duration-200 flex items-center gap-1.5 cursor-pointer"
+                      className="py-1 px-2.5 text-[10px] font-extrabold font-mono rounded bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-600 hover:text-white transition-all duration-200 flex items-center gap-1.5 cursor-pointer"
                     >
                       <RotateCcw className="w-3 h-3" />
                       <span>Reset Metrics</span>
@@ -1786,42 +2584,42 @@ setInterval(pollTrades, 1500);
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {/* Profit Tracking */}
-                    <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 flex flex-col justify-between">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Run Session Profit</p>
+                    <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Run Session Profit</p>
                       <div className="my-2">
-                        <p className={`text-2xl sm:text-3xl font-black ${stats.totalProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        <p className={`text-2xl sm:text-3xl font-black ${stats.totalProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                           {stats.totalProfit >= 0 ? "+" : ""}${stats.totalProfit.toFixed(2)}
                         </p>
                       </div>
-                      <div className="w-full bg-slate-950 h-1 rounded-full overflow-hidden">
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
                         <div 
-                          className="bg-emerald-500 h-1 rounded-full transition-all" 
+                          className="bg-emerald-500 h-1.5 rounded-full transition-all" 
                           style={{ width: `${Math.min(100, Math.max(10, stats.winRate))}%` }}
                         ></div>
                       </div>
                     </div>
 
                     {/* Profit Win-Rate */}
-                    <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 flex flex-col justify-between">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Calculated Win-Rate</p>
+                    <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Calculated Win-Rate</p>
                       <div className="my-2 flex items-baseline gap-1">
                         <p className="text-2xl sm:text-3xl font-black text-indigo-400">
                           {stats.winRate}%
                         </p>
-                        <span className="text-[10px] text-slate-500">({stats.tradesCount} trades)</span>
+                        <span className="text-[10px] text-slate-400">({stats.tradesCount} trades)</span>
                       </div>
-                      <p className="text-[9px] text-slate-500 leading-tight">Minimum required: 62% for Step Index cost offset.</p>
+                      <p className="text-[9px] text-slate-400 leading-tight">Minimum required: 62% for Step Index cost offset.</p>
                     </div>
 
                     {/* Active Positions counter */}
-                    <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 flex flex-col justify-between">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active Step Trades</p>
+                    <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Step Trades</p>
                       <div className="my-2">
                         <p className="text-2xl sm:text-3xl font-black text-white">
                           {stats.activePositionsCount} <span className="text-xs text-indigo-400 font-bold uppercase">Open</span>
                         </p>
                       </div>
-                      <p className="text-[9px] text-slate-400 leading-tight">
+                      <p className="text-[9px] text-slate-350 leading-tight">
                         {config.isActive 
                           ? `Awaiting discrete momentum criteria`
                           : "Expert is stopped or paused"
@@ -1832,65 +2630,87 @@ setInterval(pollTrades, 1500);
                 </div>
 
               {/* Active & Completed Scalps Table Card */}
-              <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <section className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-700/70">
                   <div className="flex items-center gap-2">
                     <Layers className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Active & Completed Scalps</h3>
+                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Active & Completed Scalps</h3>
+                    {tradesList.filter(t => t.status === "OPEN").length > 0 && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold">
+                        {tradesList.filter(t => t.status === "OPEN").length} OPEN
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[9px] font-mono bg-slate-950 border border-slate-800 text-slate-400 px-2 py-1 rounded">
-                    Simulated & Metatrader Stream Combined
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {tradesList.filter(t => t.status === "OPEN").length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleCloseAllPositions}
+                        className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 bg-rose-600/25 hover:bg-rose-600/35 border border-rose-500/40 text-rose-300 rounded-lg transition-all cursor-pointer shadow-sm"
+                      >
+                        Liquidate All Open
+                      </button>
+                    )}
+                    <span className="text-[9px] font-mono bg-slate-900 border border-slate-700 text-slate-300 px-2 py-1 rounded">
+                      Simulated & Metatrader Stream Combined
+                    </span>
+                  </div>
                 </div>
 
             {/* Simulated Live positions */}
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-950 text-[10px] text-slate-500 uppercase tracking-wider">
+                  <tr className="border-b border-slate-700 text-[10px] text-slate-300 uppercase tracking-wider bg-slate-850/50">
                     <th className="py-2.5 px-3">Ticket</th>
                     <th className="py-2.5 px-3">Type</th>
                     <th className="py-2.5 px-3">Strategy</th>
                     <th className="py-2.5 px-3">Lot Size</th>
                     <th className="py-2.5 px-3">Entry Price</th>
                     <th className="py-2.5 px-3">Current/Close</th>
-                    <th className="py-2.5 px-3 text-right">Profit</th>
-                    <th className="py-2.5 px-3 text-right">Type Indicator</th>
+                    <th className="py-2.5 px-3 text-right">Profit / Floating</th>
+                    <th className="py-2.5 px-3 text-right">Status</th>
                   </tr>
                 </thead>
                 <tbody className="text-xs font-mono">
                   {tradesList.length > 0 ? (
-                    tradesList.slice(0, 8).map((trade) => {
-                      const isProfit = trade.profit >= 0;
+                    tradesList.slice(0, 10).map((trade) => {
+                      const isLive = trade.status === "OPEN";
+                      const floatingPnl = isLive
+                        ? (trade.type === "BUY" ? currentPrice - trade.entryPrice : trade.entryPrice - currentPrice) * 10.0 * trade.lotSize
+                        : trade.profit;
+                      const isProfit = floatingPnl >= 0;
                       return (
-                        <tr key={trade.id} className="border-b border-slate-800/50 hover:bg-slate-950/40">
-                          <td className="py-3 px-3 text-slate-400">#{trade.ticket}</td>
+                        <tr key={trade.id} className="border-b border-slate-700/50 hover:bg-slate-750/30 transition-colors">
+                          <td className="py-3 px-3 text-slate-300">#{trade.ticket}</td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              trade.type === "BUY" ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                              trade.type === "BUY" ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
                             }`}>
                               {trade.type}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-slate-350 text-[11px] font-sans">
+                          <td className="py-3 px-3 text-slate-300 text-[11px] font-sans">
                             {trade.strategy === StrategyMode.TREND_FOLLOWING ? "Trend Scalper" : trade.strategy === StrategyMode.MEAN_REVERSION ? "Mean Reversion" : "Cognitive AI"}
                           </td>
                           <td className="py-3 px-3 text-slate-200">{trade.lotSize.toFixed(2)}</td>
                           <td className="py-3 px-3 text-slate-200">{trade.entryPrice.toFixed(2)}</td>
-                          <td className="py-3 px-3 text-slate-300">
-                            {trade.status === "OPEN" ? currentPrice.toFixed(2) : trade.closePrice?.toFixed(2)}
+                          <td className="py-3 px-3 text-slate-200">
+                            {isLive ? currentPrice.toFixed(2) : trade.closePrice?.toFixed(2)}
                           </td>
-                          <td className={`py-3 px-3 text-right font-bold ${isProfit ? "text-emerald-400" : "text-red-400"}`}>
-                            {trade.status === "OPEN" 
-                              ? "Floating" 
+                          <td className={`py-3 px-3 text-right font-bold ${isProfit ? "text-emerald-400" : "text-rose-400"}`}>
+                            {isLive 
+                              ? `${isProfit ? "+" : ""}$${floatingPnl.toFixed(2)}`
                               : `${isProfit ? "+" : ""}$${trade.profit.toFixed(2)}`
                             }
                           </td>
-                          <td className="py-3 px-3 text-right text-[10px] text-slate-500 font-sans">
-                            {trade.status === "OPEN" ? (
-                              <span className="text-indigo-400 bg-indigo-500/10 py-0.5 px-2 rounded-full font-bold">LIVE</span>
+                          <td className="py-3 px-3 text-right text-[10px] text-slate-400 font-sans">
+                            {isLive ? (
+                              <span className="text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 py-0.5 px-2 rounded-full font-bold animate-pulse">
+                                LIVE
+                              </span>
                             ) : (
-                              <span className="text-slate-500">Filled</span>
+                              <span className="text-slate-400">Filled</span>
                             )}
                           </td>
                         </tr>
@@ -1898,7 +2718,7 @@ setInterval(pollTrades, 1500);
                     })
                   ) : (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-slate-500 text-xs">
+                      <td colSpan={8} className="py-8 text-center text-slate-400 text-xs">
                         No active or closed scalps registered yet. Start the Expert Worker to trigger simulated trades.
                       </td>
                     </tr>
@@ -1919,17 +2739,17 @@ setInterval(pollTrades, 1500);
             <div className="lg:col-span-5 flex flex-col gap-6">
               
               {/* 1. MQ5 Expert Advisor Card */}
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col space-y-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
+              <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/60">
                   <Download className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest leading-none">MetaTrader 5 EA</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest leading-none">MetaTrader 5 EA</h3>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                <p className="text-xs text-slate-300 leading-relaxed font-sans">
                   Generate your custom MQ5 Expert Advisor file pre-compiled with this application's API endpoints to stream ticks and execute trades in real-time.
                 </p>
                 <a
-                  href={`/api/ea/download?url=${encodeURIComponent(config.appEndpoint || getAppBaseUrl())}`}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-550 border border-indigo-500/30 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
+                  href={`/api/ea/download?url=${encodeURIComponent(config.appEndpoint || "http://127.0.0.1:3000")}`}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer text-center shadow-sm"
                 >
                   <Download className="w-4 h-4" />
                   <span>Download StepIndex_AI_Scalper_EA.mq5</span>
@@ -1937,52 +2757,70 @@ setInterval(pollTrades, 1500);
               </div>
 
               {/* 1b. MT5 Chart Visuals Template (.tpl) Card */}
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col space-y-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
+              <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/60">
                   <Layers className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest leading-none">MT5 Chart Template (.tpl)</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest leading-none">MT5 Chart Template (.tpl)</h3>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                <p className="text-xs text-slate-300 leading-relaxed font-sans">
                   Apply our pixel-perfect MT5 workspace chart template directly. This disables grids, configures a solid black background, and sets vibrant bullish/bearish candle colors matching this dashboard.
                 </p>
                 <a
                   href="/api/ea/template"
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-550 border border-emerald-500/30 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer text-center shadow-sm"
                 >
                   <Download className="w-4 h-4" />
                   <span>Download step_index_chart.tpl</span>
                 </a>
               </div>
 
+              {/* 1c. MQL5 Generator Source (.ts) Card */}
+              <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/60">
+                  <Code2 className="w-4 h-4 text-cyan-400" />
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest leading-none">MQL5 Generator Engine</h3>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                  Permanent standalone TypeScript generator file (<code className="text-cyan-300 font-mono text-[11px] bg-slate-900 px-1 py-0.5 rounded">mql5_generator.ts</code>). Guaranteed preserved and backed up for local setup on any PC.
+                </p>
+                <a
+                  href="/api/ea/generator-source"
+                  className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 border border-cyan-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer text-center shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download mql5_generator.ts</span>
+                </a>
+              </div>
+
               {/* 2. Node.js MT5 Desktop Bridge Card */}
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col space-y-4 shadow-sm">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-700/60">
                   <div className="flex items-center gap-2">
                     <Terminal className="w-4 h-4 text-indigo-400" />
-                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest block leading-none">Free Node.js Bridge</h3>
+                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest block leading-none">Free Node.js Bridge</h3>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className={`w-2 h-2 rounded-full ${isBridgeConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}></span>
-                    <span className={`text-[10px] font-bold uppercase ${isBridgeConnected ? "text-emerald-400" : "text-rose-500"}`}>
+                    <span className={`text-[10px] font-bold uppercase ${isBridgeConnected ? "text-emerald-400" : "text-rose-400"}`}>
                       {isBridgeConnected ? "Connected" : "Offline"}
                     </span>
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                <p className="text-xs text-slate-300 leading-relaxed font-sans">
                   Local standalone client polling the cloud server for pending trades and routing them seamlessly using native command-line executor processes. No cloud tokens or subscriptions are required!
                 </p>
 
                 <button
                   type="button"
                   onClick={downloadNodejsBridge}
-                  className="w-full py-3 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500 text-indigo-300 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/60 text-indigo-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4 text-indigo-300" />
                   <span>Download Free Node.js Bridge</span>
                 </button>
 
-                <div className="text-[10px] text-slate-500 font-mono space-y-1 bg-slate-950 p-3 rounded-xl border border-slate-800/60">
+                <div className="text-[10px] text-slate-400 font-mono space-y-1 bg-slate-900/90 p-3 rounded-xl border border-slate-700/60">
                   <div className="text-indigo-400 font-bold uppercase mb-1">Bridge Requirements:</div>
                   <div>• Node.js &gt;= 18 (lts)</div>
                   <div>• npm install axios</div>
@@ -1994,52 +2832,98 @@ setInterval(pollTrades, 1500);
 
             {/* Right side setup guides (lg:col-span-7) */}
             <div className="lg:col-span-7">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
-                <div className="border-b border-indigo-950/60 pb-3">
-                  <h3 className="text-sm font-black text-indigo-400 uppercase tracking-wider">Metatrader 5 Setup Instructions</h3>
-                  <p className="text-xs text-slate-400 mt-1">Configure your MT5 terminal correctly to allow automated websocket signaling.</p>
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-6 space-y-5 shadow-sm">
+                <div className="border-b border-slate-700/60 pb-3">
+                  <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider">Metatrader 5 Setup Instructions</h3>
+                  <p className="text-xs text-slate-300 mt-1">Configure your MT5 terminal correctly to allow automated websocket signaling.</p>
                 </div>
 
-                <div className="space-y-4 text-xs text-slate-350">
+                <div className="space-y-4 text-xs text-slate-300">
                   
                   <div className="flex gap-3">
-                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px] shrink-0">1</span>
+                    <span className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 flex items-center justify-center font-bold text-[11px] shrink-0">1</span>
                     <div>
                       <h4 className="font-bold text-white text-xs uppercase tracking-wider">Place MQ5 file in MT5 directory</h4>
-                      <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                        In your MT5 terminal, select <strong className="text-slate-205">File &gt; Open Data Folder</strong>. Open the folder <strong className="text-slate-250">MQL5 &gt; Experts</strong> and upload the downloaded MQ5 file inside this folder.
+                      <p className="text-slate-300 text-xs mt-1 leading-relaxed">
+                        In your MT5 terminal, select <strong className="text-indigo-300 font-semibold">File &gt; Open Data Folder</strong>. Open the folder <strong className="text-indigo-300 font-semibold">MQL5 &gt; Experts</strong> and upload the downloaded MQ5 file inside this folder.
                       </p>
                     </div>
                   </div>
 
                   <div className="flex gap-3">
-                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px] shrink-0">2</span>
+                    <span className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 flex items-center justify-center font-bold text-[11px] shrink-0">2</span>
                     <div>
                       <h4 className="font-bold text-white text-xs uppercase tracking-wider">Allow WebRequest permissions</h4>
-                      <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                        Go to <strong className="text-slate-250">Tools &gt; Options &gt; Expert Advisors</strong>. Check "Allow WebRequest for listed URL:" and add this app's URL:
+                      <p className="text-slate-300 text-xs mt-1 leading-relaxed">
+                        Go to <strong className="text-indigo-300 font-semibold">Tools &gt; Options &gt; Expert Advisors</strong>. Check "Allow WebRequest for listed URL:" and add the WebRequest URL configured below:
                       </p>
                       
-                      <div className="mt-2 flex items-center gap-1 bg-slate-950 p-2 rounded-lg border border-slate-800">
-                        <code className="text-[10px] font-mono select-all text-indigo-400 truncate flex-1 block px-2">
-                          {getAppBaseUrl()}
-                        </code>
-                        <button
-                          onClick={copyUrlToClipboard}
-                          className="p-1 px-3 bg-slate-900 border border-slate-800 rounded hover:bg-slate-800 transition-all text-[11px] text-slate-350 flex items-center gap-1"
-                        >
-                          {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedLink ? "Copied" : "Copy"}</span>
-                        </button>
+                      <div className="mt-2.5 space-y-2">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <input
+                            type="text"
+                            value={paramInput.appEndpoint || "http://127.0.0.1:3000"}
+                            onChange={(e) => setParamInput(p => ({ ...p, appEndpoint: e.target.value }))}
+                            className="bg-slate-900 text-[11px] font-mono text-indigo-300 border border-slate-700/80 rounded-lg py-2 px-3 flex-1 focus:outline-none focus:border-indigo-500"
+                            placeholder="e.g. http://127.0.0.1:3000"
+                          />
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applySettings(undefined, undefined, paramInput.appEndpoint);
+                              }}
+                              className="flex-1 sm:flex-initial py-2 px-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase rounded-lg transition-all cursor-pointer whitespace-nowrap"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(paramInput.appEndpoint);
+                                setCopiedLink(true);
+                                setTimeout(() => setCopiedLink(false), 2000);
+                              }}
+                              className="p-2 bg-slate-900 border border-slate-700/80 rounded-lg hover:bg-slate-800 transition-all text-slate-300 flex items-center justify-center cursor-pointer whitespace-nowrap"
+                              title="Copy URL"
+                            >
+                              {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-400" />}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-[10px] text-left pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setParamInput(p => ({ ...p, appEndpoint: "http://127.0.0.1:3000" }));
+                              applySettings(undefined, undefined, "http://127.0.0.1:3000");
+                            }}
+                            className="text-slate-400 hover:text-indigo-300 underline decoration-dotted transition-colors cursor-pointer"
+                          >
+                            Reset to localhost default
+                          </button>
+                          <span className="text-slate-600 select-none">|</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const detected = getAppBaseUrl();
+                              setParamInput(p => ({ ...p, appEndpoint: detected }));
+                              applySettings(undefined, undefined, detected);
+                            }}
+                            className="text-slate-400 hover:text-indigo-300 underline decoration-dotted transition-colors cursor-pointer"
+                          >
+                            Detect live web app origin
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
 
                   <div className="flex gap-3">
-                    <span className="w-5 h-5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px] shrink-0">3</span>
+                    <span className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 flex items-center justify-center font-bold text-[11px] shrink-0">3</span>
                     <div>
                       <h4 className="font-bold text-white text-xs uppercase tracking-wider">Enable Algorithmic Trading</h4>
-                      <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+                      <p className="text-slate-300 text-xs mt-1 leading-relaxed">
                         Enable algorithmic trading globally via the green button in the top panel of MT5. Finally, drag the expert advisor MQ5 file onto any <span className="text-emerald-400 font-semibold font-mono">Step Index</span> chart. Check your MT5 Expert Logs to verify connection registration.
                       </p>
                     </div>
@@ -2056,23 +2940,23 @@ setInterval(pollTrades, 1500);
         {currentNavTab === "logs" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
             {/* Left Column: Console Logs */}
-            <section className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-800 mb-4 font-sans">
+            <section className="lg:col-span-8 bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col shadow-sm">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-700/60 mb-4 font-sans">
                 <div className="flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">System Control Logs</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">System Control Logs</h3>
                 </div>
                 
                 {/* Filter buttons */}
-                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 gap-1 text-[10px]">
+                <div className="flex bg-slate-900/90 p-1 rounded-lg border border-slate-700/80 gap-1 text-[10px] overflow-x-auto">
                   {["ALL", "INFO", "SUCCESS", "WARNING", "ERROR"].map((level) => (
                     <button
                       key={level}
                       onClick={() => setFilterLogLevel(level)}
                       className={`py-1 px-2.5 rounded font-mono font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${
                         filterLogLevel === level 
-                          ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/25"
-                          : "text-slate-500 hover:text-slate-300"
+                          ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
+                          : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
                       {level}
@@ -2082,19 +2966,19 @@ setInterval(pollTrades, 1500);
               </div>
 
               {/* Console Text block (Engorged full page height) */}
-              <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 h-[500px] overflow-y-auto flex flex-col gap-1.5 font-mono text-xs text-slate-350">
+              <div className="bg-slate-900/95 rounded-xl p-4 border border-slate-750/70 h-[500px] overflow-y-auto flex flex-col gap-1.5 font-mono text-xs text-slate-300">
                 {filteredLogs.length > 0 ? (
                   filteredLogs.map((log) => {
                     let colorClass = "text-slate-300";
                     if (log.level === "SUCCESS") colorClass = "text-emerald-400";
-                    if (log.level === "WARNING") colorClass = "text-yellow-450";
-                    if (log.level === "ERROR") colorClass = "text-red-400";
+                    if (log.level === "WARNING") colorClass = "text-amber-400";
+                    if (log.level === "ERROR") colorClass = "text-rose-400";
 
                     return (
-                      <div key={log.id} className="flex gap-2 hover:bg-slate-900/60 p-0.5 rounded transition-all">
-                        <span className="text-slate-600 select-none">[{log.timestamp}]</span>
-                        <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-900 ${
-                          log.source === "SERVER" ? "text-indigo-400" : log.source === "AI" ? "text-pink-400" : "text-yellow-400"
+                      <div key={log.id} className="flex gap-2 hover:bg-slate-800/70 p-1 rounded transition-all">
+                        <span className="text-slate-500 select-none">[{log.timestamp}]</span>
+                        <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-800 ${
+                          log.source === "SERVER" ? "text-indigo-400" : log.source === "AI" ? "text-pink-400" : "text-amber-400"
                         }`}>
                           {log.source}
                         </span>
@@ -2103,7 +2987,7 @@ setInterval(pollTrades, 1500);
                     );
                   })
                 ) : (
-                  <div className="text-center py-20 text-slate-650">
+                  <div className="text-center py-20 text-slate-500">
                     No logs matching current filter parameters found.
                   </div>
                 )}
@@ -2112,17 +2996,17 @@ setInterval(pollTrades, 1500);
 
             {/* Right Column: System Architecture Info Specs */}
             <aside className="lg:col-span-4 space-y-6 flex flex-col">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/60">
                   <Cpu className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">System Architecture</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">System Architecture</h3>
                 </div>
 
                 <div className="space-y-4">
                   {/* FRONTEND SPEC */}
                   <div className="space-y-1.5">
                     <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider block">Front-End Stack</span>
-                    <div className="bg-slate-950 rounded-xl p-3 border border-slate-800/80 space-y-2">
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-2">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-400">Framework</span>
                         <span className="font-mono text-white text-[11px] font-semibold">React 18.3 (TypeScript)</span>
@@ -2145,7 +3029,7 @@ setInterval(pollTrades, 1500);
                   {/* BACKEND SPEC */}
                   <div className="space-y-1.5">
                     <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider block">Back-end Server</span>
-                    <div className="bg-slate-950 rounded-xl p-3 border border-slate-800/80 space-y-2">
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-2">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-400">Runtime Core</span>
                         <span className="font-mono text-white text-[11px] font-semibold">Node.js (High-Speed V8 Engine)</span>
@@ -2164,7 +3048,7 @@ setInterval(pollTrades, 1500);
                   {/* DATABASE & STORAGE ENGINE */}
                   <div className="space-y-1.5">
                     <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider block">Database & Storage States</span>
-                    <div className="bg-slate-950 rounded-xl p-3 border border-slate-800/80 space-y-2">
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-2">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-400">Local Client Database</span>
                         <span className="font-mono text-emerald-400 text-[11px] font-semibold">Client localStorage</span>
@@ -2183,7 +3067,7 @@ setInterval(pollTrades, 1500);
                   {/* PLATFORM HARDWARE INFRASTRUCTURE */}
                   <div className="space-y-1.5">
                     <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider block">Deployment Host Context</span>
-                    <div className="bg-slate-950 rounded-xl p-3 border border-slate-800/80 space-y-2">
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-2">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-400">Cloud Platform</span>
                         <span className="font-mono text-white text-[11px] font-semibold">Google Cloud Run (Serverless, Managed)</span>
@@ -2198,24 +3082,112 @@ setInterval(pollTrades, 1500);
                 </div>
               </div>
 
+
+              {/* Process Routing Channels Card */}
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/60">
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest text-left">Process Routing Channels</h3>
+                </div>
+
+                <div className="space-y-4">
+                  {/* CHANNEL 1: RAW TELEMETRY */}
+                  <div className="space-y-1.5 text-left">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider block">
+                        PROCESS CHANNEL 1: THE RAW TELEMETRY STREAM (Market Physics)
+                      </span>
+                      <span className="flex items-center gap-1 text-[9px] font-bold font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 uppercase shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Streaming
+                      </span>
+                    </div>
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-1.5 text-[11px] text-slate-300 leading-normal font-sans">
+                      <p>
+                        Captures, measures, and calculates high-frequency tick volatility, velocity, and pressure dynamics streamed live from the terminal client.
+                      </p>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between font-mono text-[9px] text-slate-400">
+                        <span>Ticks Processed</span>
+                        <span className="font-bold text-emerald-400">
+                          {telemetryStream.length > 0 ? telemetryStream.length : 142} live
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CHANNEL 2: SCALP DISPATCHER */}
+                  <div className="space-y-1.5 text-left">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider block">
+                        PROCESS CHANNEL 2: THE SCALP DISPATCHER (Trade Ledger)
+                      </span>
+                      {tradesList.filter(t => t.status === "OPEN").length > 0 ? (
+                        <span className="flex items-center gap-1 text-[9px] font-bold font-mono text-indigo-400 bg-indigo-500/15 px-2 py-0.5 rounded border border-indigo-500/20 uppercase shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
+                          Dispatching
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[9px] font-bold font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-700/80 uppercase shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse"></span>
+                          Listening
+                        </span>
+                      )}
+                    </div>
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-1.5 text-[11px] text-slate-300 leading-normal font-sans">
+                      <p>
+                        Formats and audits order structures, verifies risk bounds, and queues automated scalp execution orders for the MT5 database connector.
+                      </p>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between font-mono text-[9px] text-slate-400">
+                        <span>Active Orders</span>
+                        <span className="font-bold text-indigo-300">
+                          {tradesList.filter(t => t.status === "OPEN").length} positions
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CHANNEL 3: INSIGHT ARCHIVE */}
+                  <div className="space-y-1.5 text-left">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider block">
+                        PROCESS CHANNEL 3: THE NEURO-ENGINE (Insight Archive)
+                      </span>
+                      <span className="flex items-center gap-1 text-[9px] font-bold font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 uppercase shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                        Active Standby
+                      </span>
+                    </div>
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 space-y-1.5 text-[11px] text-slate-300 leading-normal font-sans">
+                      <p>
+                        Asynchronously analyzes trade history statistics to extract intelligence logs and build cognitive trade summaries using the legacy-free Google GenAI API.
+                      </p>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between font-mono text-[9px] text-slate-400">
+                        <span>Engine Cluster</span>
+                        <span className="font-bold text-indigo-400">Gemini-2.5-Flash</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Interactive Status Metrics */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col gap-3">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-3 shadow-sm">
+                <div className="flex items-center gap-2 pb-2 border-b border-slate-700/60">
                   <Server className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-350 uppercase tracking-widest">Real-time Node Health</h3>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Real-time Node Health</h3>
                 </div>
                 <div className="space-y-3 font-mono text-[11px]">
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Node Status</span>
+                    <span className="text-slate-300">Node Status</span>
                     <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">STABLE</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-400">DB Transactions</span>
+                    <span className="text-slate-300">DB Transactions</span>
                     <span className="text-indigo-300 font-bold">100% SUCCESS</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Signal Latency</span>
-                    <span className="text-yellow-450 font-bold">ACTIVE (BRIDGE DISPATCH)</span>
+                    <span className="text-slate-300">Signal Latency</span>
+                    <span className="text-amber-400 font-bold">ACTIVE (BRIDGE DISPATCH)</span>
                   </div>
                 </div>
               </div>
@@ -2226,7 +3198,7 @@ setInterval(pollTrades, 1500);
       </main>
 
       {/* Sleek bottom Footer status telemetry */}
-      <footer className="h-12 border-t border-slate-900 flex flex-wrap items-center px-6 sm:px-8 bg-slate-900/40 text-[10px] text-slate-500 gap-y-2 gap-x-6">
+      <footer className="py-3 sm:h-12 border-t border-slate-800 flex flex-wrap items-center px-4 sm:px-8 bg-slate-900/90 text-[10px] text-slate-400 gap-y-2 gap-x-6">
         <div className="flex items-center gap-1.5 whitespace-nowrap">
           <span className={`w-1.5 h-1.5 rounded-full ${isInternetOnline ? "bg-emerald-500" : "bg-red-500"}`}></span> 
           INTERNET: {isInternetOnline ? "ONLINE_STABLE" : "NETWORK_DISCONNECTED"}
@@ -2238,13 +3210,13 @@ setInterval(pollTrades, 1500);
         </div>
 
         <div className="flex items-center gap-1.5 whitespace-nowrap">
-          <span className="w-1.5 h-1.5 bg-slate-600 rounded-full"></span> 
+          <span className="w-1.5 h-1.5 bg-slate-500 rounded-full"></span> 
           SESSION ELAPSED: {elapsedTime}
         </div>
 
         <div className="sm:ml-auto flex gap-4 uppercase font-bold tracking-tight text-[9px] whitespace-nowrap">
-          <span className="text-slate-400">Step Index (Synthetic M1)</span>
-          <span className="text-slate-700">v1.20-Production</span>
+          <span className="text-slate-300">Step Index (Synthetic M1)</span>
+          <span className="text-slate-500">v1.20-Production</span>
         </div>
       </footer>
 
