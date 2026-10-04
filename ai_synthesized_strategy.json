@@ -1,0 +1,16 @@
+{
+  "lastSynthesized": "2026-10-04T07:11:59.064Z",
+  "strategyName": "Adaptive Micro-Volatility Escalator",
+  "rationale": "Initial structural preset. Regulates velocity noise components and aligns trades with secondary EMA moving averages.",
+  "observationsUsed": [
+    "Awaiting micro-tick observation cycle. Click 'Synthesize AI Strategy' to scan live telemetry bounds."
+  ],
+  "compiledRules": {
+    "minVelocityFilter": 0.15,
+    "slPointsMultiplier": 1,
+    "tpPointsMultiplier": 1,
+    "allowCounterTrend": false,
+    "useEmaConfirmation": true,
+    "maxAllowedPositionDivergence": 1.5
+  }
+}

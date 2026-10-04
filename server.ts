@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { simpleGit } from "simple-git";
 import { generateMql5Code } from "./src/lib/mql5_generator";
 import { StrategyMode, TradeConfig, TradeRecord, SystemLog, Tick, EAConnectionDetails, AiSynthesizedStrategy } from "./src/types";
+import { createMcpHandler } from "./src/mcp_server";
 
 // Load environment variables strictly in local dev
 import dotenv from "dotenv";
@@ -1862,6 +1863,260 @@ async function startServer() {
   // Return JSON 404 for unhandled API endpoints to prevent Vite from returning index.html
   app.all("/api/*", (req: Request, res: Response) => {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+  });
+
+  const mcpContext = {
+    getStatus: () => getFullStatusPayload(),
+    getAiStudyFeed: async () => {
+      const MIN_SAFETY_CALIBRATION_THRESHOLD = 20;
+      if (aiKnowledgeBase.totalObservations < MIN_SAFETY_CALIBRATION_THRESHOLD) {
+        const rawSum = marketTelemetryData.reduce((sum, item) => sum + Math.abs(item.velocity), 0);
+        const calculatedAvg = marketTelemetryData.length > 0 ? Number((rawSum / marketTelemetryData.length).toFixed(4)) : 0;
+        return {
+          status: "calibrating",
+          message: "AI is calibrating long-term behavioral profile... Execution locked.",
+          count: marketTelemetryData.length,
+          unprocessedCount: marketTelemetryData.length - lastProcessedTelemetryIndex,
+          threshold: MIN_SAFETY_CALIBRATION_THRESHOLD,
+          aiKnowledgeBase,
+          aiSynthesizedStrategy,
+          candleStream: tickHistory,
+          averageVelocity: calculatedAvg || aiKnowledgeBase.globalAverageSpeed,
+        };
+      }
+      const sumAbsVelocity = marketTelemetryData.reduce((sum, item) => sum + Math.abs(item.velocity), 0);
+      const averageVelocity = Number((sumAbsVelocity / marketTelemetryData.length).toFixed(4));
+      return {
+        status: "optimized",
+        averageVelocity: averageVelocity || aiKnowledgeBase.globalAverageSpeed,
+        aiKnowledgeBase,
+        aiSynthesizedStrategy,
+        candleStream: tickHistory,
+        count: marketTelemetryData.length,
+        stream: marketTelemetryData,
+      };
+    },
+    getTrades: () => tradesList,
+    getLogs: () => systemLogs,
+    getConfig: () => tradeConfig,
+    getConnection: () => eaConnection,
+    getAiStrategy: () => aiSynthesizedStrategy,
+    getAiKnowledgeBase: () => aiKnowledgeBase,
+    analyzeMarket: async () => {
+      if (!ai) {
+        return "Gemini API key is not configured inside server configurations. To activate Gemini, insert a value into the SECRETS panel.";
+      }
+      try {
+        const historicalPrices = tickHistory.map(t => t.price).slice(-40);
+        const mockStrategyUsed = tradeConfig.selectedStrategy;
+        const systemPrompt = `You are the built-in AI trading engine of an advanced MetaTrader 5 Expert Advisor designed explicitly for Step Index. Step Index is a DERIV synthetic index that fluctuates in discrete mathematical sizes (e.g. +0.1, +0.2). Analyze the provided list of recent price movements, the current active strategy, and risk variables. Return a 3-bullet concise expert training analysis containing structural momentum forecast, recommended trailing stop multiplier settings, and market volatility index. Do not write codes. Speak like an objective quantum machine learning system. Keep it brief.`;
+        const modelInput = `
+Historical step index series (last 40 ticks): ${JSON.stringify(historicalPrices)}
+Target Strategy Model: ${mockStrategyUsed}
+Take Profit: ${tradeConfig.takeProfitPoints} points
+Stop Loss: ${tradeConfig.stopLossPoints} points
+Current Price: ${currentPrice}
+        `;
+        let response;
+        try {
+          response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: modelInput,
+            config: {
+              systemInstruction: systemPrompt,
+              temperature: 0.2,
+            },
+          });
+        } catch (primaryErr: any) {
+          response = await ai.models.generateContent({
+            model: "gemini-flash-latest",
+            contents: modelInput,
+            config: {
+              systemInstruction: systemPrompt,
+              temperature: 0.2,
+            },
+          });
+        }
+        return response.text || "No insights returned from cognitive server.";
+      } catch (err: any) {
+        return `Gemini analysis error: ${err.message}`;
+      }
+    },
+    synthesizeStrategy: async () => {
+      if (!ai) {
+        throw new Error("Gemini API key is not configured inside server configurations.");
+      }
+      try {
+        const historicalTicks = tickHistory.slice(-40).map(t => ({
+          price: t.price,
+          direction: t.direction,
+          open: t.open,
+          high: t.high,
+          low: t.low,
+          close: t.close,
+          time: t.time,
+        }));
+        const savedProfile = {
+          globalAverageSpeed: aiKnowledgeBase.globalAverageSpeed,
+          peakVelocityRegistered: aiKnowledgeBase.peakVelocityRegistered,
+          timeOfDayPatterns: aiKnowledgeBase.timeOfDayPatterns,
+          totalObservations: aiKnowledgeBase.totalObservations,
+        };
+        const closedPositions = tradesList.filter(t => t.status === "CLOSED");
+        const wins = closedPositions.filter(t => t.profit > 0).length;
+        const statsSummary = {
+          totalTrades: closedPositions.length,
+          winRate: closedPositions.length > 0 ? Math.round((wins / closedPositions.length) * 100) : 0,
+          totalProfit: Number(closedPositions.reduce((sum, t) => sum + t.profit, 0).toFixed(2)),
+        };
+        const systemPrompt = `You are a professional quantitative AI analyst and algorithmic systems designer for synthetic index trading.
+Your task is to analyze the provided long-term knowledge profiles, recent micro-tick logs, and overall trading performance to synthesize a tailored, highly specific, and reactive execution strategy.
+
+Identify key observational findings (e.g., peak/average velocity patterns, current hour speed vs global speed, trend persistence, trade success rate) and formulate concrete rules for our engine.
+
+You must respond with a STRICT, unformatted JSON block. Do NOT include markdown tags like \`\`\`json or \`\`\`. No leading/trailing conversational text.
+Your entire response must be a single parsable JSON object matching this structure:
+{
+  "strategyName": "A descriptive, professional quantitative name",
+  "rationale": "A comprehensive operational explanation citing specific observations from findings (e.g. average velocity of historical timings, or recent direction distributions)",
+  "observationsUsed": [
+    "Observation 1 (e.g., peak registered tick speed of X pt/s demands a tight filter)",
+    "Observation 2 (e.g., Hour Y shows Z avg velocity indicating high activity windows)",
+    "Observation 3 (e.g., trend following performance indicates we should enforce trade boundaries)"
+  ],
+  "compiledRules": {
+    "minVelocityFilter": 0.15,
+    "slPointsMultiplier": 1.0,
+    "tpPointsMultiplier": 1.0,
+    "allowCounterTrend": false,
+    "useEmaConfirmation": true,
+    "maxAllowedPositionDivergence": 2.0
+  }
+}
+`;
+        const modelInput = `
+Recent Tick History Summary:
+${JSON.stringify(historicalTicks, null, 2)}
+
+Historical Knowledge Profile:
+${JSON.stringify(savedProfile, null, 2)}
+
+Trading Performance Stats:
+${JSON.stringify(statsSummary, null, 2)}
+        `;
+        let response;
+        try {
+          response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: modelInput,
+            config: {
+              systemInstruction: systemPrompt,
+              temperature: 0.2,
+              responseMimeType: "application/json",
+            },
+          });
+        } catch (primaryErr: any) {
+          response = await ai.models.generateContent({
+            model: "gemini-flash-latest",
+            contents: modelInput,
+            config: {
+              systemInstruction: systemPrompt,
+              temperature: 0.2,
+              responseMimeType: "application/json",
+            },
+          });
+        }
+        const rawText = response.text?.trim() || "{}";
+        let cleanText = rawText;
+        if (cleanText.includes("```")) {
+          cleanText = cleanText.replace(/```json/g, "").replace(/```/g, "").trim();
+        }
+        const parsed = JSON.parse(cleanText);
+        const minVelocityFilter = typeof parsed.compiledRules?.minVelocityFilter === "number" ? parsed.compiledRules.minVelocityFilter : 0.15;
+        const slPointsMultiplier = typeof parsed.compiledRules?.slPointsMultiplier === "number" ? parsed.compiledRules.slPointsMultiplier : 1.0;
+        const tpPointsMultiplier = typeof parsed.compiledRules?.tpPointsMultiplier === "number" ? parsed.compiledRules.tpPointsMultiplier : 1.0;
+        const allowCounterTrend = typeof parsed.compiledRules?.allowCounterTrend === "boolean" ? parsed.compiledRules.allowCounterTrend : false;
+        const useEmaConfirmation = typeof parsed.compiledRules?.useEmaConfirmation === "boolean" ? parsed.compiledRules.useEmaConfirmation : true;
+        const maxAllowedPositionDivergence = typeof parsed.compiledRules?.maxAllowedPositionDivergence === "number" ? parsed.compiledRules.maxAllowedPositionDivergence : 2.0;
+        const newStrategy: AiSynthesizedStrategy = {
+          lastSynthesized: new Date().toISOString(),
+          strategyName: parsed.strategyName || "Quantum Velocity Escalator",
+          rationale: parsed.rationale || "Formulated default quantitative fallback parameters to safeguard capital boundaries.",
+          observationsUsed: Array.isArray(parsed.observationsUsed) ? parsed.observationsUsed : ["General micro-tick velocity distribution balanced successfully."],
+          compiledRules: {
+            minVelocityFilter,
+            slPointsMultiplier,
+            tpPointsMultiplier,
+            allowCounterTrend,
+            useEmaConfirmation,
+            maxAllowedPositionDivergence,
+          },
+        };
+        aiSynthesizedStrategy = newStrategy;
+        fs.writeFileSync(STRATEGY_FILE_PATH, JSON.stringify(aiSynthesizedStrategy, null, 2), "utf-8");
+        addLog("AI", "SUCCESS", `Synthesizing strategy complete. New design: '${aiSynthesizedStrategy.strategyName}'. Rules written to disk.`);
+        return aiSynthesizedStrategy;
+      } catch (err: any) {
+        throw new Error(`Strategy synthesis error: ${err.message}`);
+      }
+    },
+    updateSettings: async (params: any) => {
+      if (params.selectedStrategy !== undefined) tradeConfig.selectedStrategy = params.selectedStrategy;
+      if (params.lotSize !== undefined) tradeConfig.lotSize = Number(params.lotSize);
+      if (params.takeProfitPoints !== undefined) tradeConfig.takeProfitPoints = Number(params.takeProfitPoints);
+      if (params.stopLossPoints !== undefined) tradeConfig.stopLossPoints = Number(params.stopLossPoints);
+      if (params.trailingStopPoints !== undefined) tradeConfig.trailingStopPoints = Number(params.trailingStopPoints);
+      if (params.useTrailingStop !== undefined) tradeConfig.useTrailingStop = Boolean(params.useTrailingStop);
+      if (params.maxTrades !== undefined) tradeConfig.maxTrades = Number(params.maxTrades);
+      if (params.tradingMode !== undefined) tradeConfig.tradingMode = params.tradingMode;
+      if (params.isAiModeEnabled !== undefined) {
+        if (params.isAiModeEnabled && !geminiKey) {
+          tradeConfig.isAiModeEnabled = false;
+          addLog("SERVER", "WARNING", "AI mode toggle declined: No Gemini API Key configured in Environment Secrets.");
+        } else {
+          tradeConfig.isAiModeEnabled = Boolean(params.isAiModeEnabled);
+        }
+      }
+      addLog("SERVER", "WARNING", "Strategy configurations changed. Running parameters updated.");
+      broadcastToDashboards({ type: "config", config: tradeConfig });
+      return tradeConfig;
+    },
+    toggleTrading: async (isActive: boolean) => {
+      tradeConfig.isActive = isActive;
+      const statusLabel = tradeConfig.isActive ? "STARTED" : "STOPPED";
+      addLog("SERVER", "INFO", `Trading remote state toggled to: ${statusLabel}`);
+      if (!tradeConfig.isActive) {
+        const openTrades = tradesList.filter(t => t.status === "OPEN");
+        if (openTrades.length > 0) {
+          openTrades.forEach(t => closeSimulatedPosition(t, "Forced termination from remote dashboard."));
+        }
+      }
+      broadcastToDashboards({ type: "config", config: tradeConfig });
+      broadcastTradesUpdate();
+      return tradeConfig;
+    },
+    placeTrade: async (type: "BUY" | "SELL", reason?: string) => {
+      await openSimulatedPosition(type, reason || "MCP initiated trade");
+      return { success: true, message: `Trade signal sent: ${type}` };
+    },
+    closeTrade: async (tradeId: string) => {
+      const trade = tradesList.find(t => t.id === tradeId && t.status === "OPEN");
+      if (!trade) {
+        return { success: false, message: `Open trade with id ${tradeId} not found` };
+      }
+      closeSimulatedPosition(trade, "Closed via MCP request.");
+      return { success: true, message: `Trade ${tradeId} closed` };
+    },
+    resetStats: async () => {
+      tradesList = [];
+      addLog("SERVER", "SUCCESS", "User reset session statistics and trading history log.");
+      broadcastTradesUpdate();
+    },
+  };
+
+  const SCALARAI_MCP_API_KEY = process.env.SCALARAI_MCP_API_KEY || "+Z45RyDNhRZ5np8QWW6yrwfbKcnd5KNGzhzHU4nP8K";
+  app.post("/mcp", (req: Request, res: Response) => {
+    createMcpHandler(mcpContext, SCALARAI_MCP_API_KEY)(req, res);
   });
 
   if (process.env.NODE_ENV !== "production") {
