@@ -30,7 +30,6 @@ import {
   Lock,
   Zap,
   RotateCcw,
-  Github,
   Code2,
   Menu,
   X
@@ -167,18 +166,6 @@ export default function App() {
   const [isSynthesizingStrategy, setIsSynthesizingStrategy] = useState<boolean>(false);
   const [telemetryStream, setTelemetryStream] = useState<any[]>([]);
 
-  // GitHub integration states
-  const [isGithubConnected, setIsGithubConnected] = useState<boolean>(false);
-  const [githubClientId, setGithubClientId] = useState<string>("");
-  const [isSyncingFromGithub, setIsSyncingFromGithub] = useState<boolean>(false);
-  const [githubSyncResult, setGithubSyncResult] = useState<{
-    success: boolean;
-    message: string;
-    branch?: string;
-    summary?: any;
-    files?: string[];
-  } | null>(null);
-
   // Connection checking
   useEffect(() => {
     const handleOnline = () => setIsInternetOnline(true);
@@ -292,53 +279,6 @@ export default function App() {
     }
   };
 
-  const fetchGithubStatus = async () => {
-    try {
-      const response = await fetch("/api/github-status");
-      if (response.ok) {
-        const data = await response.json();
-        setIsGithubConnected(data.authenticated);
-        setGithubClientId(data.clientId || "");
-      }
-    } catch (e) {
-      console.error("Failed to fetch Github status:", e);
-    }
-  };
-
-  const handleSyncFromGithub = async () => {
-    setIsSyncingFromGithub(true);
-    setGithubSyncResult(null);
-    try {
-      const response = await fetch("/api/sync-from-github", { method: "POST" });
-      const data = await response.json();
-      setGithubSyncResult({
-        success: response.ok && data.success,
-        message: data.message || data.error || "Unknown response from sync operation.",
-        branch: data.branch,
-        summary: data.summary,
-        files: data.files
-      });
-      fetchStatus();
-    } catch (e: any) {
-      setGithubSyncResult({
-        success: false,
-        message: e.message || "Failed to communicate with local workspace server."
-      });
-    } finally {
-      setIsSyncingFromGithub(false);
-    }
-  };
-
-  const handleGithubLogout = async () => {
-    try {
-      await fetch("/api/auth/github/logout", { method: "POST" });
-      setIsGithubConnected(false);
-      setGithubSyncResult(null);
-    } catch (e) {
-      console.error("Failed to request GitHub session logoff: ", e);
-    }
-  };
-
   // Real-Time WebSocket Connection & Lifecycle Management
   useEffect(() => {
     let reconnectTimeout: any = null;
@@ -448,15 +388,6 @@ export default function App() {
         try { wsRef.current.close(); } catch {}
       }
     };
-  }, []);
-
-  useEffect(() => {
-    fetchGithubStatus();
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("github_auth") === "success") {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      fetchGithubStatus();
-    }
   }, []);
 
   // Initialize input fields when config is pulled
@@ -1861,155 +1792,9 @@ setInterval(pollTrades, 1500);
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
-
-            {/* Programmatic Git Synchronization Card */}
-            <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col shadow-sm">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-700/70">
-                <div className="flex items-center gap-2">
-                  <Github className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest text-left">Workspace Sync</h3>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${
-                    isGithubConnected 
-                      ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                      : "text-amber-400 border-amber-500/30 bg-amber-500/10"
-                  }`}>
-                    {isGithubConnected ? "● SECURELY LINKED" : "● DISCONNECTED"}
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-slate-350 leading-normal text-left mb-4">
-                Enables secure, zero-touch synchronization to programmatically merge, pull, and update local workspace source files from your remote private GitHub repository.
-              </p>
-
-              <div className="space-y-4">
-                {/* Dynamic Connection / Action Button */}
-                <div className="p-4 bg-slate-900/90 border border-slate-700/70 rounded-xl space-y-3">
-                  <div className="flex flex-col text-left mb-1">
-                    <span className="text-xs font-bold text-slate-200">
-                      GitHub Integration Action
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {isGithubConnected 
-                        ? "Authentication active. Let's pull down repository updates safely with simple-git." 
-                        : "Connect a secure OAuth session token first to initiate automatic pulling."}
-                    </span>
-                  </div>
-
-                  {!isGithubConnected ? (
-                    /* STATE A: Unlinked - "Link to GitHub" which redirects window */
-                    <a
-                      href={`https://github.com/login/oauth/authorize?client_id=${githubClientId || "Ov231i1UE0j2FgaM9tP3"}&redirect_uri=${encodeURIComponent(window.location.origin + '/api/auth/github/callback')}&scope=repo`}
-                      className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm"
-                    >
-                      <Github className="w-3.5 h-3.5" />
-                      <span>Link to GitHub</span>
-                    </a>
-                  ) : (
-                    /* STATE B: Linked - "Sync with GitHub" with loading feedback */
-                    <div className="space-y-3">
-                      <button
-                        type="button"
-                        disabled={isSyncingFromGithub}
-                        onClick={handleSyncFromGithub}
-                        className={`w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                          isSyncingFromGithub
-                            ? "bg-slate-900 border border-slate-700 text-slate-400 cursor-not-allowed"
-                            : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
-                        }`}
-                      >
-                        {isSyncingFromGithub ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-white/80" />
-                            <span>Syncing...</span>
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            <span>Sync with GitHub</span>
-                          </>
-                        )}
-                      </button>
-
-                      <div className="flex justify-end pt-1">
-                        <button
-                          type="button"
-                          onClick={handleGithubLogout}
-                          className="text-[10px] text-slate-400 hover:text-rose-400 transition-colors font-semibold cursor-pointer"
-                        >
-                          Clear Session Connection
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {!isGithubConnected && (
-                    <div className="p-3 border border-indigo-500/20 bg-indigo-500/10 rounded-lg text-[10px] text-slate-300 leading-relaxed text-left space-y-2 pt-1.5 mt-2">
-                      <p>
-                        💡 <strong>Dev Environment Setup Instructions:</strong>
-                      </p>
-                      <p>
-                        Append the following environment variables to your local machine's <code>.env</code> file:
-                      </p>
-                      <pre className="p-2 rounded bg-slate-950 border border-slate-800 text-[10px] text-indigo-300 font-mono leading-relaxed select-all">
-                        GITHUB_REPO_OWNER=Faarhan01{"\n"}
-                        GITHUB_REPO_NAME=Scalarai
-                      </pre>
-                      <p className="text-[9px] text-slate-400 italic">
-                        The OAuth Application callback routes to: <code>http://localhost:3000/api/auth/github/callback</code>.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Git Synchronization Result Details */}
-                {isGithubConnected && githubSyncResult && (
-                  <div className={`p-4 border rounded-xl text-left space-y-2 text-xs font-sans ${
-                    githubSyncResult.success 
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                      : "border-rose-500/30 bg-rose-500/10 text-rose-300"
-                  }`}>
-                    <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
-                      {githubSyncResult.success ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Synchronization Successful</span>
-                        </>
-                      ) : (
-                        <>
-                          <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-                          <span>Synchronization Failed</span>
-                        </>
-                      )}
-                    </div>
-                    <p className="text-slate-200 leading-relaxed font-sans">{githubSyncResult.message}</p>
-                    {githubSyncResult.success && githubSyncResult.branch && (
-                      <div className="pt-2 border-t border-slate-700/50 mt-2 text-[10.5px] font-mono space-y-1.5 text-slate-300">
-                        <div><strong>Active Branch:</strong> <span className="text-white">{githubSyncResult.branch}</span></div>
-                        {githubSyncResult.files && githubSyncResult.files.length > 0 && (
-                          <div className="mt-2 font-sans">
-                            <span className="font-semibold text-slate-200 block text-[9.5px] uppercase tracking-wider mb-1">Modified Files:</span>
-                            <ul className="list-disc pl-4 space-y-0.5 text-slate-300 font-mono text-[10px]">
-                              {githubSyncResult.files.slice(0, 10).map((f) => (
-                                <li key={f}>{f}</li>
-                              ))}
-                              {githubSyncResult.files.length > 10 && (
-                                <li className="list-none text-slate-400 text-[9px] mt-1">And {githubSyncResult.files.length - 10} more files...</li>
-                              )}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
+        </div>
         )}
 
         {/* HOME BASE TAB PAGE */}

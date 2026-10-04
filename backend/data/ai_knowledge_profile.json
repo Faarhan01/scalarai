@@ -1,10 +1,14 @@
 {
-  "totalObservations": 1797,
+  "totalObservations": 2797,
   "globalAverageSpeed": 0,
   "peakVelocityRegistered": 0,
   "timeOfDayPatterns": {
     "10": {
-      "count": 309,
+      "count": 785,
+      "avgSpeed": 0
+    },
+    "11": {
+      "count": 524,
       "avgSpeed": 0
     },
     "09": {
@@ -12,5 +16,5 @@
       "avgSpeed": 0
     }
   },
-  "lastUpdated": "2026-10-04T08:06:45.798Z"
+  "lastUpdated": "2026-10-04T09:30:45.420Z"
 }

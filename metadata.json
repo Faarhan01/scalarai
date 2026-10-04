@@ -1,6 +1,0 @@
-{
-  "name": "Step Index MT5 EA Scalper",
-  "description": "Full-stack control center and downloading dashboard for a Step Index MT5 Scalping Expert Advisor, featuring real-time connection indicators, strategy toggles, and remote execution controls.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
