@@ -327,9 +327,13 @@ const TOOLS: McpTool[] = [
 ];
 
 function isReadOnlySql(sql: string): boolean {
-  const trimmed = sql.trim().toUpperCase();
-  const forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "REPLACE", "PRAGMA"];
-  return !forbidden.some(keyword => trimmed.startsWith(keyword));
+  const normalized = sql.trim().replace(/\s+/g, " ").toUpperCase();
+  if (!normalized.startsWith("SELECT")) return false;
+  if (normalized.includes(";")) return false;
+  if (normalized.includes("--")) return false;
+  if (normalized.includes("/*")) return false;
+  const forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "REPLACE", "PRAGMA", "ATTACH", "DETACH", "VACUUM", "INDEX", "TRIGGER", "VIEW", "TRANSACTION", "SAVEPOINT", "RELEASE", "COMMIT", "ROLLBACK"];
+  return !forbidden.some(keyword => normalized.includes(keyword));
 }
 
 export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {

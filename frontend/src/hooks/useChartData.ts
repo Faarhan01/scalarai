@@ -35,14 +35,18 @@ export function useChartData(
           }));
 
     const displayCandles = candleData.slice(-maxVisibleCandles);
-    const minPrice =
-      displayCandles.length > 0
-        ? Math.min(...displayCandles.map((c) => c.low)) - 0.2
-        : 1245.0;
-    const maxPrice =
-      displayCandles.length > 0
-        ? Math.max(...displayCandles.map((c) => c.high)) + 0.2
-        : 1255.0;
+    let minPrice = 1245.0;
+    let maxPrice = 1255.0;
+    if (displayCandles.length > 0) {
+      minPrice = displayCandles[0].low;
+      maxPrice = displayCandles[0].high;
+      for (let i = 1; i < displayCandles.length; i++) {
+        if (displayCandles[i].low < minPrice) minPrice = displayCandles[i].low;
+        if (displayCandles[i].high > maxPrice) maxPrice = displayCandles[i].high;
+      }
+      minPrice -= 0.2;
+      maxPrice += 0.2;
+    }
     const priceRange = maxPrice - minPrice || 1.0;
 
     return { candleData, displayCandles, minPrice, maxPrice, priceRange };

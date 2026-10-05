@@ -318,11 +318,13 @@ export class ScalarAiDb {
   }
 
   rawQuery(sql: string, params: any[] = []): any[] {
+    const normalized = sql.trim().replace(/\s+/g, " ").toUpperCase();
+    if (!normalized.startsWith("SELECT")) return [];
+    if (normalized.includes(";")) return [];
+    if (normalized.includes("--")) return [];
+    if (normalized.includes("/*")) return [];
     const stmt = this.db.prepare(sql);
-    if (sql.trim().toUpperCase().startsWith("SELECT")) {
-      return stmt.all(...params);
-    }
-    return [];
+    return stmt.all(...params);
   }
 
   // Maintenance

@@ -577,8 +577,10 @@ export default function App() {
     const jsBridgeScript = `/**
  * Step Index AI Scalper - Free MT5 Node.js Bridge Client
  * Auto-generated with target origin: ${origin}
+ * Uses Node.js built-in https module - no external dependencies required.
  */
-const axios = require('axios');
+const https = require('https');
+const http = require('http');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -590,10 +592,23 @@ console.log("=================================================================")
 const SERVER_URL = "${origin}";
 let MT5_TERMINAL_PATH = "${config.mt5Path || "terminal64.exe"}";
 
+function request(url) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http;
+    client.get(url, (res) => {
+      const chunks = [];
+      res.on('data', (d) => chunks.push(d));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString()));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
 async function pollTrades() {
   try {
-    const response = await axios.get(\`\${SERVER_URL}/poll\`, { timeout: 8000 });
-    const trades = response.data;
+    const pollUrl = SERVER_URL.endsWith('/') ? SERVER_URL + 'poll' : SERVER_URL + '/poll';
+    const response = await request(pollUrl);
+    const trades = JSON.parse(response);
     if (Array.isArray(trades) && trades.length > 0) {
       console.log(\`[\${new Date().toLocaleTimeString()}] Received \${trades.length} signal(s):\`, trades);
       for (const trade of trades) {
@@ -622,9 +637,6 @@ console.log("Polling daemon started on " + SERVER_URL + " (Ctrl+C to stop)...");
   "name": "mt5-bridge-client",
   "version": "1.0.0",
   "main": "mt5_bridge.js",
-  "dependencies": {
-    "axios": "^1.7.0"
-  },
   "scripts": {
     "start": "node mt5_bridge.js"
   }

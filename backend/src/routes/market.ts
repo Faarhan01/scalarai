@@ -16,6 +16,10 @@ export function registerMarketRoutes(
         return res.status(400).json({ error: "Invalid price" });
       }
 
+      if (body.symbol !== undefined && typeof body.symbol !== "string") {
+        return res.status(400).json({ error: "Invalid symbol" });
+      }
+
       updateMarket(body);
       const currentConfig = getConfig ? getConfig() : null;
 

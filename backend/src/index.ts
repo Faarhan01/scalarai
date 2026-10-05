@@ -288,8 +288,8 @@ function updateMarket(data: any) {
   // Persist tick to SQLite
   try {
     scalarAiDb.insertTick(tickRecord);
-  } catch (err) {
-    // Non-blocking for high-frequency streaming
+  } catch (err: any) {
+    console.error("Failed to persist tick:", err.message || err);
   }
 
   // Incremental online speed calibration study
@@ -732,7 +732,7 @@ async function startServer() {
     candleStream: getSymbolState(activeSymbol).ticks,
     averageVelocity: aiKnowledgeBase.globalAverageSpeed,
   }));
-  registerMcpRoute(app, mcpContext, process.env.SCALARAI_MCP_API_KEY || "+Z45RyDNhRZ5np8QWW6yrwfbKcnd5KNGzhzHU4nP8K");
+  registerMcpRoute(app, mcpContext, process.env.SCALARAI_MCP_API_KEY);
   registerStatusRoute(app, getFullStatusPayload, (symbol: string) => { activeSymbol = symbol; }, getAndClearPendingOrders);
   registerHealthRoutes(app);
   registerStrategyRoutes(app);

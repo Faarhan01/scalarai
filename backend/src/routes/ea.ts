@@ -46,7 +46,7 @@ export function registerEaRoutes(
     try {
       const body = req.body || {};
       const account = body.account;
-      if (!account) {
+      if (!account || typeof account !== "string" || account.trim() === "") {
         return res.status(400).json({ error: "Missing account info" });
       }
 

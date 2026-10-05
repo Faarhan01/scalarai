@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { isValidStrategyMode, isValidTradingMode } from "../utils/validators";
 
 export function registerSettingsRoutes(
   app: any,
@@ -19,7 +20,35 @@ export function registerSettingsRoutes(
 
   app.post("/api/settings", (req: Request, res: Response) => {
     try {
-      updateSettings(req.body);
+      const body = req.body || {};
+      if (body.selectedStrategy !== undefined && !isValidStrategyMode(body.selectedStrategy)) {
+        return res.status(400).json({ error: "Invalid selectedStrategy" });
+      }
+      if (body.tradingMode !== undefined && !isValidTradingMode(body.tradingMode)) {
+        return res.status(400).json({ error: "Invalid tradingMode" });
+      }
+      if (body.lotSize !== undefined && (typeof body.lotSize !== "number" || body.lotSize <= 0)) {
+        return res.status(400).json({ error: "Invalid lotSize" });
+      }
+      if (body.takeProfitPoints !== undefined && (typeof body.takeProfitPoints !== "number" || body.takeProfitPoints <= 0)) {
+        return res.status(400).json({ error: "Invalid takeProfitPoints" });
+      }
+      if (body.stopLossPoints !== undefined && (typeof body.stopLossPoints !== "number" || body.stopLossPoints <= 0)) {
+        return res.status(400).json({ error: "Invalid stopLossPoints" });
+      }
+      if (body.trailingStopPoints !== undefined && (typeof body.trailingStopPoints !== "number" || body.trailingStopPoints < 0)) {
+        return res.status(400).json({ error: "Invalid trailingStopPoints" });
+      }
+      if (body.maxTrades !== undefined && (!Number.isInteger(body.maxTrades) || body.maxTrades <= 0)) {
+        return res.status(400).json({ error: "Invalid maxTrades" });
+      }
+      if (body.useTrailingStop !== undefined && typeof body.useTrailingStop !== "boolean") {
+        return res.status(400).json({ error: "Invalid useTrailingStop" });
+      }
+      if (body.isAiModeEnabled !== undefined && typeof body.isAiModeEnabled !== "boolean") {
+        return res.status(400).json({ error: "Invalid isAiModeEnabled" });
+      }
+      updateSettings(body);
       res.json({ status: "ok", config: getSettings() });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update settings" });
