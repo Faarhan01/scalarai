@@ -3,6 +3,7 @@ export { Button } from "./ui/Button";
 export { Badge } from "./ui/Badge";
 export { Card } from "./ui/Card";
 export { Modal } from "./ui/Modal";
+export { ErrorBanner } from "./ui/ErrorBanner";
 
 // Layout
 export { Header } from "./layout/Header";

@@ -32,6 +32,7 @@ import {
   DownloadsCenter,
   LogsViewer,
   TabBar,
+  ErrorBanner,
 } from "./components";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useChartData } from "./hooks/useChartData";
@@ -438,28 +439,7 @@ export default function App() {
 
       {/* 3. Main Dashboard Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {errors.length > 0 && (
-          <div className="space-y-2">
-            {errors.map((error) => (
-              <div
-                key={error.id}
-                className="bg-red-900/40 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-xs flex items-center justify-between gap-3"
-              >
-                <span className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-400" />
-                  {error.message}
-                </span>
-                <button
-                  onClick={() => clearError(error.id)}
-                  className="text-red-300 hover:text-white transition-colors cursor-pointer"
-                  aria-label="Dismiss error"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <ErrorBanner errors={errors} onDismiss={clearError} />
         {/* Navigation Tabs Bar */}
         <TabBar
           tabs={[
