@@ -35,6 +35,8 @@ import {
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useChartData } from "./hooks/useChartData";
 import { useDownloadBridge } from "./hooks/useDownloadBridge";
+import { useAiStudyFeed } from "./hooks/useAiStudyFeed";
+import { useTradingControls } from "./hooks/useTradingControls";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
