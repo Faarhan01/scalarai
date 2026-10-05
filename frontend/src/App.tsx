@@ -356,26 +356,15 @@ export default function App() {
   }, []);
 
   // Poll AI study feed periodically
+  const aiStudy = useAiStudyFeed(sendWsMessage);
+
   useEffect(() => {
-    const pollAi = async () => {
-      try {
-        const res = await fetch("/api/ai-study-feed");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status) setAiStudyStatus(data.status);
-          if (data.message) setAiStudyMessage(data.message);
-          if (data.aiKnowledgeBase) setAiKnowledgeBase(data.aiKnowledgeBase);
-          if (data.averageVelocity !== undefined) setAverageVelocity(data.averageVelocity);
-          if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
-        }
-      } catch {
-        // Quiet
-      }
-    };
-    pollAi();
-    const interval = setInterval(pollAi, 4000);
-    return () => clearInterval(interval);
-  }, []);
+    if (aiStudy.status) setAiStudyStatus(aiStudy.status);
+    if (aiStudy.message) setAiStudyMessage(aiStudy.message);
+    if (aiStudy.knowledgeBase) setAiKnowledgeBase(aiStudy.knowledgeBase);
+    if (aiStudy.averageVelocity !== null) setAverageVelocity(aiStudy.averageVelocity);
+    if (aiStudy.strategy) setAiSynthesizedStrategy(aiStudy.strategy);
+  }, [aiStudy]);
 
   // Sync inputs with config
   useEffect(() => {
@@ -461,61 +450,24 @@ export default function App() {
     }
   };
 
-  // Toggle Automated Trading Execution
+  const tradingControls = useTradingControls();
+
   const toggleTradingExecution = async () => {
     if (aiStudyStatus !== "optimized" && aiStudyStatus !== "active") {
       console.warn("Automated trade execution blocked: AI Speed dynamic baseline study is currently pending.");
       return;
     }
-    const targetState = !config.isActive;
-    setConfig((prev) => ({ ...prev, isActive: targetState }));
-
-    const sent = sendWsMessage({ type: "toggle_trade" });
-    if (!sent) {
-      try {
-        const response = await fetch("/api/toggle-trade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isActive: targetState }),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.config) setConfig((prev) => ({ ...prev, ...data.config }));
-        }
-      } catch (e) {
-        console.error("Error attempting to toggle remote executor state", e);
-        setConfig((prev) => ({ ...prev, isActive: !targetState }));
-      }
-    }
+    await tradingControls.toggleTradingExecution(sendWsMessage, config, fetchStatus);
   };
 
-  // Close All Positions
   const closeAllPositions = async () => {
-    const sent = sendWsMessage({ type: "close_all" });
-    if (!sent) {
-      try {
-        await fetch("/api/reset-stats", { method: "POST" });
-        fetchStatus();
-      } catch (e) {
-        console.error("Error closing positions:", e);
-      }
-    }
+    await tradingControls.closeAllPositions(sendWsMessage, fetchStatus);
   };
 
-  // Reset Metrics
   const resetStats = async () => {
-    const sent = sendWsMessage({ type: "reset_stats" });
-    if (!sent) {
-      try {
-        await fetch("/api/reset-stats", { method: "POST" });
-        fetchStatus();
-      } catch (e) {
-        console.error("Failed to reset metrics:", e);
-      }
-    }
+    await tradingControls.resetStats(sendWsMessage, fetchStatus);
   };
 
-  // Switch Symbol
   const switchSymbol = async (symbol: string) => {
     try {
       const response = await fetch("/api/status/switch-symbol", {
