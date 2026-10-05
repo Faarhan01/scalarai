@@ -1,8 +1,11 @@
 import { Request, Response } from "express";
 import { isValidTradeType } from "../utils/validators";
+import { requireApiKey } from "../middleware/auth";
 
-export function registerTradeRoutes(app: any, toggleTrade: (isActive: boolean) => void, resetStats: () => void) {
-  app.post("/api/toggle-trade", (req: Request, res: Response) => {
+export function registerTradeRoutes(app: any, toggleTrade: (isActive: boolean) => void, resetStats: () => void, apiKey?: string) {
+  const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
+
+  app.post("/api/toggle-trade", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
     try {
       const { isActive } = req.body;
       if (typeof isActive !== "boolean") {
@@ -15,7 +18,7 @@ export function registerTradeRoutes(app: any, toggleTrade: (isActive: boolean) =
     }
   });
 
-  app.post("/api/reset-stats", (req: Request, res: Response) => {
+  app.post("/api/reset-stats", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
     try {
       resetStats();
       res.json({ status: "ok" });

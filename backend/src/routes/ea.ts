@@ -3,14 +3,18 @@ import path from "path";
 import fs from "fs";
 import { generateMql5Code } from "../services/ea-generator";
 import { TradeConfig } from "../types";
+import { requireApiKey } from "../middleware/auth";
 
 export function registerEaRoutes(
   app: any,
   getStatus: () => any,
   getConfig: () => TradeConfig,
   onTick: (data: any) => void,
-  getPendingEaCommand?: () => { action: string; lot: number; sl: number; tp: number } | null
+  getPendingEaCommand?: () => { action: string; lot: number; sl: number; tp: number } | null,
+  apiKey?: string
 ) {
+  const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
+
   app.get("/api/ea/download", (req: Request, res: Response) => {
     try {
       const queryUrl = (req.query.url as string)?.trim();
@@ -42,7 +46,7 @@ export function registerEaRoutes(
     }
   });
 
-  app.post("/api/ea/tick", (req: Request, res: Response) => {
+  app.post("/api/ea/tick", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const account = body.account;

@@ -23,12 +23,13 @@ import { getDefaultTradeConfig, getDefaultAiKnowledgeBase, getDefaultAiSynthesiz
 import { StrategyMode, TradeRecord, AiSynthesizedStrategy, EAConnectionDetails, Tick, SystemLog } from "./types";
 import { scalarAiDb } from "./db";
 import { evaluateStrategy, buildContext, evaluateStrategyBacktest } from "./services/strategy";
+import { createSymbolStates, getSymbolState, updateMarket as updateMarketState, aggregateTickIntoCandle } from "./services/market-ingestion";
 
 dotenv.config();
-process.env.PORT = "3000";
+process.env.PORT = process.env.PORT || "3000";
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 app.use(corsMiddleware);
@@ -39,30 +40,10 @@ app.use(errorMiddleware);
 let tradeConfig = getDefaultTradeConfig();
 let pendingBridgeOrders: any[] = [];
 let pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null = null;
-const symbolStates = new Map<string, {
-  ticks: any[];
-  candles: any[];
-  telemetry: any[];
-  connection: any;
-  currentPrice: number;
-  lastDirection: "up" | "down" | "flat";
-  tickCount: number;
-}>();
-let activeSymbol = "Step Index";
+const symbolStates = createSymbolStates("Step Index");
 
 function getSymbolState(symbol: string) {
-  if (!symbolStates.has(symbol)) {
-    symbolStates.set(symbol, {
-      ticks: [],
-      candles: [],
-      telemetry: [],
-      connection: { isEaConnected: false, clientIp: null, lastPing: null, broker: null, accountNumber: null, balance: null, symbol, symbolDigits: null, symbolTickSize: null, symbolDescription: null },
-      currentPrice: 1250.0,
-      lastDirection: "flat",
-      tickCount: 0,
-    });
-  }
-  return symbolStates.get(symbol)!;
+  return getSymbolState(symbolStates, symbol);
 }
 
 const webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean } = {
@@ -75,8 +56,6 @@ const webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastT
 let systemLogs: SystemLog[] = [];
 let tradesList: TradeRecord[] = [];
 let nextTicket = 837201;
-let lastEvaluationTime = 0;
-let lastCandleTime = "";
 let latestBuyLockedFromEa = false;
 let latestSellLockedFromEa = false;
 let aiKnowledgeBase = getDefaultAiKnowledgeBase();
@@ -132,11 +111,14 @@ function addLog(source: "SERVER" | "EA" | "AI", level: "INFO" | "SUCCESS" | "WAR
   persistLog(newLog);
 }
 
-function broadcastToDashboards(payload: any) {
+function broadcastToDashboards(payload: unknown) {
   const message = JSON.stringify(payload);
   webDashboardClients.forEach((client: WebSocket) => {
     if (client.readyState === 1) {
-      try { client.send(message); } catch {}
+      try { client.send(message); } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`Dashboard broadcast failed: ${reason}`);
+      }
     }
   });
 }
@@ -154,7 +136,7 @@ function getFullStatusPayload() {
   const totalProfit = closedPositions.reduce((sum: number, t: any) => sum + t.profit, 0);
   const winRate = closedPositions.length > 0 ? (wins / closedPositions.length) * 100 : 0;
   const openPositions = tradesList.filter((t: any) => t.status === "OPEN");
-  const activeState = getSymbolState(activeSymbol);
+  const activeState = getSymbolState(symbolStates, activeSymbol);
 
   return {
     config: tradeConfig,
@@ -167,7 +149,7 @@ function getFullStatusPayload() {
     status: activeState.connection.isEaConnected ? "active" : "waiting",
     currentPrice: activeState.currentPrice,
     activeSymbol,
-    symbolStates: Array.from(symbolStates.entries()).map(([symbol, state]) => ({
+    symbolStates: Array.from(symbolStates.map.entries()).map(([symbol, state]) => ({
       symbol,
       connection: state.connection,
       currentPrice: state.currentPrice,
@@ -190,48 +172,13 @@ function getMinuteBucket(ts: number): number {
   return Math.floor(ts / 60000);
 }
 
-function aggregateTickIntoCandle(state: any, targetPrice: number): void {
-  const now = Date.now();
-  const currentBucket = getMinuteBucket(now);
-  const candles = state.candles || [];
-
-  if (candles.length === 0) {
-    state.candles = [{
-      time: now,
-      open: targetPrice,
-      high: targetPrice,
-      low: targetPrice,
-      close: targetPrice,
-      minuteBucket: currentBucket,
-    }];
-    return;
-  }
-
-  const lastCandle = candles[candles.length - 1];
-  if (lastCandle.minuteBucket === currentBucket) {
-    lastCandle.high = Math.max(lastCandle.high, targetPrice);
-    lastCandle.low = Math.min(lastCandle.low, targetPrice);
-    lastCandle.close = targetPrice;
-  } else {
-    candles.push({
-      time: now,
-      open: targetPrice,
-      high: targetPrice,
-      low: targetPrice,
-      close: targetPrice,
-      minuteBucket: currentBucket,
-    });
-    if (candles.length > 200) candles.shift();
-  }
-}
-
 function updateMarket(data: any) {
-  const symbol = data.symbol || activeSymbol || "Step Index";
-  if (symbol !== activeSymbol) {
-    activeSymbol = symbol;
-    addLog("SERVER", "INFO", `Switched active symbol to: ${symbol}`);
+  const result = updateMarketState(symbolStates, data);
+  const state = result.symbol;
+  
+  if (result.switched) {
+    addLog("SERVER", "INFO", `Switched active symbol to: ${symbolStates.activeSymbol}`);
   }
-  const state = getSymbolState(symbol);
   
   // Validate and sanitize incoming data
   const rawPrice = data.price !== undefined ? Number(data.price) : (data.close !== undefined ? Number(data.close) : state.currentPrice);
@@ -251,46 +198,15 @@ function updateMarket(data: any) {
     }
   }
   
+  const state = result.symbol;
+  
   const numVelocity = data.velocity !== undefined ? Number(data.velocity) : 0;
   if (!isFinite(numVelocity)) return;
-  
+
   const isBuyLocked = data.buyLocked !== undefined ? Boolean(data.buyLocked) : false;
   const isSellLocked = data.sellLocked !== undefined ? Boolean(data.sellLocked) : false;
   latestBuyLockedFromEa = isBuyLocked;
   latestSellLockedFromEa = isSellLocked;
-
-  state.telemetry.push({ timestamp: now, price: targetPrice, velocity: numVelocity, buyLocked: isBuyLocked, sellLocked: isSellLocked });
-  if (state.telemetry.length > 500) state.telemetry.shift();
-
-  let direction: "up" | "down" | "flat" = "flat";
-  if (targetPrice > state.currentPrice) direction = "up";
-  else if (targetPrice < state.currentPrice) direction = "down";
-  state.currentPrice = targetPrice;
-  state.lastDirection = direction;
-
-  const tickRecord = {
-    time: Date.now(),
-    price: state.currentPrice,
-    direction,
-    open: data.open !== undefined ? Number(data.open) : state.currentPrice,
-    high: data.high !== undefined ? Number(data.high) : state.currentPrice,
-    low: data.low !== undefined ? Number(data.low) : state.currentPrice,
-    close: Number(state.currentPrice),
-    velocity: numVelocity,
-    buyLocked: isBuyLocked,
-    sellLocked: isSellLocked,
-    spread: data.spread !== undefined ? Number(data.spread) : null,
-    session: data.session || null,
-  };
-  state.ticks.push(tickRecord);
-  if (state.ticks.length > 150) state.ticks.shift();
-
-  // Persist tick to SQLite
-  try {
-    scalarAiDb.insertTick(tickRecord);
-  } catch (err: any) {
-    console.error("Failed to persist tick:", err.message || err);
-  }
 
   // Incremental online speed calibration study
   const absVelocity = Math.abs(numVelocity);
@@ -304,12 +220,13 @@ function updateMarket(data: any) {
     persistAiKnowledge();
   }
 
-  aggregateTickIntoCandle(state, targetPrice);
+  aggregateTickIntoCandle(getSymbolState(symbolStates, activeSymbol), targetPrice);
 
-  if (!state.connection.isEaConnected) {
+  if (!getSymbolState(symbolStates, activeSymbol).connection.isEaConnected) {
     addLog("EA", "SUCCESS", `${symbol} MT5 Expert Advisor linked! Real-time velocity baseline metric: ${numVelocity.toFixed(4)} pt/s.`);
   }
 
+  const state = getSymbolState(symbolStates, activeSymbol);
   state.connection.isEaConnected = true;
   state.connection.clientIp = "127.0.0.1";
   state.connection.lastPing = new Date().toISOString();
@@ -347,12 +264,12 @@ function updateMarket(data: any) {
 }
 
 function getClosePrices() {
-  const state = getSymbolState(activeSymbol);
+  const state = getSymbolState(symbolStates, activeSymbol);
   return state.ticks.map(t => (t.close !== undefined ? t.close : t.price));
 }
 
 function calculateEMA(prices: number[], period: number): number {
-  const state = getSymbolState(activeSymbol);
+  const state = getSymbolState(symbolStates, activeSymbol);
   if (prices.length === 0) return state.currentPrice;
   if (prices.length < period) return prices.reduce((a, b) => a + b, 0) / prices.length;
   let ema = prices[0];
@@ -385,7 +302,7 @@ function calculateRSI(prices: number[], period: number = 10): number {
 }
 
 function calculateATR(period: number = 10): number {
-  const state = getSymbolState(activeSymbol);
+  const state = getSymbolState(symbolStates, activeSymbol);
   if (state.ticks.length < 2) return 0.5;
   const trs: number[] = [];
   for (let i = 1; i < state.ticks.length; i++) {
@@ -403,7 +320,7 @@ function calculateATR(period: number = 10): number {
 }
 
 function calculateBollingerBands(prices: number[], period: number = 15, numDevs: number = 2): { upper: number; middle: number; lower: number } {
-  const state = getSymbolState(activeSymbol);
+  const state = getSymbolState(symbolStates, activeSymbol);
   if (prices.length === 0) return { upper: state.currentPrice, middle: state.currentPrice, lower: state.currentPrice };
   const slice = prices.slice(-period);
   const middle = slice.reduce((sum, p) => sum + p, 0) / slice.length;
@@ -415,13 +332,13 @@ function calculateBollingerBands(prices: number[], period: number = 15, numDevs:
 async function evaluateSimulatedStrategy() {
   const MIN_SAFETY_CALIBRATION_THRESHOLD = 20;
   if (aiKnowledgeBase.totalObservations < MIN_SAFETY_CALIBRATION_THRESHOLD) return;
-  if (getSymbolState(activeSymbol).ticks.length < 5) return;
+  if (getSymbolState(symbolStates, activeSymbol).ticks.length < 5) return;
 
-  const ticks = getSymbolState(activeSymbol).ticks;
+  const ticks = getSymbolState(symbolStates, activeSymbol).ticks;
   const openTrades = tradesList.filter((t: any) => t.status === "OPEN");
 
   openTrades.forEach((trade: any) => {
-    let priceDiff = trade.type === "BUY" ? getSymbolState(activeSymbol).currentPrice - trade.entryPrice : trade.entryPrice - getSymbolState(activeSymbol).currentPrice;
+    let priceDiff = trade.type === "BUY" ? getSymbolState(symbolStates, activeSymbol).currentPrice - trade.entryPrice : trade.entryPrice - getSymbolState(symbolStates, activeSymbol).currentPrice;
     const pointsDiff = Math.abs(priceDiff) * 100;
     if (pointsDiff >= tradeConfig.takeProfitPoints && priceDiff > 0) closeSimulatedPosition(trade, `TAKE PROFIT reached on ${activeSymbol} limit (+${pointsDiff.toFixed(1)} pts).`);
     else if (pointsDiff >= tradeConfig.stopLossPoints && priceDiff < 0) closeSimulatedPosition(trade, `STOP LOSS reached on ${activeSymbol} risk boundary (-${pointsDiff.toFixed(1)} pts).`);
@@ -480,12 +397,12 @@ async function openSimulatedPosition(type: "BUY" | "SELL", reason: string) {
 
   const slApplied = Math.round(Number(tradeConfig.stopLossPoints || 0) * (aiSynthesizedStrategy.rules.slPointsMultiplier || 1.0));
   const tpApplied = Math.round(Number(tradeConfig.takeProfitPoints || 0) * (aiSynthesizedStrategy.rules.tpPointsMultiplier || 1.0));
-  const tId = Math.random().toString(36).substring(2, 9);
+  const tId = crypto.randomUUID();
   const newTrade: TradeRecord = {
     id: tId,
     ticket: nextTicket++,
     type,
-    entryPrice: getSymbolState(activeSymbol).currentPrice,
+    entryPrice: getSymbolState(symbolStates, activeSymbol).currentPrice,
     lotSize: tradeConfig.lotSize,
     profit: 0,
     status: "OPEN",
@@ -494,13 +411,16 @@ async function openSimulatedPosition(type: "BUY" | "SELL", reason: string) {
     reason,
   };
   tradesList.unshift(newTrade);
-  addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} - ${type} at ${getSymbolState(activeSymbol).currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
+  addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} - ${type} at ${getSymbolState(symbolStates, activeSymbol).currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
   const orderPayload = { action: (type || "BUY").toUpperCase(), symbol: activeSymbol, volume: Number(tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
   pendingBridgeOrders.push({ ...orderPayload, id: newTrade.id, ticket: newTrade.ticket, timestamp: Date.now() });
   pendingEaCommand = { action: (type || "BUY").toUpperCase(), lot: Number(tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
   mt5BridgeClients.forEach((client: WebSocket) => {
     if (client.readyState === 1) {
-      try { client.send(JSON.stringify(orderPayload)); } catch {}
+      try { client.send(JSON.stringify(orderPayload)); } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`Bridge order broadcast failed: ${reason}`);
+      }
     }
   });
   broadcastTradesUpdate();
@@ -508,9 +428,9 @@ async function openSimulatedPosition(type: "BUY" | "SELL", reason: string) {
 
 function closeSimulatedPosition(trade: TradeRecord, reason: string) {
   trade.status = "CLOSED";
-  trade.closePrice = getSymbolState(activeSymbol).currentPrice;
+  trade.closePrice = getSymbolState(symbolStates, activeSymbol).currentPrice;
   trade.closeTime = new Date().toLocaleTimeString();
-  const profitFactor = trade.type === "BUY" ? getSymbolState(activeSymbol).currentPrice - trade.entryPrice : trade.entryPrice - getSymbolState(activeSymbol).currentPrice;
+  const profitFactor = trade.type === "BUY" ? getSymbolState(symbolStates, activeSymbol).currentPrice - trade.entryPrice : trade.entryPrice - getSymbolState(symbolStates, activeSymbol).currentPrice;
   const finalProfit = Number((profitFactor * 10.0 * trade.lotSize).toFixed(2));
   trade.profit = finalProfit;
   trade.reason = reason;
@@ -520,7 +440,10 @@ function closeSimulatedPosition(trade: TradeRecord, reason: string) {
   pendingEaCommand = { action: "CLOSE_ALL", lot: trade.lotSize, sl: 0, tp: 0 };
   mt5BridgeClients.forEach((client: WebSocket) => {
     if (client.readyState === 1) {
-      try { client.send(JSON.stringify(closePayload)); } catch {}
+      try { client.send(JSON.stringify(closePayload)); } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`Bridge close broadcast failed: ${reason}`);
+      }
     }
   });
   broadcastTradesUpdate();
@@ -550,7 +473,7 @@ function loadAiKnowledgeBase() {
 
 function runBackgroundAnalysisWorker() {
   try {
-    const symbolTelemetry = getSymbolState(activeSymbol).telemetry;
+    const symbolTelemetry = getSymbolState(symbolStates, activeSymbol).telemetry;
     if (symbolTelemetry.length <= lastProcessedTelemetryIndex) return;
     const unprocessedRecords = symbolTelemetry.slice(lastProcessedTelemetryIndex);
     lastProcessedTelemetryIndex = symbolTelemetry.length;
@@ -655,11 +578,11 @@ function resetStats() {
 
 const mcpContext: McpContext = {
   getStatus: () => getFullStatusPayload(),
-  getAiStudyFeed: async () => ({ status: "calibrating", message: "AI is calibrating...", count: 0, aiKnowledgeBase, aiSynthesizedStrategy, candleStream: getSymbolState(activeSymbol).ticks, averageVelocity: 0 }),
+  getAiStudyFeed: async () => ({ status: "calibrating", message: "AI is calibrating...", count: 0, aiKnowledgeBase, aiSynthesizedStrategy, candleStream: getSymbolState(symbolStates, activeSymbol).ticks, averageVelocity: 0 }),
   getTrades: () => tradesList,
   getLogs: () => systemLogs,
   getConfig: () => tradeConfig,
-  getConnection: () => getSymbolState(activeSymbol).connection,
+  getConnection: () => getSymbolState(symbolStates, activeSymbol).connection,
   getAiStrategy: () => aiSynthesizedStrategy,
   getAiKnowledgeBase: () => aiKnowledgeBase,
   analyzeMarket,
@@ -698,8 +621,8 @@ async function startServer() {
     return cmd;
   };
 
-  registerEaRoutes(app, getFullStatusPayload, () => tradeConfig, updateMarket, getPendingEaCommand);
-  registerMarketRoutes(app, updateMarket, () => tradeConfig);
+  registerEaRoutes(app, getFullStatusPayload, () => tradeConfig, updateMarket, getPendingEaCommand, process.env.SCALARAI_MCP_API_KEY);
+  registerMarketRoutes(app, updateMarket, () => tradeConfig, process.env.SCALARAI_MCP_API_KEY);
   registerSettingsRoutes(
     app,
     updateSettings,
@@ -720,20 +643,21 @@ async function startServer() {
       webRequestTest.triggerTest = false;
       broadcastToDashboards({ type: "webrequest_test", testState: webRequestTest });
       addLog("SERVER", report.status === "success" ? "SUCCESS" : "WARNING", `WebRequest verification report: ${report.status.toUpperCase()} - ${report.details}`);
-    }
+    },
+    process.env.SCALARAI_MCP_API_KEY
   );
-  registerTradeRoutes(app, toggleTrading, resetStats);
+  registerTradeRoutes(app, toggleTrading, resetStats, process.env.SCALARAI_MCP_API_KEY);
   registerAiRoutes(app, () => ({
     status: aiKnowledgeBase.totalObservations >= 20 ? "optimized" : "calibrating",
     message: aiKnowledgeBase.totalObservations >= 20 ? "Quantitative baseline calibrated." : "AI is analyzing market speed baseline... Awaiting sufficient expert data stream from MetaTrader 5 terminal.",
     count: aiKnowledgeBase.totalObservations,
     aiKnowledgeBase,
     aiSynthesizedStrategy,
-    candleStream: getSymbolState(activeSymbol).ticks,
+    candleStream: getSymbolState(symbolStates, activeSymbol).ticks,
     averageVelocity: aiKnowledgeBase.globalAverageSpeed,
   }));
   registerMcpRoute(app, mcpContext, process.env.SCALARAI_MCP_API_KEY);
-  registerStatusRoute(app, getFullStatusPayload, (symbol: string) => { activeSymbol = symbol; }, getAndClearPendingOrders);
+  registerStatusRoute(app, getFullStatusPayload, (symbol: string) => { activeSymbol = symbol; }, getAndClearPendingOrders, process.env.SCALARAI_MCP_API_KEY);
   registerHealthRoutes(app);
   registerStrategyRoutes(app);
 

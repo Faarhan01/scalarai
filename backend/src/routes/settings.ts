@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { isValidStrategyMode, isValidTradingMode } from "../utils/validators";
+import { requireApiKey } from "../middleware/auth";
 
 export function registerSettingsRoutes(
   app: any,
@@ -7,8 +8,11 @@ export function registerSettingsRoutes(
   getSettings: () => any,
   getWebRequestTest: () => { status: string; lastTested: string; error: string; details: string; triggerTest: boolean },
   triggerTest: () => void,
-  reportTest: (report: { status: string; error?: string; details?: string }) => void
+  reportTest: (report: { status: string; error?: string; details?: string }) => void,
+  apiKey?: string
 ) {
+  const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
+
   app.get("/api/settings", (req: Request, res: Response) => {
     try {
       const testState = getWebRequestTest();
@@ -18,7 +22,7 @@ export function registerSettingsRoutes(
     }
   });
 
-  app.post("/api/settings", (req: Request, res: Response) => {
+  app.post("/api/settings", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       if (body.selectedStrategy !== undefined && !isValidStrategyMode(body.selectedStrategy)) {

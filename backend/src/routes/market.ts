@@ -1,13 +1,17 @@
 import { Request, Response } from "express";
 import { scalarAiDb } from "../db";
 import { TradeConfig } from "../types";
+import { requireApiKey } from "../middleware/auth";
 
 export function registerMarketRoutes(
   app: any,
   updateMarket: (data: any) => void,
-  getConfig?: () => TradeConfig
+  getConfig?: () => TradeConfig,
+  apiKey?: string
 ) {
-  app.post("/api/update-market", async (req: Request, res: Response) => {
+  const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
+
+  app.post("/api/update-market", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const price = body.price !== undefined ? Number(body.price) : (body.close !== undefined ? Number(body.close) : null);

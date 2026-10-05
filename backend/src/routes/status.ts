@@ -1,11 +1,15 @@
 import { Request, Response } from "express";
+import { requireApiKey } from "../middleware/auth";
 
 export function registerStatusRoute(
   app: any,
   getStatus: () => any,
   switchSymbol: (symbol: string) => void,
-  getAndClearPendingOrders?: () => any[]
+  getAndClearPendingOrders?: () => any[],
+  apiKey?: string
 ) {
+  const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
+
   app.get("/api/status", (req: Request, res: Response) => {
     try {
       const status = getStatus();
@@ -15,7 +19,7 @@ export function registerStatusRoute(
     }
   });
 
-  app.post("/api/status/switch-symbol", (req: Request, res: Response) => {
+  app.post("/api/status/switch-symbol", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
     try {
       const { symbol } = req.body;
       if (!symbol || typeof symbol !== "string") {
