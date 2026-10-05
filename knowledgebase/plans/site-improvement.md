@@ -11,6 +11,21 @@ The ScalarAI trading application is partially restructured and functional:
 - Styling is entirely inline Tailwind utilities
 - Legacy JSON files still exist alongside SQLite
 
+## Completed Improvements
+
+### Backend hardening
+- Removed duplicate dead MCP `TOOLS` array in `backend/src/routes/mcp.ts`
+- Removed hardcoded `SCALARAI_MCP_API_KEY` fallback in `backend/src/index.ts`
+- Hardened `query_db` read-only SQL checks against multi-statement and comment injection
+- Added input validation to `/api/settings`, `/api/ea/tick`, `/api/update-market`, `/api/toggle-trade`
+- Made `insertTick` failures visible in logs instead of silently swallowing them
+- Removed unused duplicate indicator/strategy modules
+- Removed dead placeholder modules: `backend/src/services/ai.ts`, `backend/src/services/market.ts`, `backend/src/services/index.ts`
+- Sanitized `.env.example` GitHub OAuth placeholders
+- Replaced generated Node.js bridge dependency on `axios` with built-in `https`/`http`
+- Fixed `useChartData` large-array min/max overflow risk
+- Added `vitest` unit tests for strategy evaluation, DB repository, and MCP SQL guard
+
 ## Improvement Areas
 
 ### 1. Frontend Component Split
@@ -209,15 +224,47 @@ frontend/src/
 
 ## Priority Order
 
-| Priority | Improvement | Effort | Impact |
-|----------|-------------|--------|--------|
-| P0 | Frontend component split | High | High |
-| P0 | Dynamic symbol display | Low | High |
-| P1 | Multi-symbol UI | Medium | High |
-| P1 | Design tokens & styling | Medium | Medium |
-| P2 | Extended tick history | Medium | Medium |
-| P2 | Broader data capture | High | Medium |
-| P3 | Legacy JSON cleanup | Low | Low |
+| Priority | Improvement | Effort | Impact | Status |
+|----------|-------------|--------|--------|--------|
+| P0 | Backend validation, MCP cleanup, secrets hygiene | Medium | High | ✅ Done |
+| P0 | Frontend component split | High | High | ⏳ In progress |
+| P0 | Dynamic symbol display | Low | High | ⏳ In progress |
+| P1 | Multi-symbol UI | Medium | High | ⏳ In progress |
+| P1 | Design tokens & styling | Medium | Medium | ✅ Done |
+| P2 | Extended tick history | Medium | Medium | Pending |
+| P2 | Broader data capture | High | Medium | Pending |
+| P3 | Legacy JSON cleanup | Low | Low | Pending |
+
+## What's Left
+
+### High priority
+1. **Backend god-file refactor** — `backend/src/index.ts` still mixes state, indicators, strategy, trade execution, and route wiring. Extract at least:
+   - market ingestion / symbol state management
+   - trade execution / strategy evaluation
+   - state persistence / DB hydration
+2. **Frontend god-component refactor** — `frontend/src/App.tsx` still manages 25+ state variables and embeds bridge-download generation. Extract:
+   - `useDownloadBridge.ts`
+   - `useTradingControls.ts`
+   - shared `AppStateContext` if needed
+3. **CORS restriction** — switch from `*` to configured frontend origin
+4. **Auth on state-changing routes** — protect `/api/settings`, `/api/toggle-trade`, `/api/reset-stats`, `/api/status/switch-symbol`, etc.
+5. **`process.env.PORT` override fix** — currently forced to `"3000"`, breaking non-default deployments
+
+### Medium priority
+6. **Type safety sweep** — replace remaining `any` types in backend `McpContext`, `AiSynthesizedStrategy.rules`, frontend component props, and status/websocket payloads
+7. **Silent error handling** — convert empty `catch {}` and swallowed network failures into logged/visible errors
+8. **Client IP handling** — stop hardcoding `127.0.0.1` for EA connections; use real socket/EA-reported IP when available
+9. **`Math.random()` trade IDs** — migrate to `crypto.randomUUID()` or ULIDs
+10. **URL validation in EA generator** — sanitize `appUrl` before injecting into MQL5
+11. **Generated bridge hardening** — prefer `execFile` with array args over `exec()` with shell strings
+
+### Lower priority
+12. **Global mutable state** — wrap module-level state into a testable store/class
+13. **Hardcoded ticket seed** — derive next ticket from DB max on startup
+14. **Frontend fetch error UX** — show stale-data warnings instead of silently failing
+15. **Rate limiting / schema validation middleware** for public routes
+16. **Extended history UI** — date-range picker, CSV export, retention policy controls
+17. **Broader EA telemetry** — spread, session, indicator values, order book, margin/leverage, swap rates
 
 ## Non-Goals
 
