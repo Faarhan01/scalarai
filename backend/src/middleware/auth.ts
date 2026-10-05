@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 
-export function requireApiKey(expectedApiKey?: string) {
-  if (!expectedApiKey) return (_req: Request, _res: Response, next: NextFunction) => next();
+export function requireApiKey(expectedApiKey: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization || "";
     if (!authHeader.startsWith(`Bearer ${expectedApiKey}`)) {
