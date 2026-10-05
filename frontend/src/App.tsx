@@ -37,6 +37,7 @@ import { useChartData } from "./hooks/useChartData";
 import { useDownloadBridge } from "./hooks/useDownloadBridge";
 import { useAiStudyFeed } from "./hooks/useAiStudyFeed";
 import { useTradingControls } from "./hooks/useTradingControls";
+import { useSettings, type SettingsState } from "./hooks/useSettings";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -147,33 +148,9 @@ export default function App() {
   const [filterLogLevel, setFilterLogLevel] = useState<string>("ALL");
   const [currentNavTab, setCurrentNavTab] = useState<"home" | "risk" | "downloads" | "logs" | "settings">("home");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState(false);
   const [showEma, setShowEma] = useState<boolean>(true);
   const [showBollingerBands, setShowBollingerBands] = useState<boolean>(false);
-
-  const [paramInput, setParamInput] = useState({
-    lotSize: "0.1",
-    takeProfitPoints: "300",
-    stopLossPoints: "150",
-    trailingStopPoints: "100",
-    maxTrades: "3",
-    useTrailingStop: true,
-    mt5Path: "",
-    appEndpoint: "http://127.0.0.1:3000",
-    tradingMode: "Scalping" as "Scalping" | "Swing",
-    selectedAssets: ["Step Index"] as string[],
-    isAiModeEnabled: false,
-  });
-
-  const [webRequestStatus, setWebRequestStatus] = useState<{
-    status: string;
-    lastTested: string;
-    error: string;
-    details: string;
-  } | null>(null);
-  const [isVerifyingWebRequest, setIsVerifyingWebRequest] = useState<boolean>(false);
 
   // AI & Strategies
   const [aiStudyStatus, setAiStudyStatus] = useState<"waiting" | "calibrating" | "optimized" | "active">("calibrating");
@@ -251,7 +228,7 @@ export default function App() {
         if (data.stats) setStats(data.stats);
         if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
         if (data.lastStrategySignal) setLastStrategySignal(data.lastStrategySignal);
-        if (data.webRequestStatus) setWebRequestStatus(data.webRequestStatus);
+        if (data.webRequestStatus) settings.setWebRequestStatus(data.webRequestStatus);
       }
     } catch {
       // Fallback
@@ -274,7 +251,7 @@ export default function App() {
       if (data.stats) setStats(data.stats);
       if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
       if (data.lastStrategySignal) setLastStrategySignal(data.lastStrategySignal);
-      if (data.webRequestStatus) setWebRequestStatus(data.webRequestStatus);
+      if (data.webRequestStatus) settings.setWebRequestStatus(data.webRequestStatus);
       fetchStrategies();
     },
     onTick: (msg) => {
@@ -312,7 +289,7 @@ export default function App() {
       if (msg.connection) setConnection(msg.connection);
     },
     onWebRequestTest: (testState) => {
-      setWebRequestStatus(testState as any);
+      settings.setWebRequestStatus(testState as SettingsState["webRequestStatus"]);
     },
     onAiStrategy: (strategy) => {
       setAiSynthesizedStrategy(strategy);
@@ -368,90 +345,7 @@ export default function App() {
     if (aiStudy.strategy) setAiSynthesizedStrategy(aiStudy.strategy);
   }, [aiStudy]);
 
-  // Sync inputs with config
-  useEffect(() => {
-    const savedEndpoint =
-      (typeof window !== "undefined" && localStorage.getItem("mt5_webrequest_endpoint")) || "";
-    setParamInput({
-      lotSize: String(config.lotSize ?? 0.1),
-      takeProfitPoints: String(config.takeProfitPoints ?? 300),
-      stopLossPoints: String(config.stopLossPoints ?? 150),
-      trailingStopPoints: String(config.trailingStopPoints ?? 100),
-      maxTrades: String(config.maxTrades ?? 3),
-      useTrailingStop: config.useTrailingStop ?? true,
-      mt5Path: config.mt5Path || "",
-      appEndpoint: config.appEndpoint || savedEndpoint || "http://127.0.0.1:3000",
-      tradingMode: config.tradingMode || "Scalping",
-      selectedAssets: config.selectedAssets || ["Step Index"],
-      isAiModeEnabled: !!config.isAiModeEnabled,
-    });
-  }, [config]);
-
-  // URL Helper
-  const getAppBaseUrl = useCallback(() => {
-    let origin = window.location.origin;
-    if (origin.includes("ais-dev-")) {
-      origin = origin.replace("ais-dev-", "ais-pre-");
-    }
-    return origin;
-  }, []);
-
-  // Apply settings
-  const applySettings = async (
-    strategyOverride?: StrategyMode,
-    mt5PathOverride?: string,
-    appEndpointOverride?: string,
-    tradingModeOverride?: "Scalping" | "Swing",
-    selectedAssetsOverride?: string[],
-    isAiModeEnabledOverride?: boolean
-  ) => {
-    const finalEndpoint =
-      appEndpointOverride !== undefined
-        ? appEndpointOverride
-        : paramInput.appEndpoint || "http://127.0.0.1:3000";
-
-    if (finalEndpoint) {
-      try {
-        localStorage.setItem("mt5_webrequest_endpoint", finalEndpoint);
-      } catch {}
-    }
-
-    try {
-      const lotSize = Math.max(0.01, Math.min(100, parseFloat(paramInput.lotSize) || 0.1));
-      const takeProfitPoints = Math.max(1, Math.min(10000, parseInt(paramInput.takeProfitPoints) || 300));
-      const stopLossPoints = Math.max(1, Math.min(10000, parseInt(paramInput.stopLossPoints) || 150));
-      const trailingStopPoints = Math.max(0, Math.min(5000, parseInt(paramInput.trailingStopPoints) || 100));
-      const maxTrades = Math.max(1, Math.min(20, parseInt(paramInput.maxTrades) || 3));
-
-      const response = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedStrategy: strategyOverride || config.selectedStrategy,
-          lotSize,
-          takeProfitPoints,
-          stopLossPoints,
-          trailingStopPoints,
-          useTrailingStop: paramInput.useTrailingStop,
-          maxTrades,
-          mt5Path: mt5PathOverride !== undefined ? mt5PathOverride : paramInput.mt5Path,
-          appEndpoint: finalEndpoint,
-          tradingMode: tradingModeOverride !== undefined ? tradingModeOverride : paramInput.tradingMode,
-          selectedAssets: selectedAssetsOverride !== undefined ? selectedAssetsOverride : paramInput.selectedAssets,
-          isAiModeEnabled: isAiModeEnabledOverride !== undefined ? isAiModeEnabledOverride : paramInput.isAiModeEnabled,
-        }),
-      });
-
-      if (response.ok) {
-        setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 2500);
-        fetchStatus();
-      }
-    } catch (e) {
-      console.error("Failed to commit settings updates to backend.", e);
-    }
-  };
-
+  const settings = useSettings(config);
   const tradingControls = useTradingControls();
 
   const toggleTradingExecution = async () => {
@@ -485,43 +379,6 @@ export default function App() {
       }
     } catch (e) {
       console.error("Failed to switch symbol:", e);
-    }
-  };
-
-  // Trigger WebRequest Verification Test
-  const triggerWebRequestTest = async () => {
-    setIsVerifyingWebRequest(true);
-    try {
-      const response = await fetch("/api/test-webrequest/trigger", { method: "POST" });
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.testState) {
-          setWebRequestStatus(data.testState);
-        }
-      }
-
-      let attempts = 0;
-      const interval = setInterval(async () => {
-        attempts++;
-        try {
-          const statusRes = await fetch("/api/test-webrequest/status");
-          if (statusRes.ok) {
-            const statusData = await statusRes.json();
-            if (statusData && statusData.testState) {
-              setWebRequestStatus(statusData.testState);
-              if (statusData.testState.status !== "pending" || attempts > 15) {
-                clearInterval(interval);
-                setIsVerifyingWebRequest(false);
-              }
-            }
-          }
-        } catch {
-          clearInterval(interval);
-          setIsVerifyingWebRequest(false);
-        }
-      }, 1000);
-    } catch {
-      setIsVerifyingWebRequest(false);
     }
   };
 
@@ -635,7 +492,7 @@ export default function App() {
                   aiSynthesizedStrategy={aiSynthesizedStrategy}
                   strategiesList={strategiesList}
                   onToggleTradingExecution={toggleTradingExecution}
-                  onApplySettings={applySettings}
+                   onApplySettings={() => settings.applySettings(fetchStatus)}
                   selectedStrategy={config.selectedStrategy}
                 />
 
@@ -683,11 +540,11 @@ export default function App() {
         {currentNavTab === "risk" && (
           <div className="space-y-6 animate-fade-in">
             <AssetSelector
-              config={{ ...config, saveSuccess }}
-              paramInput={paramInput}
+              config={{ ...config, saveSuccess: settings.saveSuccess }}
+              paramInput={settings.paramInput}
               selectedStrategy={config.selectedStrategy}
-              onApplySettings={applySettings}
-              onSetParamInput={(patch) => setParamInput((prev) => ({ ...prev, ...patch }))}
+              onApplySettings={() => settings.applySettings(fetchStatus)}
+              onSetParamInput={(patch) => settings.onParamInputChange(patch)}
               onSetConfig={(patch) => setConfig((prev) => ({ ...prev, ...patch }))}
             />
 
@@ -703,17 +560,17 @@ export default function App() {
             config={config}
             activeSymbol={activeSymbol}
             isBridgeConnected={isBridgeConnected}
-            appEndpoint={paramInput.appEndpoint}
+            appEndpoint={settings.paramInput.appEndpoint}
             copiedLink={copiedLink}
-            onSetEndpoint={(ep) => setParamInput((prev) => ({ ...prev, appEndpoint: ep }))}
-            onSaveEndpoint={(ep) => applySettings(undefined, undefined, ep)}
+            onSetEndpoint={(ep) => settings.onParamInputChange({ appEndpoint: ep })}
+            onSaveEndpoint={(ep) => settings.applySettings(fetchStatus, { appEndpointOverride: ep })}
             onCopyLink={(text) => {
               navigator.clipboard.writeText(text);
               setCopiedLink(true);
               setTimeout(() => setCopiedLink(false), 2000);
             }}
             onDownloadNodejsBridge={downloadNodejsBridge}
-            getAppBaseUrl={getAppBaseUrl}
+            getAppBaseUrl={settings.getAppBaseUrl}
           />
         )}
 
@@ -730,16 +587,16 @@ export default function App() {
         {currentNavTab === "settings" && (
           <SettingsForm
             config={config}
-            paramInput={paramInput}
-            saveSuccess={saveSuccess}
-            webRequestStatus={webRequestStatus}
-            isVerifyingWebRequest={isVerifyingWebRequest}
-            copiedUrl={copiedUrl}
-            getAppBaseUrl={getAppBaseUrl}
-            onApplySettings={() => applySettings()}
-            onSetParamInput={(patch) => setParamInput((prev) => ({ ...prev, ...patch }))}
-            onTriggerWebRequestTest={triggerWebRequestTest}
-            onSetCopiedUrl={setCopiedUrl}
+            paramInput={settings.paramInput}
+            saveSuccess={settings.saveSuccess}
+            webRequestStatus={settings.webRequestStatus}
+            isVerifyingWebRequest={settings.isVerifyingWebRequest}
+            copiedUrl={settings.copiedUrl}
+            getAppBaseUrl={settings.getAppBaseUrl}
+            onApplySettings={() => settings.applySettings(fetchStatus)}
+            onSetParamInput={(patch) => settings.onParamInputChange(patch)}
+            onTriggerWebRequestTest={settings.triggerWebRequestTest}
+            onSetCopiedUrl={settings.setCopiedUrl}
           />
         )}
       </main>
