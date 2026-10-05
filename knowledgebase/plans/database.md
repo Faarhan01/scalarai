@@ -3,8 +3,8 @@
 ## Current State
 
 - Persistence was handled via flat JSON files:
-  - `backend/data/ai_knowledge_profile.json`
-  - `backend/data/ai_synthesized_strategy.json`
+  - `ai_knowledge_profile.json`
+  - `ai_synthesized_strategy.json`
 - Data was loaded into memory at startup and written back to disk on changes.
 - No relational structure, no querying, no transactions, no schema enforcement.
 
@@ -41,5 +41,5 @@ SQLite 3 migration is **fully implemented and operational**.
 ### Remaining Items
 
 - Remove legacy JSON files after validation period:
-  - `backend/data/ai_knowledge_profile.json`
-  - `backend/data/ai_synthesized_strategy.json`
+  - `ai_knowledge_profile.json`
+  - `ai_synthesized_strategy.json`

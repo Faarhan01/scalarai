@@ -8,8 +8,7 @@ The ScalarAI trading application is partially restructured and functional:
 - Multi-symbol backend state is supported via `symbolStates` Map
 - Frontend `App.tsx` reduced from ~892 lines to ~613 lines by extracting hooks
 - Header and graph titles still hardcode "STEP INDEX"
-- Styling is entirely inline Tailwind utilities
-- Legacy JSON files still exist alongside SQLite
+- Styling uses a mix of Tailwind utilities and semantic CSS classes in `components.css`
 
 ## Completed Improvements
 
