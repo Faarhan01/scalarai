@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
 import { generateMql5Code } from "../services/ea-generator";

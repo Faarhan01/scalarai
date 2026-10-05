@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import { isValidStrategyMode, isValidTradingMode } from "../utils/validators";
 import { requireApiKey } from "../middleware/auth";
 

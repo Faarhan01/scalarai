@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import { scalarAiDb } from "../db";
 import { TradeConfig } from "../types";
 import { requireApiKey } from "../middleware/auth";

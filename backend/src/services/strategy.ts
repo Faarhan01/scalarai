@@ -40,11 +40,11 @@ export interface BacktestResult {
   maxDrawdown: number;
 }
 
-function getClosePrices(ticks: Tick[]): number[] {
+export function getClosePrices(ticks: Tick[]): number[] {
   return ticks.map(t => (t.close !== undefined ? t.close : t.price));
 }
 
-function calculateEMA(prices: number[], period: number): number {
+export function calculateEMA(prices: number[], period: number): number {
   if (prices.length === 0) return 0;
   if (prices.length < period) return prices.reduce((a, b) => a + b, 0) / prices.length;
   let ema = prices[0];
@@ -53,7 +53,7 @@ function calculateEMA(prices: number[], period: number): number {
   return ema;
 }
 
-function calculateRSI(prices: number[], period: number = 10): number {
+export function calculateRSI(prices: number[], period: number = 10): number {
   if (prices.length <= period) return 50;
   let gains = 0;
   let losses = 0;
@@ -76,7 +76,7 @@ function calculateRSI(prices: number[], period: number = 10): number {
   return 100 - (100 / (1 + rs));
 }
 
-function calculateATR(ticks: Tick[], period: number = 10): number {
+export function calculateATR(ticks: Tick[], period: number = 10): number {
   if (ticks.length < 2) return 0.5;
   const trs: number[] = [];
   for (let i = 1; i < ticks.length; i++) {
@@ -93,7 +93,7 @@ function calculateATR(ticks: Tick[], period: number = 10): number {
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 
-function calculateBollingerBands(prices: number[], period: number = 15, numDevs: number = 2): { upper: number; middle: number; lower: number } {
+export function calculateBollingerBands(prices: number[], period: number = 15, numDevs: number = 2): { upper: number; middle: number; lower: number } {
   if (prices.length === 0) return { upper: 0, middle: 0, lower: 0 };
   const slice = prices.slice(-period);
   const middle = slice.reduce((sum, p) => sum + p, 0) / slice.length;

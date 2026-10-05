@@ -326,7 +326,7 @@ const TOOLS: McpTool[] = [
   },
 ];
 
-function isReadOnlySql(sql: string): boolean {
+export function isReadOnlySql(sql: string): boolean {
   const normalized = sql.trim().replace(/\s+/g, " ").toUpperCase();
   if (!normalized.startsWith("SELECT")) return false;
   if (normalized.includes(";")) return false;

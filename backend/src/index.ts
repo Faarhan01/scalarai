@@ -41,10 +41,7 @@ let tradeConfig = getDefaultTradeConfig();
 let pendingBridgeOrders: any[] = [];
 let pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null = null;
 const symbolStates = createSymbolStates("Step Index");
-
-function getSymbolState(symbol: string) {
-  return getSymbolState(symbolStates, symbol);
-}
+let activeSymbol = "Step Index";
 
 const webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean } = {
   status: "idle",
@@ -175,6 +172,7 @@ function getMinuteBucket(ts: number): number {
 function updateMarket(data: any) {
   const result = updateMarketState(symbolStates, data);
   const state = result.symbol;
+  const symbol = data.symbol || symbolStates.activeSymbol || "Step Index";
   
   if (result.switched) {
     addLog("SERVER", "INFO", `Switched active symbol to: ${symbolStates.activeSymbol}`);
@@ -197,8 +195,6 @@ function updateMarket(data: any) {
       return;
     }
   }
-  
-  const state = result.symbol;
   
   const numVelocity = data.velocity !== undefined ? Number(data.velocity) : 0;
   if (!isFinite(numVelocity)) return;
@@ -226,24 +222,24 @@ function updateMarket(data: any) {
     addLog("EA", "SUCCESS", `${symbol} MT5 Expert Advisor linked! Real-time velocity baseline metric: ${numVelocity.toFixed(4)} pt/s.`);
   }
 
-  const state = getSymbolState(symbolStates, activeSymbol);
-  state.connection.isEaConnected = true;
-  state.connection.clientIp = "127.0.0.1";
-  state.connection.lastPing = new Date().toISOString();
-  state.connection.broker = data.broker || "MetaTrader 5 Link";
-  state.connection.accountNumber = state.connection.accountNumber || data.account || "Simulated MT5 Acc";
-  state.connection.balance = data.balance !== undefined ? Number(data.balance) : (state.connection.balance || 1000.0);
-  state.connection.symbol = symbol;
-  state.connection.symbolDigits = data.digits !== undefined ? Number(data.digits) : null;
-  state.connection.symbolTickSize = data.tickSize !== undefined ? Number(data.tickSize) : null;
-  state.connection.symbolDescription = data.description || null;
-  state.connection.spread = data.spread !== undefined ? Number(data.spread) : null;
-  state.connection.session = data.session || null;
-  state.connection.margin = data.margin !== undefined ? Number(data.margin) : null;
-  state.connection.leverage = data.leverage !== undefined ? Number(data.leverage) : null;
-  state.connection.swapLong = data.swapLong !== undefined ? Number(data.swapLong) : null;
-  state.connection.swapShort = data.swapShort !== undefined ? Number(data.swapShort) : null;
-  state.connection.profitCalcMode = data.profitCalcMode !== undefined ? Number(data.profitCalcMode) : null;
+  const activeState = getSymbolState(symbolStates, activeSymbol);
+  activeState.connection.isEaConnected = true;
+  activeState.connection.clientIp = "127.0.0.1";
+  activeState.connection.lastPing = new Date().toISOString();
+  activeState.connection.broker = data.broker || "MetaTrader 5 Link";
+  activeState.connection.accountNumber = activeState.connection.accountNumber || data.account || "Simulated MT5 Acc";
+  activeState.connection.balance = data.balance !== undefined ? Number(data.balance) : (activeState.connection.balance || 1000.0);
+  activeState.connection.symbol = symbol;
+  activeState.connection.symbolDigits = data.digits !== undefined ? Number(data.digits) : null;
+  activeState.connection.symbolTickSize = data.tickSize !== undefined ? Number(data.tickSize) : null;
+  activeState.connection.symbolDescription = data.description || null;
+  activeState.connection.spread = data.spread !== undefined ? Number(data.spread) : null;
+  activeState.connection.session = data.session || null;
+  activeState.connection.margin = data.margin !== undefined ? Number(data.margin) : null;
+  activeState.connection.leverage = data.leverage !== undefined ? Number(data.leverage) : null;
+  activeState.connection.swapLong = data.swapLong !== undefined ? Number(data.swapLong) : null;
+  activeState.connection.swapShort = data.swapShort !== undefined ? Number(data.swapShort) : null;
+  activeState.connection.profitCalcMode = data.profitCalcMode !== undefined ? Number(data.profitCalcMode) : null;
 
   // Real-time strategy evaluation when automated trading is active
   if (tradeConfig.isActive) {
