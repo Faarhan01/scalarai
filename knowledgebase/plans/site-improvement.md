@@ -6,8 +6,8 @@ The ScalarAI trading application is partially restructured and functional:
 - Backend is modularized under `backend/src/` with routes, services, websockets, and DB layers
 - SQLite 3 database is implemented and operational
 - Multi-symbol backend state is supported via `symbolStates` Map
-- Frontend is still a single 2981-line `App.tsx` file
-- Header and graph titles hardcode "STEP INDEX"
+- Frontend `App.tsx` reduced from ~892 lines to ~613 lines by extracting hooks
+- Header and graph titles still hardcode "STEP INDEX"
 - Styling is entirely inline Tailwind utilities
 - Legacy JSON files still exist alongside SQLite
 
@@ -30,9 +30,23 @@ The ScalarAI trading application is partially restructured and functional:
 
 ### 1. Frontend Component Split
 
-**Problem:** `frontend/src/App.tsx` is a 2981-line monolith containing layout, charts, trades, AI panels, settings, and bridge download logic.
+**Problem:** `frontend/src/App.tsx` was a ~892-line monolith containing layout, charts, trades, AI panels, settings, and bridge download logic. It has been reduced to ~613 lines by extracting focused hooks.
 
-**Goal:** Split into logical component folders for maintainability and team collaboration.
+**Completed extractions:**
+- `frontend/src/hooks/useDownloadBridge.ts` — bridge download/generation logic
+- `frontend/src/hooks/useAiStudyFeed.ts` — AI study feed polling
+- `frontend/src/hooks/useTradingControls.ts` — trading execution controls
+- `frontend/src/hooks/useAppStatus.ts` — initial status fetch
+- `frontend/src/hooks/useSettings.ts` — settings state, validation, WebRequest test flow
+- `frontend/src/hooks/useNetworkStatus.ts` — online/offline and latency state
+
+**Remaining in App.tsx:**
+- Main layout orchestration
+- WebSocket wiring
+- State aggregation from multiple hooks
+- Tab routing and component composition
+
+**Goal:** Continue splitting into logical component folders for maintainability and team collaboration.
 
 **Proposed Structure:**
 ```
@@ -227,13 +241,24 @@ frontend/src/
 | Priority | Improvement | Effort | Impact | Status |
 |----------|-------------|--------|--------|--------|
 | P0 | Backend validation, MCP cleanup, secrets hygiene | Medium | High | ✅ Done |
-| P0 | Frontend component split | High | High | ⏳ In progress |
-| P0 | Dynamic symbol display | Low | High | ⏳ In progress |
-| P1 | Multi-symbol UI | Medium | High | ⏳ In progress |
-| P1 | Design tokens & styling | Medium | Medium | ✅ Done |
-| P2 | Extended tick history | Medium | Medium | Pending |
-| P2 | Broader data capture | High | Medium | Pending |
-| P3 | Legacy JSON cleanup | Low | Low | Pending |
+| P0 | Frontend hook extraction from App.tsx | High | High | ✅ In progress (60% complete) |
+| P0 | CORS restriction | Low | High | ✅ Done |
+| P0 | Simple API key auth for state-changing routes | Medium | High | ✅ Done |
+| P0 | Allow env-configured PORT | Low | Medium | ✅ Done |
+| P1 | Backend god-file refactor (index.ts) | High | High | ⏳ In progress |
+| P1 | Type safety sweep | Medium | Medium | ⏳ In progress |
+| P1 | Frontend component folder split | Medium | Medium | ⏳ In progress |
+| P2 | Silent error handling | Medium | Medium | Pending |
+| P2 | Client IP handling | Low | Low | Pending |
+| P2 | UUID trade IDs | Low | Low | ✅ Done |
+| P2 | EA generator URL validation | Low | Medium | Pending |
+| P2 | Bridge hardening | Low | Medium | ✅ Done |
+| P3 | Global mutable state wrapper | High | Low | Pending |
+| P3 | Hardcoded ticket seed | Low | Low | Pending |
+| P3 | Frontend fetch error UX | Low | Low | Pending |
+| P3 | Rate limiting / schema validation | Medium | Low | Pending |
+| P3 | Extended history UI | Medium | Low | Pending |
+| P3 | Broader EA telemetry | High | Low | Pending |
 
 ## What's Left
 
