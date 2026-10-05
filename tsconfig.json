@@ -14,7 +14,9 @@
     "paths": {
       "@/*": ["./*"],
       "backend/*": ["./backend/src/*"],
-      "frontend/*": ["./frontend/src/*"]
+      "frontend/*": ["./frontend/src/*"],
+      "@tokens/*": ["./frontend/src/tokens/*"],
+      "@styles/*": ["./frontend/src/styles/*"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true

@@ -112,7 +112,9 @@ export function useSettings(config: TradeConfig): SettingsState & SettingsOption
       if (finalEndpoint) {
         try {
           localStorage.setItem("mt5_webrequest_endpoint", finalEndpoint);
-        } catch {}
+        } catch (err) {
+          console.warn("Failed to save endpoint to localStorage:", err);
+        }
       }
 
       try {

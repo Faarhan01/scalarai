@@ -8,6 +8,7 @@ export { Modal } from "./ui/Modal";
 export { Header } from "./layout/Header";
 export { MobileDrawer } from "./layout/MobileDrawer";
 export { StatusBar } from "./layout/StatusBar";
+export { TabBar } from "./layout/TabBar";
 
 // Dashboard
 export { TradePanel } from "./dashboard/TradePanel";

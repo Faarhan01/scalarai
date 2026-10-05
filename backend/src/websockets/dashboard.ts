@@ -19,7 +19,10 @@ export function createDashboardServer(server: any, sendInit: () => string, onMes
   wssDashboard.on("connection", (ws: WebSocket) => {
     try {
       ws.send(sendInit());
-    } catch {}
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`Dashboard init broadcast failed: ${reason}`);
+    }
 
     ws.on("message", (rawMsg: string) => {
       onMessage(ws, rawMsg);

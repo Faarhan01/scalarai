@@ -31,6 +31,7 @@ import {
   AssetSelector,
   DownloadsCenter,
   LogsViewer,
+  TabBar,
 } from "./components";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useChartData } from "./hooks/useChartData";
@@ -38,6 +39,7 @@ import { useDownloadBridge } from "./hooks/useDownloadBridge";
 import { useAiStudyFeed } from "./hooks/useAiStudyFeed";
 import { useTradingControls } from "./hooks/useTradingControls";
 import { useSettings, type SettingsState } from "./hooks/useSettings";
+import { useErrorHandler } from "./hooks/useErrorHandler";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -196,6 +198,11 @@ export default function App() {
     []
   );
 
+  const { errors, showError, clearError } = useErrorHandler();
+
+  const settings = useSettings(config);
+  const tradingControls = useTradingControls();
+
   // Fetch Strategy List
   const fetchStrategies = useCallback(async () => {
     try {
@@ -204,10 +211,10 @@ export default function App() {
         const data = await res.json();
         setStrategiesList(data);
       }
-    } catch {
-      // Quietly ignore network failures
+    } catch (err) {
+      showError("Failed to fetch strategies");
     }
-  }, []);
+  }, [showError]);
 
   // Fetch Initial Status
   const fetchStatus = useCallback(async () => {
@@ -230,10 +237,10 @@ export default function App() {
         if (data.lastStrategySignal) setLastStrategySignal(data.lastStrategySignal);
         if (data.webRequestStatus) settings.setWebRequestStatus(data.webRequestStatus);
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      showError("Failed to fetch server status");
     }
-  }, []);
+  }, [showError, settings]);
 
   // Sync WebSocket
   const { sendWsMessage } = useWebSocket({
@@ -345,9 +352,6 @@ export default function App() {
     if (aiStudy.strategy) setAiSynthesizedStrategy(aiStudy.strategy);
   }, [aiStudy]);
 
-  const settings = useSettings(config);
-  const tradingControls = useTradingControls();
-
   const toggleTradingExecution = async () => {
     if (aiStudyStatus !== "optimized" && aiStudyStatus !== "active") {
       console.warn("Automated trade execution blocked: AI Speed dynamic baseline study is currently pending.");
@@ -434,40 +438,40 @@ export default function App() {
 
       {/* 3. Main Dashboard Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Navigation Tabs Bar */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <nav className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1">
-            {[
-              { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
-              { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy },
-              { id: "downloads", label: "Downloads Center", icon: Download },
-              { id: "logs", label: "System Logs", icon: Terminal, badge: `${logs.length}` },
-              { id: "settings", label: "Settings", icon: Settings },
-            ].map((tab) => {
-              const IconComp = tab.icon;
-              const isActive = currentNavTab === tab.id;
-              return (
+        {errors.length > 0 && (
+          <div className="space-y-2">
+            {errors.map((error) => (
+              <div
+                key={error.id}
+                className="bg-red-900/40 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-xs flex items-center justify-between gap-3"
+              >
+                <span className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400" />
+                  {error.message}
+                </span>
                 <button
-                  key={tab.id}
-                  onClick={() => setCurrentNavTab(tab.id as any)}
-                  className={`nav-tab-btn ${isActive ? "nav-tab-active" : ""}`}
+                  onClick={() => clearError(error.id)}
+                  className="text-red-300 hover:text-white transition-colors cursor-pointer"
+                  aria-label="Dismiss error"
                 >
-                  <IconComp className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                  {tab.badge && (
-                    <span
-                      className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
-                        isActive ? "bg-indigo-700 text-indigo-100" : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {tab.badge}
-                    </span>
-                  )}
+                  ×
                 </button>
-              );
-            })}
-          </nav>
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Navigation Tabs Bar */}
+        <TabBar
+          tabs={[
+            { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
+            { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy },
+            { id: "downloads", label: "Downloads Center", icon: Download },
+            { id: "logs", label: "System Logs", icon: Terminal, badge: `${logs.length}` },
+            { id: "settings", label: "Settings", icon: Settings },
+          ]}
+          activeTab={currentNavTab}
+          onSelect={(tabId) => setCurrentNavTab(tabId as any)}
+        />
 
         {/* Tab 1: Live Trading Dashboard */}
         {currentNavTab === "home" && (

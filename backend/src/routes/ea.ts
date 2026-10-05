@@ -9,7 +9,7 @@ export function registerEaRoutes(
   app: any,
   getStatus: () => any,
   getConfig: () => TradeConfig,
-  onTick: (data: any) => void,
+  onTick: (data: any, clientIp?: string) => void,
   getPendingEaCommand?: () => { action: string; lot: number; sl: number; tp: number } | null,
   apiKey?: string
 ) {
@@ -73,7 +73,8 @@ export function registerEaRoutes(
         description: body.description || undefined,
       };
 
-      onTick(payload);
+      const clientIp = (req as any).ip || (req as any).socket?.remoteAddress || "127.0.0.1";
+      onTick(payload, clientIp);
       const status = getStatus();
       const pendingCmd = getPendingEaCommand ? getPendingEaCommand() : null;
 

@@ -24,6 +24,7 @@ import { StrategyMode, TradeRecord, AiSynthesizedStrategy, EAConnectionDetails, 
 import { scalarAiDb } from "./db";
 import { evaluateStrategy, buildContext, evaluateStrategyBacktest } from "./services/strategy";
 import { createSymbolStates, getSymbolState, updateMarket as updateMarketState, aggregateTickIntoCandle } from "./services/market-ingestion";
+import { rateLimit } from "./middleware/rateLimit";
 
 dotenv.config();
 process.env.PORT = process.env.PORT || "3000";
@@ -35,6 +36,7 @@ app.use(express.json());
 app.use(corsMiddleware);
 app.use(loggerMiddleware);
 app.use(errorMiddleware);
+app.use(rateLimit());
 
 // Global state
 let tradeConfig = getDefaultTradeConfig();
@@ -169,7 +171,7 @@ function getMinuteBucket(ts: number): number {
   return Math.floor(ts / 60000);
 }
 
-function updateMarket(data: any) {
+function updateMarket(data: any, clientIp?: string) {
   const result = updateMarketState(symbolStates, data);
   const state = result.symbol;
   const symbol = data.symbol || symbolStates.activeSymbol || "Step Index";
@@ -224,7 +226,9 @@ function updateMarket(data: any) {
 
   const activeState = getSymbolState(symbolStates, activeSymbol);
   activeState.connection.isEaConnected = true;
-  activeState.connection.clientIp = "127.0.0.1";
+  if (!activeState.connection.clientIp) {
+    activeState.connection.clientIp = clientIp || "127.0.0.1";
+  }
   activeState.connection.lastPing = new Date().toISOString();
   activeState.connection.broker = data.broker || "MetaTrader 5 Link";
   activeState.connection.accountNumber = activeState.connection.accountNumber || data.account || "Simulated MT5 Acc";
