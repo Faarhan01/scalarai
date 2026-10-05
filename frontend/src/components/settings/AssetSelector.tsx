@@ -31,12 +31,12 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   return (
     <div className="max-w-2xl mx-auto w-full flex flex-col gap-6 animate-fade-in">
       {/* MULTI-INDEX ASSET SELECTION GRID */}
-      <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-3 shadow-sm">
+      <div className="card-panel flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Multi-Index Selector</h3>
+          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest font-mono">Multi-Index Selector</h3>
         </div>
-        <p className="text-[11px] text-slate-350 leading-normal -mt-1">
+        <p className="text-[11px] text-slate-400 leading-normal -mt-1">
           Deploys concurrent signal scrapers over linked MT5 charts.
         </p>
         <div className="grid grid-cols-2 gap-2 mt-1">
@@ -58,10 +58,10 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                   onSetParamInput({ selectedAssets: newList });
                   onApplySettings(undefined, undefined, undefined, undefined, newList);
                 }}
-                className={`py-2 px-2.5 text-[11px] font-extrabold font-mono rounded-xl border flex items-center justify-between transition-all duration-200 cursor-pointer ${
+                className={`py-2 px-3 text-[11px] font-bold font-mono rounded-lg border flex items-center justify-between transition-all duration-200 cursor-pointer ${
                   isSelected
-                    ? "bg-indigo-600/25 border-indigo-500 text-indigo-200 shadow-sm shadow-indigo-500/10"
-                    : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:border-slate-600 hover:text-white"
+                    ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-sm"
+                    : "bg-slate-900 border-slate-700/80 text-slate-300 hover:border-slate-600 hover:text-white"
                 }`}
               >
                 <span>{asset}</span>
@@ -73,12 +73,12 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
       </div>
 
       {/* STRATEGY OPTIONS: EXECUTION STYLE */}
-      <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-3 shadow-sm">
+      <div className="card-panel flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Sliders className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Execution Profile</h3>
+          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest font-mono">Execution Profile</h3>
         </div>
-        <p className="text-[11px] text-slate-350 leading-normal -mt-1">
+        <p className="text-[11px] text-slate-400 leading-normal -mt-1">
           Define frequency parameters for incoming market speed spikes.
         </p>
         <div className="grid grid-cols-2 gap-2 mt-1">
@@ -88,10 +88,10 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
               onSetParamInput({ tradingMode: "Scalping" });
               onApplySettings(undefined, undefined, undefined, "Scalping", undefined);
             }}
-            className={`py-2 px-3 text-xs font-extrabold font-mono rounded-xl border transition-all duration-200 uppercase tracking-wider cursor-pointer text-center ${
+            className={`py-2 px-3 text-xs font-bold font-mono rounded-lg border transition-all duration-200 uppercase tracking-wider cursor-pointer text-center ${
               paramInput.tradingMode === "Scalping"
-                ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-lg shadow-indigo-500/10"
-                : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:border-slate-600 hover:text-white"
+                ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-sm"
+                : "bg-slate-900 border-slate-700/80 text-slate-300 hover:border-slate-600 hover:text-white"
             }`}
           >
             Scalping
@@ -102,10 +102,10 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
               onSetParamInput({ tradingMode: "Swing" });
               onApplySettings(undefined, undefined, undefined, "Swing", undefined);
             }}
-            className={`py-2 px-3 text-xs font-extrabold font-mono rounded-xl border transition-all duration-200 uppercase tracking-wider cursor-pointer text-center ${
+            className={`py-2 px-3 text-xs font-bold font-mono rounded-lg border transition-all duration-200 uppercase tracking-wider cursor-pointer text-center ${
               paramInput.tradingMode === "Swing"
-                ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-lg shadow-indigo-500/10"
-                : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:border-slate-600 hover:text-white"
+                ? "bg-indigo-600/30 border-indigo-500 text-indigo-200 shadow-sm"
+                : "bg-slate-900 border-slate-700/80 text-slate-300 hover:border-slate-600 hover:text-white"
             }`}
           >
             Swing
@@ -114,14 +114,14 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
       </div>
 
       {/* Control & Parameters Card */}
-      <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col shadow-sm">
-        <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-700/70">
-          <div className="flex items-center gap-2">
+      <div className="card-panel flex flex-col">
+        <div className="card-panel-header">
+          <div className="card-panel-title">
             <Sliders className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Risk & Strategy</h3>
+            <span>Risk & Strategy Parameters</span>
           </div>
           {config.saveSuccess && (
-            <span className="text-[10px] text-emerald-400 bg-emerald-500/15 px-2 py-0.5 border border-emerald-500/30 rounded-full flex items-center gap-1 animate-pulse">
+            <span className="badge badge-success flex items-center gap-1 animate-pulse">
               <CheckCircle2 className="w-2.5 h-2.5" /> Updated
             </span>
           )}
@@ -132,7 +132,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
           {/* Active Strategy Mode selection */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Trading Algorithm</label>
+            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider font-mono">Trading Algorithm</label>
             <div className="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
@@ -143,7 +143,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all cursor-pointer ${
                   selectedStrategy === StrategyMode.TREND_FOLLOWING
                     ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                    : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:text-white hover:border-slate-600"
+                    : "bg-slate-900 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600"
                 }`}
               >
                 Trend Following
@@ -157,7 +157,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all cursor-pointer ${
                   selectedStrategy === StrategyMode.MEAN_REVERSION
                     ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                    : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:text-white hover:border-slate-600"
+                    : "bg-slate-900 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600"
                 }`}
               >
                 Mean Reversion
@@ -171,7 +171,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 className={`py-2 px-1 text-[10px] font-bold rounded-lg border leading-tight transition-all cursor-pointer ${
                   selectedStrategy === StrategyMode.AI_ADAPTIVE
                     ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                    : "bg-slate-900/90 border-slate-700/70 text-slate-300 hover:text-white hover:border-slate-600"
+                    : "bg-slate-900 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600"
                 }`}
               >
                 AI Adaptive
@@ -181,13 +181,13 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
           {/* Lot size */}
           <div className="space-y-1.5">
-            <div className="flex justify-between items-center text-[11px] text-slate-300 uppercase font-semibold">
+            <div className="flex justify-between items-center text-[11px] text-slate-300 uppercase font-semibold font-mono">
               <span>Lot Allocation</span>
-              <span className="text-white font-mono">{paramInput.lotSize} Lots</span>
+              <span className="text-white font-mono tabular-nums">{paramInput.lotSize} Lots</span>
             </div>
             <input
               type="range"
-              className="w-full accent-indigo-500 h-1.5 rounded-lg bg-slate-900 cursor-pointer"
+              className="slider-control"
               min="0.01"
               max="2.0"
               step="0.01"
@@ -205,7 +205,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
           {/* Target Trailing Configuration slider */}
           <div className="p-3 bg-slate-900/90 border border-slate-700/70 rounded-xl space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1">
+              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1 font-mono">
                 Trailing Stop-Loss
               </span>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -226,13 +226,13 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
             {paramInput.useTrailingStop && (
               <div className="space-y-1 pt-1.5 border-t border-slate-800">
-                <div className="flex justify-between text-[10px] text-slate-300">
+                <div className="flex justify-between text-[10px] text-slate-300 font-mono">
                   <span>Trailing Distance</span>
-                  <span className="text-indigo-400 font-mono font-bold">{paramInput.trailingStopPoints} Points</span>
+                  <span className="text-indigo-400 font-mono font-bold tabular-nums">{paramInput.trailingStopPoints} Points</span>
                 </div>
                 <input
                   type="range"
-                  className="w-full accent-indigo-500 h-1 bg-slate-800 cursor-pointer"
+                  className="slider-control"
                   min="20"
                   max="500"
                   step="10"
@@ -248,36 +248,36 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
           {/* Take Profit & Stop loss parameters */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase block text-slate-300">Take Profit (Pts)</label>
+              <label className="text-[10px] font-bold uppercase block text-slate-300 font-mono">Take Profit (Pts)</label>
               <input
                 type="number"
                 value={paramInput.takeProfitPoints}
                 onChange={(e) => onSetParamInput({ takeProfitPoints: e.target.value })}
                 onBlur={() => onApplySettings()}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 text-center"
+                className="input-control font-bold text-emerald-400 text-center"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase block text-slate-300">Stop Loss (Pts)</label>
+              <label className="text-[10px] font-bold uppercase block text-slate-300 font-mono">Stop Loss (Pts)</label>
               <input
                 type="number"
                 value={paramInput.stopLossPoints}
                 onChange={(e) => onSetParamInput({ stopLossPoints: e.target.value })}
                 onBlur={() => onApplySettings()}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono font-bold text-rose-400 focus:outline-none focus:border-rose-500 text-center"
+                className="input-control font-bold text-rose-400 text-center"
               />
             </div>
           </div>
 
           {/* Max Open trades */}
           <div className="space-y-1">
-            <div className="flex justify-between items-center text-[10px] text-slate-300 font-bold uppercase">
+            <div className="flex justify-between items-center text-[10px] text-slate-300 font-bold uppercase font-mono">
               <span>Max Concurrent Trades</span>
-              <span className="text-white font-mono">{paramInput.maxTrades}</span>
+              <span className="text-white font-mono tabular-nums">{paramInput.maxTrades}</span>
             </div>
             <input
               type="range"
-              className="w-full accent-indigo-500 h-1 cursor-pointer"
+              className="slider-control"
               min="1"
               max="10"
               step="1"

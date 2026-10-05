@@ -10,6 +10,8 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(__dirname, 'src'),
         'frontend': path.resolve(__dirname, 'src'),
+        '@tokens': path.resolve(__dirname, 'src/tokens'),
+        '@styles': path.resolve(__dirname, 'src/styles'),
       },
     },
     server: {

@@ -11,7 +11,9 @@
     "jsx": "react-jsx",
     "paths": {
       "frontend/*": ["./src/*"],
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@tokens/*": ["./src/tokens/*"],
+      "@styles/*": ["./src/styles/*"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true

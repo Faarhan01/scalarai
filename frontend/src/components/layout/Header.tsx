@@ -68,55 +68,54 @@ export const Header: React.FC<HeaderProps> = ({
           activeSymbol={activeSymbol}
           onSwitchSymbol={onSwitchSymbol}
         />
-        <div className="flex items-center gap-3 px-3.5 py-1.5 bg-slate-800/80 border border-slate-700/60 rounded-full text-xs text-slate-300">
+        <div className="telemetry-strip">
           {/* WebSocket Real-time Stream Indicator */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {wsConnected ? (
               <>
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-                <span className="font-semibold text-emerald-400 font-mono text-[10px] tracking-wide flex items-center gap-1">
+                <span className="font-semibold text-emerald-400 text-[10px] tracking-wide flex items-center gap-1">
                   <Zap className="w-3 h-3 text-emerald-400 inline" />
-                  LIVE STREAM {pingLatency !== null ? `(${pingLatency}ms)` : ""}
+                  LIVE {pingLatency !== null ? `${pingLatency}ms` : ""}
                 </span>
               </>
             ) : (
               <>
                 <span className="h-2 w-2 rounded-full bg-amber-500"></span>
-                <span className="font-semibold text-amber-400 font-mono text-[10px] tracking-wide flex items-center gap-1">
+                <span className="font-semibold text-amber-400 text-[10px] tracking-wide flex items-center gap-1">
                   <RefreshCw className="w-3 h-3 text-amber-400 inline" />
-                  POLL MODE ({latency}ms)
+                  POLL ({latency}ms)
                 </span>
               </>
             )}
           </div>
 
-          <div className="h-3 w-px bg-slate-700"></div>
+          <span className="telemetry-divider" aria-hidden="true">·</span>
 
           {/* Internet Status */}
           <div className="flex items-center gap-1">
             {isInternetOnline ? (
               <span className="font-semibold text-emerald-400 flex items-center gap-1 text-[10px]">
-                <Wifi className="w-3 h-3 inline" /> ONLINE
+                <Wifi className="w-3 h-3 inline" /> NET
               </span>
             ) : (
               <span className="font-semibold text-red-400 flex items-center gap-1 text-[10px]">
-                <WifiOff className="w-3 h-3 inline" /> OFFLINE
+                <WifiOff className="w-3 h-3 inline" /> DISCONNECTED
               </span>
             )}
           </div>
 
-          <div className="h-3 w-px bg-slate-700"></div>
+          <span className="telemetry-divider" aria-hidden="true">·</span>
 
           {/* EA Online Sync Indicator */}
           <div className="flex items-center gap-1.5">
             {connection.isEaConnected ? (
               <>
-                <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
-                <span className="font-semibold text-blue-400 text-[10px]">EA ONLINE</span>
-                <span className="text-[9px] text-slate-400 font-mono">#{connection.accountNumber}</span>
+                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                <span className="font-semibold text-cyan-300 text-[10px]">EA #{connection.accountNumber || "LIVE"}</span>
               </>
             ) : (
               <>
@@ -126,7 +125,7 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          <div className="h-3 w-px bg-slate-700"></div>
+          <span className="telemetry-divider" aria-hidden="true">·</span>
 
           {/* Desktop Bridge Status Indicator */}
           <div className="flex items-center gap-1.5">
@@ -141,10 +140,10 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={onToggleTradingExecution}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+          className={`btn btn-sm ${
             config.isActive
-              ? "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20"
-              : "bg-emerald-600 hover:bg-emerald-550 text-white shadow-emerald-600/20"
+              ? "btn-danger shadow-rose-600/20"
+              : "btn-success shadow-emerald-600/20"
           }`}
           title={config.isActive ? "Pause automated trade execution" : "Start automated trade execution"}
         >

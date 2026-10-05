@@ -1,20 +1,45 @@
 import { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
+import { generateMql5Code } from "../services/ea-generator";
+import { TradeConfig } from "../types";
 
-export function registerEaRoutes(app: any, getStatus: () => any, onTick: (data: any) => void) {
+export function registerEaRoutes(
+  app: any,
+  getStatus: () => any,
+  getConfig: () => TradeConfig,
+  onTick: (data: any) => void,
+  getPendingEaCommand?: () => { action: string; lot: number; sl: number; tp: number } | null
+) {
   app.get("/api/ea/download", (req: Request, res: Response) => {
-    const queryUrl = (req.query.url as string)?.trim();
-    let appUrl = queryUrl || "http://127.0.0.1:3000";
-    appUrl = appUrl.replace(/\/$/, "");
-    if (!appUrl) appUrl = "http://127.0.0.1:3000";
-    res.setHeader("Content-Disposition", "attachment; filename=StepIndex_AI_Scalper_EA.mq5");
-    res.setHeader("Content-Type", "text/plain");
-    res.send(`// MQL5 EA placeholder for ${appUrl}`);
+    try {
+      const queryUrl = (req.query.url as string)?.trim();
+      let appUrl = queryUrl || `${req.protocol}://${req.get("host")}`;
+      appUrl = appUrl.replace(/\/$/, "");
+      if (!appUrl) appUrl = "http://127.0.0.1:3000";
+
+      const currentConfig = getConfig();
+      const mql5Code = generateMql5Code(appUrl, currentConfig);
+
+      res.setHeader("Content-Disposition", "attachment; filename=StepIndex_AI_Scalper_EA.mq5");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(mql5Code);
+    } catch (err: any) {
+      console.error("EA download generator error:", err);
+      res.status(500).send("// Failed to generate MQL5 EA");
+    }
   });
 
   app.get("/api/ea/generator-source", (req: Request, res: Response) => {
-    res.status(404).json({ error: "mql5_generator.ts file not found" });
+    try {
+      const currentConfig = getConfig();
+      const appUrl = `${req.protocol}://${req.get("host")}`;
+      const code = generateMql5Code(appUrl, currentConfig);
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(code);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to fetch generator source" });
+    }
   });
 
   app.post("/api/ea/tick", (req: Request, res: Response) => {
@@ -46,6 +71,8 @@ export function registerEaRoutes(app: any, getStatus: () => any, onTick: (data: 
 
       onTick(payload);
       const status = getStatus();
+      const pendingCmd = getPendingEaCommand ? getPendingEaCommand() : null;
+
       res.json({
         isActive: status.config.isActive,
         selectedStrategy: status.config.selectedStrategy,
@@ -58,10 +85,10 @@ export function registerEaRoutes(app: any, getStatus: () => any, onTick: (data: 
         tradingMode: status.config.tradingMode,
         isAiModeEnabled: status.config.isAiModeEnabled,
         selectedAssets: status.config.selectedAssets,
-        pendingAction: "NONE",
-        pendingLot: 0,
-        pendingSL: 0,
-        pendingTP: 0,
+        pendingAction: pendingCmd ? pendingCmd.action : "NONE",
+        pendingLot: pendingCmd ? pendingCmd.lot : 0,
+        pendingSL: pendingCmd ? pendingCmd.sl : 0,
+        pendingTP: pendingCmd ? pendingCmd.tp : 0,
       });
     } catch (err: any) {
       console.error("EA tick handler error:", err);

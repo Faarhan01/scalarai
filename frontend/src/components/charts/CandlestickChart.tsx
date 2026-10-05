@@ -1,6 +1,6 @@
 import React from "react";
-import { Activity, Gauge, Zap } from "lucide-react";
 import type { CandleData, ChartData } from "../../hooks/useChartData";
+import { colors } from "@tokens/colors";
 
 export interface CandlestickChartProps {
   chartData: ChartData;
@@ -60,9 +60,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 const isBullish = closePrice >= openPrice;
                 const isLastCandle = idx === visibleCandles.length - 1;
 
-                // MT5-style colors: bullish = green/white, bearish = red/black
-                const bullishColor = "#54f354";
-                const bearishColor = "#ff4a4a";
+                const bullishColor = colors.emerald[500];
+                const bearishColor = colors.rose[500];
                 const strokeColor = isBullish ? bullishColor : bearishColor;
 
                 return (
@@ -113,7 +112,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 const x = width - padding - candleWidth / 2;
                 const y = padding + (1 - (lastClose - minPrice) / priceRange) * (height - 2 * padding);
                 const isBullish = lastClose >= lastOpen;
-                const glowColor = isBullish ? "#54f354" : "#ff4a4a";
+                const glowColor = isBullish ? colors.emerald[500] : colors.rose[500];
                 return (
                   <g>
                     <circle cx={x} cy={y} r="8" fill={glowColor} className="opacity-30 animate-pulse" />

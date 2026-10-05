@@ -10,12 +10,19 @@ export function useWebSocket(options: {
   onWebRequestTest: (testState: Record<string, any>) => void;
   onAiStrategy: (strategy: Record<string, any>) => void;
   onFetchStrategies: () => void;
+  onPong?: (pingLatency: number) => void;
+  onStatusChange?: (connected: boolean) => void;
 }) {
   const wsRef = useRef<WebSocket | null>(null);
   const wsConnectedRef = useRef(false);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
   const isUnmountedRef = useRef(false);
+  const optionsRef = useRef(options);
+
+  useEffect(() => {
+    optionsRef.current = options;
+  });
 
   const sendWsMessage = useCallback((msg: Record<string, any>): boolean => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -45,6 +52,7 @@ export function useWebSocket(options: {
         socket.onopen = () => {
           if (isUnmountedRef.current) return;
           wsConnectedRef.current = true;
+          optionsRef.current.onStatusChange?.(true);
           if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
           pingIntervalRef.current = window.setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) {
@@ -57,24 +65,27 @@ export function useWebSocket(options: {
           if (isUnmountedRef.current) return;
           try {
             const msg = JSON.parse(event.data);
-            if (msg.type === "init" && msg.payload) {
-              options.onInit(msg.payload);
+            if (msg.type === "pong" && msg.clientTime) {
+              const rtt = Math.max(1, Date.now() - msg.clientTime);
+              optionsRef.current.onPong?.(rtt);
+            } else if (msg.type === "init" && msg.payload) {
+              optionsRef.current.onInit(msg.payload);
             } else if (msg.type === "tick") {
-              options.onTick(msg);
+              optionsRef.current.onTick(msg);
             } else if (msg.type === "trades") {
-              options.onTrades(msg);
+              optionsRef.current.onTrades(msg);
             } else if (msg.type === "log" && msg.log) {
-              options.onLog(msg.log);
+              optionsRef.current.onLog(msg.log);
             } else if (msg.type === "config" && msg.config) {
-              options.onConfig(msg.config);
+              optionsRef.current.onConfig(msg.config);
             } else if (msg.type === "connection") {
-              options.onConnection(msg);
+              optionsRef.current.onConnection(msg);
             } else if (msg.type === "webrequest_test" && msg.testState) {
-              options.onWebRequestTest(msg.testState);
+              optionsRef.current.onWebRequestTest(msg.testState);
             } else if (msg.type === "ai_strategy" && msg.aiSynthesizedStrategy) {
-              options.onAiStrategy(msg.aiSynthesizedStrategy);
+              optionsRef.current.onAiStrategy(msg.aiSynthesizedStrategy);
             }
-            options.onFetchStrategies();
+            optionsRef.current.onFetchStrategies();
           } catch {
             // ignore parse errors
           }
@@ -83,6 +94,7 @@ export function useWebSocket(options: {
         socket.onclose = () => {
           if (isUnmountedRef.current) return;
           wsConnectedRef.current = false;
+          optionsRef.current.onStatusChange?.(false);
           if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
           reconnectTimeoutRef.current = window.setTimeout(connectWs, 2500);
         };
@@ -113,17 +125,7 @@ export function useWebSocket(options: {
         }
       }
     };
-  }, [
-    options.onInit,
-    options.onTick,
-    options.onTrades,
-    options.onLog,
-    options.onConfig,
-    options.onConnection,
-    options.onWebRequestTest,
-    options.onAiStrategy,
-    options.onFetchStrategies,
-  ]);
+  }, []);
 
   return { wsRef, wsConnectedRef, sendWsMessage };
 }

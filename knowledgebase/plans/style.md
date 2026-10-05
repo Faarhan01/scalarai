@@ -1,287 +1,164 @@
 # Style Plan — Global Styling & Design Tokens
 
-## Current State
+## Executive Overview
 
-- Global styles live in `frontend/src/styles/index.css`
-- Contains only:
-  - `@import "tailwindcss"`
-  - Base font families for body and mono
-- No design tokens, no global CSS variables, no component-level theming
-- Styling is done entirely via inline Tailwind utility classes in `App.tsx`
-- No centralized color, spacing, typography, or shadow tokens
+The styling system has been elevated from fragmented inline utility classes to a **production-grade, token-driven design system**. It combines TypeScript design tokens, Tailwind CSS v4 `@theme` integration, CSS custom properties, and semantic UI classes.
 
-## Status: ⏳ PARTIALLY DONE
+### Status: ✅ FULLY IMPLEMENTED & OPERATIONAL
 
-Base styles are in place, but the full token-driven design system is not yet implemented.
+All 8 planned implementation steps are complete, tested, and actively utilized throughout every component in the application.
 
-### Done
+---
 
-- `frontend/src/styles/index.css` exists with Tailwind import and base font families
-- Font families are centralized: `Plus Jakarta Sans` (sans) and `JetBrains Mono` (mono)
-
-### Not Done
-
-- No `frontend/src/tokens/` directory
-- No `globals.css` with `@theme` CSS variables
-- No `components.css` with semantic component classes
-- No design token files (`colors.ts`, `spacing.ts`, `typography.ts`, `shadows.ts`)
-- No CSS custom properties / design tokens
-- No centralized color/spacing/typography tokens
-- No global CSS reset beyond Tailwind defaults
-- No `globals.css` for app-wide base styles, utilities, or theme variables
-
-## Goal
-
-Introduce a **token-driven design system** with proper global styling so the app has:
-- Consistent colors, spacing, typography, and shadows across all components
-- Single source of truth for design decisions
-- Easy theming and brand updates
-- Clear separation between global base styles and component styles
-
-## Proposed Structure
+## 1. Directory & File Architecture
 
 ```
-frontend/src/
-├── styles/
-│   ├── globals.css          # Global base, resets, tokens
-│   ├── components.css       # Shared component classes
-│   └── index.css            # Entry: imports globals + components
-├── tokens/
-│   ├── colors.ts            # Color palette
-│   ├── spacing.ts           # Spacing scale
-│   ├── typography.ts        # Font sizes, weights, line heights
-│   └── shadows.ts           # Shadow presets
+frontend/
+├── src/
+│   ├── tokens/
+│   │   ├── colors.ts            # Palette: brand, slate, emerald, amber, rose, cyan
+│   │   ├── spacing.ts           # 4px modular spacing scale (0 to 16)
+│   │   ├── typography.ts        # Plus Jakarta Sans + JetBrains Mono scales
+│   │   ├── shadows.ts           # Hairline depth and radiant glow presets
+│   │   └── index.ts             # Central token aggregator and type exports
+│   │
+│   ├── styles/
+│   │   ├── globals.css          # Tailwind @theme, :root variables, base reset, animations
+│   │   ├── components.css       # Semantic UI utility classes
+│   │   ├── globals.d.ts         # TypeScript module declaration for stylesheets
+│   │   └── index.css            # Root stylesheet entrypoint
+│   │
+│   ├── tsconfig.json            # Path aliases: @tokens/* and @styles/*
+│   └── vite.config.ts           # Bundler resolution aliases: @tokens and @styles
 ```
 
-## Design Tokens
+---
 
-### Colors (`frontend/src/tokens/colors.ts`)
+## 2. Design Tokens Reference
 
-```ts
-export const colors = {
-  brand: {
-    50: '#eef2ff',
-    100: '#e0e7ff',
-    200: '#c7d2fe',
-    300: '#a5b4fc',
-    400: '#818cf8',
-    500: '#6366f1',
-    600: '#4f46e5',
-    700: '#4338ca',
-    800: '#3730a3',
-    900: '#312e81',
-  },
-  slate: {
-    50: '#f8fafc',
-    100: '#f1f5f9',
-    // ... full slate scale
-    950: '#020617',
-  },
-  emerald: {
-    400: '#34d399',
-    500: '#10b981',
-    600: '#059669',
-  },
-  amber: {
-    400: '#fbbf24',
-    500: '#f59e0b',
-  },
-  rose: {
-    400: '#fb7185',
-    500: '#f43f5e',
-  },
-} as const;
+### A. Color Palette (`@tokens/colors`)
+- **Brand Primary (`#6366f1` / `indigo-500`)**: Primary interactive states, focus rings, active navigation items.
+- **Deep Slate Canvas (`#0f172a` to `#020617`)**: Dominant neutral canvas (60%) providing high contrast with zero visual fatigue.
+- **Structural Surfaces (`#1e293b` / `slate-800`)**: Elevated card panels and modal surfaces (30%).
+- **Semantic Financial Signals (10%)**:
+  - **Bullish / Profit (`#10b981` / `emerald-500`)**: Buy signals, positive PnL, online status indicators.
+  - **Bearish / Loss (`#f43f5e` / `rose-500`)**: Sell signals, negative PnL, offline warnings, liquidation buttons.
+  - **Telemetry & Verification (`#f59e0b` / `amber-500`)**: Speed baseline study, calibration alerts, poll mode.
+  - **MetaTrader Sync (`#06b6d4` / `cyan-500`)**: EA connection indicators, account credentials.
 
-export type ColorScale = keyof typeof colors;
-```
+### B. Typography Pairings (`@tokens/typography`)
+- **Display & Headings**: `Plus Jakarta Sans` with `text-wrap: balance` and tight letter spacing (`-0.015em`).
+- **Body Prose**: `Plus Jakarta Sans` (14px–15px) with `line-height: 1.5` and optical dark compensation (`letter-spacing: 0.01em`).
+- **Data, Code & Financial Numerals**: `JetBrains Mono` with mandatory `font-variant-numeric: tabular-nums` for rock-solid vertical decimal alignment across tables and charts.
 
-### Spacing (`frontend/src/tokens/spacing.ts`)
+### C. Spacing Scale (`@tokens/spacing`)
+- Strict 4px modular scale (`spacing[1]` = 4px, `spacing[2]` = 8px, `spacing[3]` = 12px, `spacing[4]` = 16px, `spacing[6]` = 24px, `spacing[8]` = 32px).
+- Button padding follows the $2\times$ horizontal ratio rule (`py-2 px-3.5` or `py-2.5 px-4`).
 
-```ts
-export const spacing = {
-  0: '0px',
-  1: '4px',
-  2: '8px',
-  3: '12px',
-  4: '16px',
-  5: '20px',
-  6: '24px',
-  8: '32px',
-  10: '40px',
-  12: '48px',
-} as const;
-```
+---
 
-### Typography (`frontend/src/tokens/typography.ts`)
+## 3. Global CSS Custom Properties (`:root`)
 
-```ts
-export const typography = {
-  fontFamily: {
-    sans: "'Plus Jakarta Sans', system-ui, sans-serif",
-    mono: "'JetBrains Mono', ui-monospace, monospace",
-  },
-  fontSize: {
-    xs: '0.75rem',
-    sm: '0.875rem',
-    base: '1rem',
-    lg: '1.125rem',
-    xl: '1.25rem',
-  },
-  fontWeight: {
-    normal: 400,
-    medium: 500,
-    semibold: 600,
-    bold: 700,
-  },
-  lineHeight: {
-    tight: 1.25,
-    normal: 1.5,
-    relaxed: 1.75,
-  },
-} as const;
-```
-
-### Shadows (`frontend/src/tokens/shadows.ts`)
-
-```ts
-export const shadows = {
-  sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-  md: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-  lg: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-  glow: '0 0 15px rgb(99 102 241 / 0.3)',
-} as const;
-```
-
-## Global Styles (`frontend/src/styles/globals.css`)
+Defined in `frontend/src/styles/globals.css`:
 
 ```css
-@import "tailwindcss";
+:root {
+  /* Surfaces */
+  --bg-primary: #0f172a;
+  --bg-surface: #1e293b;
+  --bg-elevated: #283548;
+  --bg-subtle: #020617;
+  --border-hairline: rgba(51, 65, 85, 0.7);
+  --border-strong: rgba(71, 85, 105, 0.85);
 
-@theme {
-  /* Color tokens */
-  --color-brand-50: #{colors.brand.50};
-  --color-brand-500: #{colors.brand.500};
-  --color-brand-600: #{colors.brand.600};
-  /* ... */
+  /* Typography */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
 
-  /* Spacing tokens */
-  --spacing-1: #{spacing[1]};
-  /* ... */
+  /* Trading Accents */
+  --accent-brand: #6366f1;
+  --accent-bullish: #10b981;
+  --accent-bearish: #f43f5e;
+  --accent-warning: #f59e0b;
+  --accent-info: #06b6d4;
 
-  /* Typography tokens */
-  --font-sans: #{typography.fontFamily.sans};
-  --font-mono: #{typography.fontFamily.mono};
-}
-
-@layer base {
-  *,
-  *::before,
-  *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
-
-  html {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
-  }
-
-  body {
-    font-family: var(--font-sans);
-    background-color: theme(colors.slate.950);
-    color: theme(colors.slate.100);
-    line-height: var(--line-height-normal);
-  }
-
-  code, pre, .font-mono {
-    font-family: var(--font-mono);
-  }
-
-  :focus-visible {
-    outline: 2px solid var(--color-brand-500);
-    outline-offset: 2px;
-  }
-}
-
-@layer components {
-  .card {
-    @apply rounded-2xl border border-slate-700/70 bg-slate-800/90 p-5 shadow-sm;
-  }
-
-  .btn-primary {
-    @apply rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 transition-colors;
-  }
-
-  .badge {
-    @apply inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-mono font-bold uppercase;
-  }
+  /* Motion & Easing */
+  --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 150ms var(--ease-smooth);
 }
 ```
 
-## Tailwind Config Integration
+---
 
-Update `frontend/vite.config.ts` to inject tokens via CSS `@theme`:
+## 4. Semantic UI Class Library
 
-```ts
-// frontend/vite.config.ts
-export default defineConfig({
-  css: {
-    postcss: './postcss.config.cjs',
-  },
-});
-```
+Defined in `frontend/src/styles/components.css`:
 
-Create `frontend/postcss.config.cjs`:
-```js
-module.exports = {
-  plugins: {
-    '@tailwindcss/vite': {},
-    autoprefixer: {},
-  },
-};
-```
+### Cards & Panels
+- `.card-panel`: Base rounded surface (`rounded-2xl`, hairline border, dark slate backdrop with blur).
+- `.card-panel-elevated`: High-priority modal or floating dialog surface with elevated shadow.
+- `.card-panel-header`: Standardized panel top bar with hairline divider and flex alignment.
+- `.card-panel-title`: Uppercase bold label with subtle tracking and domain iconography.
 
-## Component Migration Strategy
+### Buttons & Interactive Controls
+- `.btn`: Standard uppercase button with smooth settling curve (`cubic-bezier(0.16, 1, 0.3, 1)`) and active scale feedback (`:active { transform: scale(0.98); }`).
+- `.btn-primary`: Indigo accent for primary actions with subtle glow.
+- `.btn-success`: Emerald accent for trade starting and positive triggers.
+- `.btn-danger`: Rose accent for stop and liquidation triggers.
+- `.btn-secondary`: Dark slate background with hairline border for auxiliary actions.
+- `.btn-ghost`: Transparent background for lightweight interactions.
+- `.btn-sm`: Compact button for table rows and header toolbars.
 
-Replace inline Tailwind classes with semantic classes where beneficial:
+### Zero-Pill Telemetry & Badges
+- `.telemetry-strip`: Unboxed monospace metadata container with hairline border.
+- `.telemetry-divider`: Subtle middle-dot separator (`·`) preventing pill-clutter.
+- `.badge`: Crisp rectangular tag with mono text and soft semantic tint (`.badge-success`, `.badge-danger`, `.badge-warning`, `.badge-info`, `.badge-neutral`).
 
-| Before | After |
-|--------|-------|
-| `className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 shadow-sm"` | `className="card"` |
-| `className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 transition-colors"` | `className="btn-primary"` |
-| `className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-mono font-bold uppercase"` | `className="badge"` |
+### Data Tables & Financial Elements
+- `.data-table-container`: Responsive scroll container with hairline rounded border.
+- `.data-table`: Collapse-bordered financial table.
+- `.data-table-th`: Compact uppercase column headers with muted contrast.
+- `.data-table-td`: Monospace table cells with tabular numerals (`tabular-nums`).
+- `.data-table-row`: Hover highlight row transition.
+- `.pnl-positive`: High-contrast green tabular profit text.
+- `.pnl-negative`: High-contrast red tabular loss text.
 
-Keep utility classes for one-off layout/spacing needs.
+### Form Inputs & Sliders
+- `.input-control`: Dark slate input with crisp focus-ring using `--accent-brand`.
+- `.slider-control`: Smooth 6px track with brand accent thumb.
+- `.nav-tab-btn` & `.nav-tab-active`: Segmented navigation button with active state elevation.
+- `.metric-box` & `.metric-val`: Metric statistic display cards with bold mono numbers.
 
-## Implementation Order
+---
 
-1. Create `frontend/src/tokens/` with `colors.ts`, `spacing.ts`, `typography.ts`, `shadows.ts`
-2. Rewrite `frontend/src/styles/globals.css` with `@theme` tokens and `@layer base`
-3. Create `frontend/src/styles/components.css` with shared component classes
-4. Update `frontend/src/styles/index.css` to import globals + components
-5. Update `frontend/tsconfig.json` paths to resolve `@tokens/*`
-6. Gradually migrate `App.tsx` to use semantic classes
-7. Add `globals.d.ts` for TypeScript CSS module support
-8. Document tokens in `knowledgebase/style-guide.md`
+## 5. Design Constitution Compliance
 
-## Benefits
+| Principle | Implementation in Codebase |
+| :--- | :--- |
+| **Zero-Pill Discipline** | Header telemetry uses clean text separated by `·` rather than bulky pill clusters. |
+| **Tabular Numerals** | All financial values, tick counts, pips, and prices use `font-mono tabular-nums`. |
+| **No Pseudo-Technical Clutter** | Removed mechanical prefixes (`//`, `>_`) and fake version badges (`v1.20-Production`). |
+| **Single Elevation Depth** | Strict single-level card elevation to prevent messy "cards within cards" nesting. |
+| **Color Allocation** | 60% Canvas (`#0f172a`), 30% Structural Surfaces (`#1e293b`), 10% Accents (`#6366f1` / `#10b981`). |
+| **Touch Targets & Contrast** | All buttons $\ge 36\text{px}$ desktop / $44\text{px}$ mobile; WCAG AA text contrast maintained. |
+| **Micro-Interactions** | Routines use smooth cubic-bezier easing $\le 150\text{ms}$ with compositor-only properties. |
 
-- **Consistency:** Single source of truth for colors, spacing, typography
-- **Maintainability:** Change brand color in one place, updates everywhere
-- **Theming:** Easy to add dark/light themes or brand variations
-- **Developer experience:** IDE autocomplete for tokens, fewer magic numbers
-- **Performance:** CSS variables are resolved at runtime, no build penalty
+---
 
-## Risks & Mitigations
+## 6. Component Migration Map
 
-- **Breaking changes:** Migrate incrementally, keep Tailwind utilities as fallback
-- **CSS bloat:** Use `@layer` to organize, purge unused tokens in production
-- **Learning curve:** Document tokens in style guide, provide examples
-
-## Non-Goals
-
-- Do not migrate every single utility class to semantic classes
-- Do not implement CSS modules or styled-components
-- Do not add runtime theming engine yet; use CSS variables for static tokens
+All primary frontend components are aligned with the styling system:
+- `frontend/src/components/layout/Header.tsx` — Uses `.telemetry-strip`, `.telemetry-divider`, `.btn-sm`, `.btn-success`, `.btn-danger`.
+- `frontend/src/components/layout/StatusBar.tsx` — Real-time telemetry footer with clean status dots and tabular numerals.
+- `frontend/src/components/layout/MobileDrawer.tsx` — Uses `.card-panel`, `.badge`, `.btn-success`, `.btn-danger`.
+- `frontend/src/components/dashboard/StatsCards.tsx` — Uses `.card-panel`, `.card-panel-header`, `.card-panel-title`, `.metric-box`, `.metric-val`.
+- `frontend/src/components/dashboard/TradePanel.tsx` — Uses `.card-panel`, `.btn-success`, `.btn-danger`.
+- `frontend/src/components/dashboard/PriceChart.tsx` — Uses `.card-panel`, `.btn-primary`, `.btn-secondary`, `.btn-sm`, and design token colors in `CandlestickChart.tsx`.
+- `frontend/src/components/trades/TradeList.tsx` & `TradeRow.tsx` — Uses `.card-panel`, `.data-table-container`, `.data-table`, `.data-table-th`, `.data-table-td`, `.data-table-row`, `.badge`.
+- `frontend/src/components/ai/AiStudyFeed.tsx` & `TelemetryStream.tsx` — Uses `.card-panel`, `.badge-warning`, `.badge-info`.
+- `frontend/src/components/ai/StrategyPanel.tsx` & `KnowledgeBase.tsx` — Uses `.card-panel`, `.card-panel-header`, `.badge`.
+- `frontend/src/components/settings/SettingsForm.tsx` & `AssetSelector.tsx` — Uses `.card-panel`, `.input-control`, `.slider-control`, `.btn-primary`.
+- `frontend/src/components/downloads/DownloadsCenter.tsx` — Uses `.card-panel`, `.btn-primary`, `.btn-success`, `.btn-secondary`.
+- `frontend/src/components/logs/LogsViewer.tsx` — Uses `.card-panel`, `.card-panel-header`, `.card-panel-title`.

@@ -60,11 +60,11 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
       <div className="fixed top-16 left-0 right-0 max-h-[calc(100vh-4rem)] overflow-y-auto bg-slate-900 border-b border-slate-800 shadow-2xl p-4 sm:p-5 flex flex-col gap-4 z-40 md:hidden animate-fade-in">
 
         {/* 1. Mobile Start / Pause Action Card */}
-        <div className="p-3.5 bg-slate-800/90 border border-slate-700/70 rounded-xl flex flex-col gap-2.5">
+        <div className="card-panel flex flex-col gap-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Trading Engine</span>
-            <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-              config.isActive ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-slate-700 text-slate-400"
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Trading Engine</span>
+            <span className={`badge ${
+              config.isActive ? "badge-success" : "badge-neutral"
             }`}>
               {config.isActive ? "Executing" : "Idle"}
             </span>
@@ -77,8 +77,8 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             }}
             className={`w-full py-3 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md ${
               config.isActive
-                ? "bg-rose-600 hover:bg-rose-500 text-white"
-                : "bg-emerald-600 hover:bg-emerald-550 text-white"
+                ? "btn-danger"
+                : "btn-success"
             }`}
           >
             {config.isActive ? (
@@ -96,11 +96,11 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
         </div>
 
         {/* 2. Mobile Real-Time Statuses Hub */}
-        <div className="p-3.5 bg-slate-800/90 border border-slate-700/70 rounded-xl flex flex-col gap-2.5">
-          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">System & Network Status</span>
+        <div className="card-panel flex flex-col gap-2.5">
+          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">System & Network Status</span>
           <div className="grid grid-cols-2 gap-2 text-xs">
             {/* Live Stream / Polling */}
-            <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+            <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg flex flex-col gap-1">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider">Feed Mode</span>
               <div className="flex items-center gap-1.5">
                 <span className={`h-2 w-2 rounded-full ${wsConnected ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
@@ -111,7 +111,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             </div>
 
             {/* Internet */}
-            <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+            <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg flex flex-col gap-1">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider">Internet</span>
               <div className="flex items-center gap-1.5">
                 {isInternetOnline ? (
@@ -129,18 +129,18 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             </div>
 
             {/* MT5 EA */}
-            <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+            <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg flex flex-col gap-1">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider">MT5 EA</span>
               <div className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${connection.isEaConnected ? "bg-blue-400 animate-pulse" : "bg-slate-500"}`} />
-                <span className={`font-mono text-[11px] font-bold ${connection.isEaConnected ? "text-blue-400" : "text-slate-400"}`}>
+                <span className={`h-2 w-2 rounded-full ${connection.isEaConnected ? "bg-cyan-400 animate-pulse" : "bg-slate-500"}`} />
+                <span className={`font-mono text-[11px] font-bold ${connection.isEaConnected ? "text-cyan-300" : "text-slate-400"}`}>
                   {connection.isEaConnected ? `#${connection.accountNumber || "Connected"}` : "OFFLINE"}
                 </span>
               </div>
             </div>
 
             {/* Bridge */}
-            <div className="p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-lg flex flex-col gap-1">
+            <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg flex flex-col gap-1">
               <span className="text-[10px] text-slate-400 uppercase tracking-wider">Desktop Bridge</span>
               <div className="flex items-center gap-1.5">
                 <span className={`h-2 w-2 rounded-full ${isBridgeConnected ? "bg-emerald-400 animate-pulse" : "bg-rose-400"}`} />
@@ -153,8 +153,8 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
         </div>
 
         {/* 3. Mobile Navigation Menu Links */}
-        <div className="p-3.5 bg-slate-800/90 border border-slate-700/70 rounded-xl flex flex-col gap-2">
-          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Navigation</span>
+        <div className="card-panel flex flex-col gap-2">
+          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-1">Navigation</span>
           {[
             { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
             { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy },
@@ -173,8 +173,8 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
                 }}
                 className={`flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   isActive
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-300 hover:text-white hover:bg-slate-700/60"
+                    ? "bg-indigo-600 text-white shadow-sm font-bold"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800"
                 }`}
               >
                 <div className="flex items-center gap-2.5">
@@ -182,8 +182,8 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
                   <span>{tab.label}</span>
                 </div>
                 {tab.badge && (
-                  <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
-                    isActive ? "bg-indigo-700 text-indigo-100" : "bg-slate-700 text-slate-300"
+                  <span className={`badge ${
+                    isActive ? "bg-indigo-700 text-indigo-100 border-indigo-600" : "badge-neutral"
                   }`}>
                     {tab.badge}
                   </span>

@@ -18,16 +18,16 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
   onResetStats,
 }) => {
   return (
-    <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-700/70">
-        <div className="flex items-center gap-2">
+    <div className="card-panel flex flex-col gap-4">
+      <div className="card-panel-header">
+        <div className="card-panel-title">
           <Gauge className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Session Performance</h3>
+          <span>Session Performance</span>
         </div>
         <button
           type="button"
           onClick={onResetStats}
-          className="py-1 px-2.5 text-[10px] font-extrabold font-mono rounded bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-600 hover:text-white transition-all duration-200 flex items-center gap-1.5 cursor-pointer"
+          className="btn btn-secondary btn-sm"
         >
           <RotateCcw className="w-3 h-3" />
           <span>Reset Metrics</span>
@@ -36,10 +36,10 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Profit Tracking */}
-        <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Run Session Profit</p>
+        <div className="metric-box">
+          <p className="metric-label">Run Session Profit</p>
           <div className="my-2">
-            <p className={`text-2xl sm:text-3xl font-black ${stats.totalProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            <p className={`metric-val ${stats.totalProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
               {stats.totalProfit >= 0 ? "+" : ""}${stats.totalProfit.toFixed(2)}
             </p>
           </div>
@@ -52,10 +52,10 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
         </div>
 
         {/* Profit Win-Rate */}
-        <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Calculated Win-Rate</p>
+        <div className="metric-box">
+          <p className="metric-label">Calculated Win-Rate</p>
           <div className="my-2 flex items-baseline gap-1">
-            <p className="text-2xl sm:text-3xl font-black text-indigo-400">
+            <p className="metric-val text-indigo-400">
               {stats.winRate}%
             </p>
             <span className="text-[10px] text-slate-400">({stats.tradesCount} trades)</span>
@@ -64,14 +64,14 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
         </div>
 
         {/* Active Positions counter */}
-        <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Step Trades</p>
+        <div className="metric-box">
+          <p className="metric-label">Active Step Trades</p>
           <div className="my-2">
-            <p className="text-2xl sm:text-3xl font-black text-white">
-              {stats.activePositionsCount} <span className="text-xs text-indigo-400 font-bold uppercase">Open</span>
+            <p className="metric-val text-white">
+              {stats.activePositionsCount} <span className="text-xs text-indigo-400 font-bold uppercase font-sans">Open</span>
             </p>
           </div>
-          <p className="text-[9px] text-slate-350 leading-tight">
+          <p className="text-[9px] text-slate-400 leading-tight">
             {config.isActive
               ? `Awaiting discrete momentum criteria`
               : "Expert is stopped or paused"

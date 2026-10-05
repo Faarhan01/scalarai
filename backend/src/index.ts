@@ -37,6 +37,8 @@ app.use(errorMiddleware);
 
 // Global state
 let tradeConfig = getDefaultTradeConfig();
+let pendingBridgeOrders: any[] = [];
+let pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null = null;
 const symbolStates = new Map<string, {
   ticks: any[];
   candles: any[];
@@ -63,7 +65,13 @@ function getSymbolState(symbol: string) {
   return symbolStates.get(symbol)!;
 }
 
-const webRequestTest = { status: "idle" as const, lastTested: "", error: "", details: "Awaiting first WebRequest test trigger.", triggerTest: false };
+const webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean } = {
+  status: "idle",
+  lastTested: "",
+  error: "",
+  details: "Awaiting first WebRequest test trigger.",
+  triggerTest: false,
+};
 let systemLogs: SystemLog[] = [];
 let tradesList: TradeRecord[] = [];
 let nextTicket = 837201;
@@ -260,7 +268,7 @@ function updateMarket(data: any) {
   state.currentPrice = targetPrice;
   state.lastDirection = direction;
 
-  state.ticks.push({
+  const tickRecord = {
     time: Date.now(),
     price: state.currentPrice,
     direction,
@@ -273,8 +281,28 @@ function updateMarket(data: any) {
     sellLocked: isSellLocked,
     spread: data.spread !== undefined ? Number(data.spread) : null,
     session: data.session || null,
-  });
+  };
+  state.ticks.push(tickRecord);
   if (state.ticks.length > 150) state.ticks.shift();
+
+  // Persist tick to SQLite
+  try {
+    scalarAiDb.insertTick(tickRecord);
+  } catch (err) {
+    // Non-blocking for high-frequency streaming
+  }
+
+  // Incremental online speed calibration study
+  const absVelocity = Math.abs(numVelocity);
+  aiKnowledgeBase.totalObservations += 1;
+  const obs = aiKnowledgeBase.totalObservations;
+  aiKnowledgeBase.globalAverageSpeed = Number((((obs - 1) * aiKnowledgeBase.globalAverageSpeed + absVelocity) / obs).toFixed(4));
+  if (absVelocity > aiKnowledgeBase.peakVelocityRegistered) {
+    aiKnowledgeBase.peakVelocityRegistered = Number(absVelocity.toFixed(4));
+  }
+  if (obs % 25 === 0) {
+    persistAiKnowledge();
+  }
 
   aggregateTickIntoCandle(state, targetPrice);
 
@@ -299,6 +327,13 @@ function updateMarket(data: any) {
   state.connection.swapLong = data.swapLong !== undefined ? Number(data.swapLong) : null;
   state.connection.swapShort = data.swapShort !== undefined ? Number(data.swapShort) : null;
   state.connection.profitCalcMode = data.profitCalcMode !== undefined ? Number(data.profitCalcMode) : null;
+
+  // Real-time strategy evaluation when automated trading is active
+  if (tradeConfig.isActive) {
+    evaluateSimulatedStrategy().catch((err) => {
+      console.error("Strategy evaluation error on tick:", err);
+    });
+  }
 
   broadcastToDashboards({
     type: "tick",
@@ -461,6 +496,8 @@ async function openSimulatedPosition(type: "BUY" | "SELL", reason: string) {
   tradesList.unshift(newTrade);
   addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} - ${type} at ${getSymbolState(activeSymbol).currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
   const orderPayload = { action: (type || "BUY").toUpperCase(), symbol: activeSymbol, volume: Number(tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
+  pendingBridgeOrders.push({ ...orderPayload, id: newTrade.id, ticket: newTrade.ticket, timestamp: Date.now() });
+  pendingEaCommand = { action: (type || "BUY").toUpperCase(), lot: Number(tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
   mt5BridgeClients.forEach((client: WebSocket) => {
     if (client.readyState === 1) {
       try { client.send(JSON.stringify(orderPayload)); } catch {}
@@ -479,6 +516,8 @@ function closeSimulatedPosition(trade: TradeRecord, reason: string) {
   trade.reason = reason;
   addLog("SERVER", "SUCCESS", `Simulated Trade #${trade.ticket} CLOSED. Profit: ${finalProfit > 0 ? "+" : ""}$${finalProfit}`);
   const closePayload = { action: "CLOSE_ALL", symbol: activeSymbol, volume: trade.lotSize, sl: 0, tp: 0 };
+  pendingBridgeOrders.push({ ...closePayload, id: trade.id, timestamp: Date.now() });
+  pendingEaCommand = { action: "CLOSE_ALL", lot: trade.lotSize, sl: 0, tp: 0 };
   mt5BridgeClients.forEach((client: WebSocket) => {
     if (client.readyState === 1) {
       try { client.send(JSON.stringify(closePayload)); } catch {}
@@ -647,13 +686,54 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, getFullStatusPayload, updateMarket);
-  registerMarketRoutes(app, updateMarket);
-  registerSettingsRoutes(app, updateSettings, () => tradeConfig, () => {});
+  const getAndClearPendingOrders = () => {
+    const list = [...pendingBridgeOrders];
+    pendingBridgeOrders = [];
+    return list;
+  };
+
+  const getPendingEaCommand = () => {
+    const cmd = pendingEaCommand;
+    pendingEaCommand = null;
+    return cmd;
+  };
+
+  registerEaRoutes(app, getFullStatusPayload, () => tradeConfig, updateMarket, getPendingEaCommand);
+  registerMarketRoutes(app, updateMarket, () => tradeConfig);
+  registerSettingsRoutes(
+    app,
+    updateSettings,
+    () => tradeConfig,
+    () => webRequestTest,
+    () => {
+      webRequestTest.status = "pending";
+      webRequestTest.triggerTest = true;
+      webRequestTest.lastTested = new Date().toISOString();
+      webRequestTest.details = "Verification probe initiated. Waiting for MT5 bridge...";
+      broadcastToDashboards({ type: "webrequest_test", testState: webRequestTest });
+    },
+    (report) => {
+      webRequestTest.status = report.status as any;
+      webRequestTest.error = report.error || "";
+      webRequestTest.details = report.details || "";
+      webRequestTest.lastTested = new Date().toISOString();
+      webRequestTest.triggerTest = false;
+      broadcastToDashboards({ type: "webrequest_test", testState: webRequestTest });
+      addLog("SERVER", report.status === "success" ? "SUCCESS" : "WARNING", `WebRequest verification report: ${report.status.toUpperCase()} - ${report.details}`);
+    }
+  );
   registerTradeRoutes(app, toggleTrading, resetStats);
-  registerAiRoutes(app);
+  registerAiRoutes(app, () => ({
+    status: aiKnowledgeBase.totalObservations >= 20 ? "optimized" : "calibrating",
+    message: aiKnowledgeBase.totalObservations >= 20 ? "Quantitative baseline calibrated." : "AI is analyzing market speed baseline... Awaiting sufficient expert data stream from MetaTrader 5 terminal.",
+    count: aiKnowledgeBase.totalObservations,
+    aiKnowledgeBase,
+    aiSynthesizedStrategy,
+    candleStream: getSymbolState(activeSymbol).ticks,
+    averageVelocity: aiKnowledgeBase.globalAverageSpeed,
+  }));
   registerMcpRoute(app, mcpContext, process.env.SCALARAI_MCP_API_KEY || "+Z45RyDNhRZ5np8QWW6yrwfbKcnd5KNGzhzHU4nP8K");
-  registerStatusRoute(app, getFullStatusPayload, (symbol: string) => { activeSymbol = symbol; });
+  registerStatusRoute(app, getFullStatusPayload, (symbol: string) => { activeSymbol = symbol; }, getAndClearPendingOrders);
   registerHealthRoutes(app);
   registerStrategyRoutes(app);
 

@@ -1,7 +1,5 @@
-@import "tailwindcss";
-
 @theme {
-  /* Color tokens */
+  /* Brand palette */
   --color-brand-50: #eef2ff;
   --color-brand-100: #e0e7ff;
   --color-brand-200: #c7d2fe;
@@ -13,6 +11,7 @@
   --color-brand-800: #3730a3;
   --color-brand-900: #312e81;
 
+  /* Neutral palette (Deep Financial Slate) */
   --color-slate-50: #f8fafc;
   --color-slate-100: #f1f5f9;
   --color-slate-150: #eef1f6;
@@ -29,6 +28,7 @@
   --color-slate-900: #0f172a;
   --color-slate-950: #020617;
 
+  /* Semantic trading accents */
   --color-emerald-300: #6ee7b7;
   --color-emerald-400: #34d399;
   --color-emerald-500: #10b981;
@@ -39,14 +39,42 @@
 
   --color-rose-400: #fb7185;
   --color-rose-500: #f43f5e;
+  --color-rose-600: #e11d48;
 
   --color-cyan-400: #22d3ee;
   --color-cyan-500: #06b6d4;
   --color-cyan-600: #0891b2;
 
   /* Typography tokens */
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  /* Semantic surfaces */
+  --bg-primary: #0f172a;
+  --bg-surface: #1e293b;
+  --bg-elevated: #283548;
+  --bg-subtle: #020617;
+  --border-hairline: rgba(51, 65, 85, 0.7);
+  --border-strong: rgba(71, 85, 105, 0.85);
+
+  /* Semantic text hierarchy */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
+
+  /* Trading accents */
+  --accent-brand: #6366f1;
+  --accent-bullish: #10b981;
+  --accent-bearish: #f43f5e;
+  --accent-warning: #f59e0b;
+  --accent-info: #06b6d4;
+
+  /* Motion & easing curve */
+  --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 150ms var(--ease-smooth);
 }
 
 @layer base {
@@ -63,138 +91,121 @@
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     scroll-behavior: smooth;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   body {
     font-family: var(--font-sans);
-    background-color: theme(colors.slate.900);
-    color: theme(colors.slate.100);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
     line-height: 1.5;
+    letter-spacing: 0.01em;
     min-height: 100vh;
   }
 
-  code, pre, .font-mono {
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+    letter-spacing: -0.015em;
+  }
+
+  code, pre, .font-mono, .tabular-nums, table {
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
   }
 
   :focus-visible {
-    outline: 2px solid theme(colors.brand.500);
+    outline: 2px solid var(--accent-brand);
     outline-offset: 2px;
   }
 
   ::selection {
-    background-color: theme(colors.brand.500);
-    color: white;
+    background-color: var(--accent-brand);
+    color: #ffffff;
   }
 
-  /* Scrollbar styling */
+  /* Cross-browser Scrollbars */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 #0f172a;
+  }
+
+  /* Custom WebKit Scrollbar */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    background: theme(colors.slate.800);
+    background: #0f172a;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: theme(colors.slate.600);
-    border-radius: 4px;
+    background: #334155;
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: theme(colors.slate.500);
+    background: #475569;
   }
 }
 
-@layer components {
-  .card {
-    border-radius: 1rem;
-    border: 1px solid theme(colors.slate.700 / 0.7);
-    background-color: theme(colors.slate.800 / 0.9);
-    padding: 1.25rem;
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+/* Reduced Motion Support for Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+}
 
-  .card-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid theme(colors.slate.700 / 0.6);
-    margin-bottom: 1rem;
-  }
+/* Radiant Glow Utilities */
+.glow-brand {
+  box-shadow: 0 0 15px -2px rgba(99, 102, 241, 0.35);
+}
 
-  .card-title {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: theme(colors.slate.200);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
+.glow-emerald {
+  box-shadow: 0 0 15px -2px rgba(16, 185, 129, 0.35);
+}
 
-  .btn-primary {
-    border-radius: 0.5rem;
-    background-color: theme(colors.brand.600);
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: white;
-    transition: background-color 0.2s;
-  }
+.glow-rose {
+  box-shadow: 0 0 15px -2px rgba(244, 63, 94, 0.35);
+}
 
-  .btn-primary:hover {
-    background-color: theme(colors.brand.500);
-  }
+.glow-amber {
+  box-shadow: 0 0 15px -2px rgba(245, 158, 11, 0.35);
+}
 
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    border-radius: 0.375rem;
-    border: 1px solid theme(colors.slate.700);
-    padding: 0.125rem 0.5rem;
-    font-size: 0.625rem;
-    font-family: var(--font-mono);
-    font-weight: 700;
-    text-transform: uppercase;
-  }
+/* Subtle Technical Grid Background for Financial Charts & Dashboards */
+.trading-grid-background {
+  background-size: 24px 24px;
+  background-image: 
+    linear-gradient(to right, rgba(51, 65, 85, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(51, 65, 85, 0.15) 1px, transparent 1px);
+}
 
-  .badge-success {
-    border-color: theme(colors.emerald.500 / 0.3);
-    background-color: theme(colors.emerald.500 / 0.1);
-    color: theme(colors.emerald.300);
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
-  .badge-danger {
-    border-color: theme(colors.rose.500 / 0.3);
-    background-color: theme(colors.rose.500 / 0.1);
-    color: theme(colors.rose.400);
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
   }
+  100% {
+    background-position: 200% 0;
+  }
+}
 
-  .input-field {
-    width: 100%;
-    border-radius: 0.5rem;
-    border: 1px solid theme(colors.slate.700);
-    background-color: theme(colors.slate.900);
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    font-family: var(--font-mono);
-    color: theme(colors.slate.100);
-  }
-
-  .input-field:focus {
-    outline: none;
-    border-color: theme(colors.brand.500);
-  }
-
-  .input-field::placeholder {
-    color: theme(colors.slate.500);
-  }
-
-  .section-divider {
-    border-top: 1px solid theme(colors.slate.700 / 0.6);
-    margin-top: 1rem;
-    padding-top: 1rem;
-  }
+.animate-fade-in {
+  animation: fadeIn 0.2s var(--ease-smooth) forwards;
 }

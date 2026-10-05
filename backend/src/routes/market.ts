@@ -1,7 +1,12 @@
 import { Request, Response } from "express";
 import { scalarAiDb } from "../db";
+import { TradeConfig } from "../types";
 
-export function registerMarketRoutes(app: any, updateMarket: (data: any) => void) {
+export function registerMarketRoutes(
+  app: any,
+  updateMarket: (data: any) => void,
+  getConfig?: () => TradeConfig
+) {
   app.post("/api/update-market", async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
@@ -12,16 +17,19 @@ export function registerMarketRoutes(app: any, updateMarket: (data: any) => void
       }
 
       updateMarket(body);
-      const status = updateMarket.toString().includes("getStatus") ? {} : {};
+      const currentConfig = getConfig ? getConfig() : null;
+
       res.json({
         status: "ok",
-        isActive: false,
-        selectedStrategy: "TREND_FOLLOWING",
-        lotSize: 0.1,
-        takeProfitPoints: 300,
-        stopLossPoints: 150,
-        trailingStopPoints: 100,
-        useTrailingStop: true,
+        isActive: currentConfig ? currentConfig.isActive : false,
+        selectedStrategy: currentConfig ? currentConfig.selectedStrategy : "TREND_FOLLOWING",
+        lotSize: currentConfig ? currentConfig.lotSize : 0.1,
+        takeProfitPoints: currentConfig ? currentConfig.takeProfitPoints : 300,
+        stopLossPoints: currentConfig ? currentConfig.stopLossPoints : 150,
+        trailingStopPoints: currentConfig ? currentConfig.trailingStopPoints : 100,
+        useTrailingStop: currentConfig ? currentConfig.useTrailingStop : true,
+        maxTrades: currentConfig ? currentConfig.maxTrades : 3,
+        tradingMode: currentConfig ? currentConfig.tradingMode : "Scalping",
       });
     } catch (err: any) {
       console.error("Market update error:", err);

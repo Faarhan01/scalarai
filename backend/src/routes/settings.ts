@@ -1,9 +1,17 @@
 import { Request, Response } from "express";
 
-export function registerSettingsRoutes(app: any, updateSettings: (params: any) => void, getSettings: () => any, triggerTest: () => void) {
+export function registerSettingsRoutes(
+  app: any,
+  updateSettings: (params: any) => void,
+  getSettings: () => any,
+  getWebRequestTest: () => { status: string; lastTested: string; error: string; details: string; triggerTest: boolean },
+  triggerTest: () => void,
+  reportTest: (report: { status: string; error?: string; details?: string }) => void
+) {
   app.get("/api/settings", (req: Request, res: Response) => {
     try {
-      res.json({ ...getSettings(), triggerWebRequestTest: false });
+      const testState = getWebRequestTest();
+      res.json({ ...getSettings(), triggerWebRequestTest: testState.triggerTest });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to fetch settings" });
     }
@@ -21,7 +29,8 @@ export function registerSettingsRoutes(app: any, updateSettings: (params: any) =
   app.post("/api/test-webrequest/trigger", (req: Request, res: Response) => {
     try {
       triggerTest();
-      res.json({ status: "ok", testState: { status: "pending" } });
+      const testState = getWebRequestTest();
+      res.json({ status: "ok", testState });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to trigger test" });
     }
@@ -29,7 +38,11 @@ export function registerSettingsRoutes(app: any, updateSettings: (params: any) =
 
   app.get("/api/test-webrequest/status", (req: Request, res: Response) => {
     try {
-      res.json({ testState: { status: "idle", details: "Awaiting first WebRequest test trigger." }, suggestedUrl: "http://127.0.0.1:3000" });
+      const testState = getWebRequestTest();
+      const host = req.get("host") || "127.0.0.1:3000";
+      const protocol = req.protocol || "http";
+      const suggestedUrl = `${protocol}://${host}`;
+      res.json({ testState, suggestedUrl });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to get test status" });
     }
@@ -37,6 +50,8 @@ export function registerSettingsRoutes(app: any, updateSettings: (params: any) =
 
   app.post("/api/test-webrequest/report", (req: Request, res: Response) => {
     try {
+      const { status, error, details } = req.body || {};
+      reportTest({ status: status || "success", error: error || "", details: details || "" });
       res.json({ status: "ok" });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to process report" });

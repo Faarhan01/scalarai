@@ -32,3 +32,7 @@ export { KnowledgeBase } from "./ai/KnowledgeBase";
 export { SettingsForm } from "./settings/SettingsForm";
 export { AssetSelector } from "./settings/AssetSelector";
 export { WebRequestTest } from "./settings/WebRequestTest";
+
+// Downloads & Logs
+export { DownloadsCenter } from "./downloads/DownloadsCenter";
+export { LogsViewer } from "./logs/LogsViewer";

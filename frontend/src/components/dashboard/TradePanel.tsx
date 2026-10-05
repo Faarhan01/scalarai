@@ -27,10 +27,10 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   const isLocked = aiStudyStatus !== "optimized" && aiStudyStatus !== "active";
 
   return (
-    <div className={`p-5 rounded-2xl border flex flex-col justify-between transition-all duration-300 relative overflow-hidden ${
+    <div className={`card-panel flex flex-col justify-between transition-all duration-300 relative overflow-hidden ${
       config.isActive
-        ? "bg-emerald-600/10 border-emerald-500/30"
-        : "bg-indigo-600/10 border-indigo-500/20"
+        ? "border-emerald-500/40 bg-slate-900/90 shadow-emerald-950/20"
+        : "border-indigo-500/30 bg-slate-900/90"
     }`}>
       {/* sleek locked screen overlay */}
       {aiStudyStatus === "calibrating" && (
@@ -52,9 +52,9 @@ export const TradePanel: React.FC<TradePanelProps> = ({
       <div className="mb-4">
         <div className="flex items-center gap-2 mb-1">
           <Cpu className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest">Execution Engine</h3>
+          <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest font-mono">Execution Engine</h3>
         </div>
-        <p className="text-xs text-slate-350 leading-relaxed">
+        <p className="text-xs text-slate-400 leading-relaxed">
           {config.isActive
             ? "Expert Advisor trade validation active. Watching for tick signals."
             : "Scalar trading core is idle. Toggle execution keys to initiate scalp signals."
@@ -66,12 +66,12 @@ export const TradePanel: React.FC<TradePanelProps> = ({
       <button
         onClick={onToggleTradingExecution}
         disabled={isLocked}
-        className={`w-full py-4 rounded-xl font-black text-xs sm:text-sm uppercase tracking-widest leading-none shadow-lg transition-all flex items-center justify-center gap-3 ${
+        className={`w-full py-3.5 rounded-lg font-bold text-xs sm:text-sm uppercase tracking-widest leading-none shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer ${
           isLocked
             ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50 shadow-none"
             : config.isActive
-            ? "bg-red-500 hover:bg-red-400 text-white shadow-red-500/10 cursor-pointer"
-            : "bg-emerald-500 hover:bg-emerald-400 text-emerald-950 shadow-emerald-500/20 cursor-pointer"
+            ? "btn-danger shadow-rose-600/20"
+            : "btn-success shadow-emerald-600/20"
         }`}
       >
         {isLocked ? (
@@ -81,12 +81,12 @@ export const TradePanel: React.FC<TradePanelProps> = ({
           </>
         ) : config.isActive ? (
           <>
-            <Square className="w-5 h-5 fill-current" />
+            <Square className="w-4 h-4 fill-current" />
             <span>STOP EXPERT WORKER</span>
           </>
         ) : (
           <>
-            <Play className="w-5 h-5 fill-current" />
+            <Play className="w-4 h-4 fill-current" />
             <span>START EXPERT WORKER</span>
           </>
         )}

@@ -36,15 +36,15 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
 }) => {
   return (
     <div className="max-w-2xl mx-auto w-full animate-fade-in">
-      {/* System Settings Panel (No longer collapsible) */}
-      <div className="p-5 bg-slate-800/90 border border-slate-700/70 rounded-2xl flex flex-col shadow-sm">
-        <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-700/70">
-          <div className="flex items-center gap-2">
+      {/* System Settings Panel */}
+      <div className="card-panel flex flex-col">
+        <div className="card-panel-header">
+          <div className="card-panel-title">
             <Settings className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest text-left">System Settings</h3>
+            <span>System Settings</span>
           </div>
           {saveSuccess && (
-            <span className="text-[10px] text-emerald-400 bg-emerald-500/15 px-2 py-0.5 border border-emerald-500/30 rounded-full flex items-center gap-1 animate-pulse">
+            <span className="badge badge-success flex items-center gap-1 animate-pulse">
               <CheckCircle2 className="w-2.5 h-2.5" /> Updated
             </span>
           )}
@@ -54,7 +54,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
           {/* MT5 File Path Input */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+              <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider font-mono">
                 MT5 terminal64.exe Path
               </label>
               <span className="text-[9px] text-indigo-400 border border-indigo-400/20 px-1.5 py-0.5 rounded bg-indigo-500/10 font-mono">
@@ -66,7 +66,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
               placeholder="e.g. C:\Program Files\Deriv MT5\terminal64.exe"
               value={paramInput.mt5Path}
               onChange={(e) => onSetParamInput({ mt5Path: e.target.value })}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="input-control"
             />
             <p className="text-[10px] text-slate-400 leading-normal">
               Leave blank to run smart auto-detection scanning the Program Files directory for foldernames containing 'Deriv' or 'MetaTrader'.
@@ -76,7 +76,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
           {/* App Link/Server Endpoint */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+              <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider font-mono">
                 App Link / Server Endpoint
               </label>
               <button
@@ -87,7 +87,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
                 }}
                 className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase transition-colors cursor-pointer"
               >
-                [Get Origin]
+                [Use Current Origin]
               </button>
             </div>
             <input
@@ -95,7 +95,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
               placeholder={`e.g. ${window.location.origin}`}
               value={paramInput.appEndpoint}
               onChange={(e) => onSetParamInput({ appEndpoint: e.target.value })}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="input-control"
             />
             <p className="text-[10px] text-slate-400 leading-normal">
               Used by mt5_bridge.js to poll for signals. Automatically detects window origin, but can be manually overridden.
@@ -142,7 +142,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({
             <button
               type="button"
               onClick={onApplySettings}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-lg transition-all cursor-pointer shadow-sm"
+              className="btn btn-primary w-full py-2.5"
             >
               Save System Settings
             </button>

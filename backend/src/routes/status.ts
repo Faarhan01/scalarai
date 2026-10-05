@@ -1,7 +1,11 @@
 import { Request, Response } from "express";
-import { scalarAiDb } from "../db";
 
-export function registerStatusRoute(app: any, getStatus: () => any, switchSymbol: (symbol: string) => void) {
+export function registerStatusRoute(
+  app: any,
+  getStatus: () => any,
+  switchSymbol: (symbol: string) => void,
+  getAndClearPendingOrders?: () => any[]
+) {
   app.get("/api/status", (req: Request, res: Response) => {
     try {
       const status = getStatus();
@@ -24,46 +28,17 @@ export function registerStatusRoute(app: any, getStatus: () => any, switchSymbol
     }
   });
 
-  app.get("/api/health", (req: Request, res: Response) => {
+  // Polling endpoints for MT5 bridge client
+  const handlePendingTrades = (req: Request, res: Response) => {
     try {
-      const dbPath = process.cwd() + "/backend/data/scalarai.sqlite";
-      const fs = require("fs");
-      const dbExists = fs.existsSync(dbPath);
-      return res.json({
-        status: "ok",
-        timestamp: new Date().toISOString(),
-        database: dbExists ? "connected" : "missing",
-        uptime: process.uptime(),
-      });
-    } catch (error: any) {
-      return res.status(500).json({ status: "error", error: error.message });
-    }
-  });
-
-  app.get("/poll", (req: Request, res: Response) => {
-    try {
-      const pendingTrades: any[] = [];
-      res.json(pendingTrades);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Poll failed" });
-    }
-  });
-
-  app.get("/get-pending-trades", (req: Request, res: Response) => {
-    try {
-      const pendingTrades: any[] = [];
+      const pendingTrades = getAndClearPendingOrders ? getAndClearPendingOrders() : [];
       res.json(pendingTrades);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to get pending trades" });
     }
-  });
+  };
 
-  app.get("/api/get-pending-trades", (req: Request, res: Response) => {
-    try {
-      const pendingTrades: any[] = [];
-      res.json(pendingTrades);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to get pending trades" });
-    }
-  });
+  app.get("/poll", handlePendingTrades);
+  app.get("/get-pending-trades", handlePendingTrades);
+  app.get("/api/get-pending-trades", handlePendingTrades);
 }
