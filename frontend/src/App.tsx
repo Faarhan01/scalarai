@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import React from "react";
 import {
   Activity,
   Gauge,
@@ -36,6 +37,53 @@ import {
 } from "lucide-react";
 import { StrategyMode, TradeConfig, TradeRecord, SystemLog, Tick, EAConnectionDetails } from "./types";
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error?: Error }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("React error boundary caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-8 h-8 text-red-400" />
+              <h1 className="text-xl font-bold text-white">Something went wrong</h1>
+            </div>
+            <p className="text-sm text-slate-300 mb-4">
+              The application encountered an unexpected error. Please refresh the page.
+            </p>
+            {this.state.error && (
+              <pre className="bg-slate-900 p-3 rounded-lg text-xs text-red-300 overflow-auto max-h-32 mb-4">
+                {this.state.error.message}
+              </pre>
+            )}
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-bold transition-all"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export { ErrorBoundary };
 export default function App() {
   // Sync States
   const [config, setConfig] = useState<TradeConfig>({
@@ -56,7 +104,11 @@ export default function App() {
     lastPing: null,
     broker: null,
     accountNumber: null,
-    balance: null
+    balance: null,
+    symbol: null,
+    symbolDigits: null,
+    symbolTickSize: null,
+    symbolDescription: null
   });
 
   const [stats, setStats] = useState({
@@ -68,28 +120,19 @@ export default function App() {
   });
 
   const [history, setHistory] = useState<Tick[]>([]);
+  const [candles, setCandles] = useState<Array<{ time: number; open: number; high: number; low: number; close: number }>>([]);
+  const MAX_VISIBLE_CANDLES = 80;
   const [currentPrice, setCurrentPrice] = useState<number>(1250.0);
+  const [activeSymbol, setActiveSymbol] = useState<string>("Step Index");
+  const [symbolStates, setSymbolStates] = useState<Array<{ symbol: string; connection: any; currentPrice: number; tickCount: number }>>([]);
   const [tradesList, setTradesList] = useState<TradeRecord[]>([]);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [isBridgeConnected, setIsBridgeConnected] = useState<boolean>(false);
   
   // UI states
-  const [hasGeminiKey, setHasGeminiKey] = useState<boolean>(false);
   const [isInternetOnline, setIsInternetOnline] = useState<boolean>(navigator.onLine);
   const [latency, setLatency] = useState<number>(12);
   const [filterLogLevel, setFilterLogLevel] = useState<string>("ALL");
-  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
-  const [aiAnalysisResult, setAiAnalysisResult] = useState<string | null>(null);
-  
-  // Meta-analysis log & quantitative synthesis state
-  const [isMetaAnalysisLoading, setIsMetaAnalysisLoading] = useState<boolean>(false);
-  const [metaAnalysisInsights, setMetaAnalysisInsights] = useState<{
-    category: string;
-    metric: string;
-    explanation: string;
-    summary: string;
-  }[] | null>(null);
-  const [metaAnalysisError, setMetaAnalysisError] = useState<string | null>(null);
   const [paramInput, setParamInput] = useState({
     lotSize: "0.1",
     takeProfitPoints: "300",
@@ -120,7 +163,34 @@ export default function App() {
   const [isVerifyingWebRequest, setIsVerifyingWebRequest] = useState<boolean>(false);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [pingLatency, setPingLatency] = useState<number | null>(null);
+  const [showEma, setShowEma] = useState<boolean>(true);
+  const [showBollingerBands, setShowBollingerBands] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const wsConnectedRef = useRef(false);
+  const historyRef = useRef<Tick[]>([]);
+  const candlesRef = useRef<Array<{ time: number; open: number; high: number; low: number; close: number }>>([]);
+  const pendingChartUpdate = useRef<{ history?: Tick[]; candles?: any[]; currentPrice?: number } | null>(null);
+  const rafId = useRef<number | null>(null);
+
+  // Keep refs in sync with state to avoid stale closures in WS handler
+  useEffect(() => { historyRef.current = history; }, [history]);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
+
+  const scheduleChartUpdate = (update: { history?: Tick[]; candles?: any[]; currentPrice?: number }) => {
+    pendingChartUpdate.current = { ...pendingChartUpdate.current, ...update };
+    if (rafId.current === null) {
+      rafId.current = requestAnimationFrame(() => {
+        const pending = pendingChartUpdate.current;
+        if (pending) {
+          if (pending.history !== undefined) setHistory(pending.history);
+          if (pending.candles !== undefined) setCandles(pending.candles);
+          if (pending.currentPrice !== undefined) setCurrentPrice(pending.currentPrice);
+        }
+        pendingChartUpdate.current = null;
+        rafId.current = null;
+      });
+    }
+  };
 
   const sendWsMessage = (msg: any): boolean => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -150,20 +220,24 @@ export default function App() {
     lastUpdated: string;
   } | null>(null);
   const [aiSynthesizedStrategy, setAiSynthesizedStrategy] = useState<{
-    lastSynthesized: string;
-    strategyName: string;
-    rationale: string;
-    observationsUsed: string[];
-    compiledRules: {
-      minVelocityFilter: number;
-      slPointsMultiplier: number;
-      tpPointsMultiplier: number;
-      allowCounterTrend: boolean;
-      useEmaConfirmation: boolean;
-      maxAllowedPositionDivergence: number;
-    };
+    id?: string;
+    name: string;
+    description: string;
+    mode: string;
+    rules: Record<string, any>;
+    createdAt: string;
+    updatedAt: string;
   } | null>(null);
-  const [isSynthesizingStrategy, setIsSynthesizingStrategy] = useState<boolean>(false);
+  const [lastStrategySignal, setLastStrategySignal] = useState<{ type: string; reason: string; confidence?: number } | null>(null);
+  const [strategiesList, setStrategiesList] = useState<Array<{
+    id: string;
+    name: string;
+    description: string;
+    mode: string;
+    category: string;
+    tags: string[];
+    performance?: { winRate: number; profitFactor: number; totalTrades: number };
+  }>>([]);
   const [telemetryStream, setTelemetryStream] = useState<any[]>([]);
 
   // Connection checking
@@ -218,6 +292,18 @@ export default function App() {
     }
   };
 
+  const fetchStrategies = async () => {
+    try {
+      const response = await fetch("/api/strategies");
+      if (response.ok) {
+        const data = await response.json();
+        setStrategiesList(data);
+      }
+    } catch {
+      // Silently ignore strategy fetch errors
+    }
+  };
+
   // Poll server for latest stats, parameters, live prices and log history
   const fetchStatus = async () => {
     const startTick = Date.now();
@@ -234,16 +320,23 @@ export default function App() {
         setLogs(data.logs);
         setTradesList(data.trades || []);
         setHistory(data.history || []);
+        setCandles(data.candles || []);
         setCurrentPrice(data.currentPrice);
+        if (data.activeSymbol) setActiveSymbol(data.activeSymbol);
+        if (data.symbolStates) setSymbolStates(data.symbolStates);
         setStats(data.stats);
-        setHasGeminiKey(!!data.hasGeminiKey);
         if (data.aiSynthesizedStrategy) {
           setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
+        }
+        if (data.lastStrategySignal) {
+          setLastStrategySignal(data.lastStrategySignal);
         }
         
         // Calculate latency
         const endTick = Date.now();
         setLatency(Math.max(3, endTick - startTick));
+        
+        fetchStrategies();
       }
     } catch {
       // Simulate low latency drop
@@ -298,6 +391,7 @@ export default function App() {
         socket.onopen = () => {
           if (isUnmounted) return;
           setWsConnected(true);
+          wsConnectedRef.current = true;
           if (pingInterval) clearInterval(pingInterval);
           pingInterval = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) {
@@ -322,18 +416,26 @@ export default function App() {
               if (data.logs) setLogs(data.logs);
               if (data.trades) setTradesList(data.trades);
               if (data.history) setHistory(data.history);
+              if (data.candles) setCandles(data.candles);
               if (data.currentPrice !== undefined) setCurrentPrice(data.currentPrice);
+              if (data.activeSymbol) setActiveSymbol(data.activeSymbol);
+              if (data.symbolStates) setSymbolStates(data.symbolStates);
               if (data.stats) setStats(data.stats);
-              if (data.hasGeminiKey !== undefined) setHasGeminiKey(!!data.hasGeminiKey);
               if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
+              if (data.lastStrategySignal) setLastStrategySignal(data.lastStrategySignal);
               if (data.webRequestStatus) setWebRequestStatus(data.webRequestStatus);
+              fetchStrategies();
             } else if (msg.type === "tick") {
-              if (msg.currentPrice !== undefined) setCurrentPrice(msg.currentPrice);
+              if (msg.currentPrice !== undefined) {
+                scheduleChartUpdate({ currentPrice: msg.currentPrice });
+              }
               if (msg.tick) {
-                setHistory(prev => {
-                  const next = [...prev, msg.tick];
-                  return next.length > 100 ? next.slice(-100) : next;
+                scheduleChartUpdate({
+                  history: [...(pendingChartUpdate.current?.history || historyRef.current), msg.tick].slice(-100)
                 });
+              }
+              if (msg.candles) {
+                scheduleChartUpdate({ candles: msg.candles });
               }
               if (msg.stats) setStats(msg.stats);
               if (msg.connection) setConnection(msg.connection);
@@ -352,12 +454,14 @@ export default function App() {
             } else if (msg.type === "ai_strategy" && msg.aiSynthesizedStrategy) {
               setAiSynthesizedStrategy(msg.aiSynthesizedStrategy);
             }
+            fetchStrategies();
           } catch {}
         };
 
         socket.onclose = () => {
           if (isUnmounted) return;
           setWsConnected(false);
+          wsConnectedRef.current = false;
           setPingLatency(null);
           if (pingInterval) clearInterval(pingInterval);
           reconnectTimeout = setTimeout(connectWs, 2500);
@@ -374,16 +478,22 @@ export default function App() {
     connectWs();
     fetchStatus();
 
-    // Gentle fallback polling
+    // Fallback polling only when WebSocket is not connected
     const fallbackInterval = setInterval(() => {
-      fetchStatus();
-    }, 4000);
+      if (!wsConnectedRef.current) {
+        fetchStatus();
+      }
+    }, 1000);
 
     return () => {
       isUnmounted = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (pingInterval) clearInterval(pingInterval);
       clearInterval(fallbackInterval);
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+        rafId.current = null;
+      }
       if (wsRef.current) {
         try { wsRef.current.close(); } catch {}
       }
@@ -424,17 +534,23 @@ export default function App() {
       } catch {}
     }
     try {
+      const lotSize = Math.max(0.01, Math.min(100, parseFloat(paramInput.lotSize) || 0.1));
+      const takeProfitPoints = Math.max(1, Math.min(10000, parseInt(paramInput.takeProfitPoints) || 300));
+      const stopLossPoints = Math.max(1, Math.min(10000, parseInt(paramInput.stopLossPoints) || 150));
+      const trailingStopPoints = Math.max(0, Math.min(5000, parseInt(paramInput.trailingStopPoints) || 100));
+      const maxTrades = Math.max(1, Math.min(20, parseInt(paramInput.maxTrades) || 3));
+      
       const response = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selectedStrategy: strategyOverride || config.selectedStrategy,
-          lotSize: parseFloat(paramInput.lotSize) || 0.1,
-          takeProfitPoints: parseInt(paramInput.takeProfitPoints) || 300,
-          stopLossPoints: parseInt(paramInput.stopLossPoints) || 150,
-          trailingStopPoints: parseInt(paramInput.trailingStopPoints) || 100,
+          lotSize,
+          takeProfitPoints,
+          stopLossPoints,
+          trailingStopPoints,
           useTrailingStop: paramInput.useTrailingStop,
-          maxTrades: parseInt(paramInput.maxTrades) || 3,
+          maxTrades,
           mt5Path: mt5PathOverride !== undefined ? mt5PathOverride : paramInput.mt5Path,
           appEndpoint: finalEndpoint,
           tradingMode: tradingModeOverride !== undefined ? tradingModeOverride : paramInput.tradingMode,
@@ -483,84 +599,6 @@ export default function App() {
     }
   };
 
-  // Trigger Gemini Artificial Intelligence Step Index Graph pattern matching
-  const generateAiReport = async () => {
-    setIsAiLoading(true);
-    setAiAnalysisResult(null);
-    try {
-      const response = await fetch("/api/gemini/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.error) {
-          setAiAnalysisResult(data.error);
-        } else {
-          setAiAnalysisResult(data.report);
-        }
-      } else {
-        setAiAnalysisResult("Unable to verify workspace credentials. Ensure your GEMINI_API_KEY is configured.");
-      }
-    } catch (e: any) {
-      setAiAnalysisResult("AI model timeout or server path unreachable. Reason: " + e.message);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  // Run specialized Step Index EA Meta-Analysis & Log Synthesis
-  const runMetaAnalysis = async () => {
-    setIsMetaAnalysisLoading(true);
-    setMetaAnalysisInsights(null);
-    setMetaAnalysisError(null);
-    try {
-      const response = await fetch("/api/gemini/meta-analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.error) {
-          setMetaAnalysisError(data.error);
-        } else if (data.success && data.insights) {
-          setMetaAnalysisInsights(data.insights);
-        } else {
-          setMetaAnalysisError("Synthesis failed; empty response returned.");
-        }
-      } else {
-        setMetaAnalysisError("Meta-analysis execution failed. Ensure GEMINI_API_KEY is configured.");
-      }
-    } catch (e: any) {
-      setMetaAnalysisError("AI Synthesis server error: " + e.message);
-    } finally {
-      setIsMetaAnalysisLoading(false);
-    }
-  };
-
-  const synthesizeStrategy = async () => {
-    setIsSynthesizingStrategy(true);
-    try {
-      const response = await fetch("/api/gemini/synthesize-strategy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.strategy) {
-          setAiSynthesizedStrategy(data.strategy);
-          fetchStatus();
-        } else if (data.error) {
-          console.error("Strategy synthesis failed:", data.error);
-        }
-      }
-    } catch (e: any) {
-      console.error("Failed to synthesize strategy:", e);
-    } finally {
-      setIsSynthesizingStrategy(false);
-    }
-  };
-
   const fetchWebRequestStatus = async () => {
     try {
       const res = await fetch("/api/test-webrequest/status");
@@ -592,7 +630,7 @@ export default function App() {
           setWebRequestStatus(data.testState);
         }
       }
-      
+
       // Start polling status check
       let attempts = 0;
       const interval = setInterval(async () => {
@@ -618,6 +656,24 @@ export default function App() {
       }, 1000);
     } catch {
       setIsVerifyingWebRequest(false);
+    }
+  };
+
+  const switchSymbol = async (symbol: string) => {
+    try {
+      const response = await fetch("/api/status/switch-symbol", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.activeSymbol) {
+          setActiveSymbol(data.activeSymbol);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to switch symbol:", e);
     }
   };
 
@@ -794,7 +850,7 @@ async function executeLocalTrade(trade) {
 
   // Ultra-resilient key mapping to support any variation of trade keys (e.g. signal payload vs legacy TradeRecord)
   const action = (trade.action || trade.type || trade.Action || trade.Type || "").toUpperCase();
-  const symbol = trade.symbol || trade.Symbol || "Step Index";
+  const symbol = trade.symbol || trade.Symbol || activeSymbol || "Step Index";
   const volume = Number(trade.volume || trade.lotSize || trade.LotSize || trade.Volume || 0);
   const sl = Number(trade.sl || trade.stopLossPoints || trade.stopLoss || trade.slPoints || 0);
   const tp = Number(trade.tp || trade.takeProfitPoints || trade.takeProfit || trade.tpPoints || 0);
@@ -938,11 +994,19 @@ setInterval(pollTrades, 1500);
   });
 
   // Graph render coordinate calculations with dynamic candlestick scaling
-  const minPrice = history.length > 0 
-    ? Math.min(...history.map(t => t.low !== undefined ? t.low : t.price)) - 0.2
+  const candleData = candles.length > 0 ? candles : history.map(t => ({
+    time: t.time,
+    open: t.open !== undefined ? t.open : t.price,
+    high: t.high !== undefined ? t.high : t.price,
+    low: t.low !== undefined ? t.low : t.price,
+    close: t.close !== undefined ? t.close : t.price,
+  }));
+  const displayCandles = candleData.slice(-MAX_VISIBLE_CANDLES);
+  const minPrice = displayCandles.length > 0 
+    ? Math.min(...displayCandles.map(c => c.low)) - 0.2
     : 1245.0;
-  const maxPrice = history.length > 0 
-    ? Math.max(...history.map(t => t.high !== undefined ? t.high : t.price)) + 0.2
+  const maxPrice = displayCandles.length > 0 
+    ? Math.max(...displayCandles.map(c => c.high)) + 0.2
     : 1255.0;
   const priceRange = maxPrice - minPrice || 1.0;
 
@@ -959,10 +1023,27 @@ setInterval(pollTrades, 1500);
           <div className="flex items-center gap-2">
             <span className="text-base font-bold tracking-tight text-white">Scalar AI</span>
             <span className="hidden xs:inline-block text-[10px] font-mono px-1.5 py-0.5 bg-indigo-500/15 border border-indigo-500/30 rounded text-indigo-300 font-medium">
-              STEP INDEX
+              {activeSymbol || "NO SYMBOL"}
             </span>
           </div>
         </div>
+
+        {/* Symbol Switcher */}
+        {symbolStates.length > 1 && (
+          <div className="hidden md:flex items-center gap-2">
+            <select
+              value={activeSymbol}
+              onChange={(e) => switchSymbol(e.target.value)}
+              className="bg-slate-800/80 border border-slate-700/60 rounded-lg text-xs font-mono text-slate-200 px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {symbolStates.map((state) => (
+                <option key={state.symbol} value={state.symbol}>
+                  {state.symbol} {state.connection.isEaConnected ? "●" : "○"}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Desktop Controls (Hidden on Mobile) */}
         <div className="hidden md:flex items-center gap-3">
@@ -1638,7 +1719,6 @@ setInterval(pollTrades, 1500);
                     </div>
                     <button
                       type="button"
-                      disabled={!hasGeminiKey}
                       onClick={() => {
                         const nextVal = !paramInput.isAiModeEnabled;
                         setParamInput(p => ({ ...p, isAiModeEnabled: nextVal }));
@@ -1646,7 +1726,7 @@ setInterval(pollTrades, 1500);
                       }}
                       className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                         paramInput.isAiModeEnabled ? "bg-emerald-500" : "bg-slate-700"
-                      } ${!hasGeminiKey ? "opacity-40 cursor-not-allowed" : ""}`}
+                      }`}
                     >
                       <span
                         className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
@@ -1656,15 +1736,9 @@ setInterval(pollTrades, 1500);
                     </button>
                   </div>
 
-                  {!hasGeminiKey ? (
-                    <div className="p-2 border border-amber-500/20 bg-amber-500/10 rounded text-[10px] text-amber-300 leading-relaxed text-left">
-                      ⚠️ <strong>AI verification client is inactive:</strong> No <code>GEMINI_API_KEY</code> detected in Environment Secrets. Configure the API key in the Platform Settings to enable intelligent trading validation.
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-slate-400 leading-normal text-left">
-                      💡 When <strong>ON</strong>, standard rule-based executions will route through the Gemini Cognitive AI Engine for velocity divergence audits and risk validation.
-                    </p>
-                  )}
+                  <p className="text-[10px] text-slate-400 leading-normal text-left">
+                    💡 When <strong>ON</strong>, the AI Adaptive strategy uses velocity and acceleration signals.
+                  </p>
                 </div>
 
                 {/* Save Settings Trigger Button */}
@@ -1871,359 +1945,300 @@ setInterval(pollTrades, 1500);
                 </button>
               </div>
 
-              {/* Built-in AI Analyst card */}
-              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
-                  <Cpu className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Built-in AI Analyst</h3>
-                </div>
+               {/* Active Strategy Card */}
+               <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                 <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
+                   <Zap className="w-4 h-4 text-amber-400" />
+                   <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Active Strategy</h3>
+                 </div>
 
-                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
-                  <div className="space-y-3">
-                    <p className="text-xs text-slate-350 leading-relaxed">
-                      Analyze last 40 discrete step coordinates on the server using Gemini's LLM to generate reinforcement patterns.
-                    </p>
-                    
-                    {isAiLoading && (
-                      <div className="flex flex-col items-center justify-center py-6 text-xs text-slate-400">
-                        <RefreshCw className="w-6 h-6 animate-spin text-indigo-400 mb-2" />
-                        <span>Analyzing tick history...</span>
-                      </div>
-                    )}
+                 <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
+                   <div className="space-y-4">
+                     {aiSynthesizedStrategy ? (
+                       <div className="space-y-4 text-left">
+                         <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-lg">
+                           <p className="text-[9px] font-bold text-amber-400 uppercase tracking-wider mb-1 font-mono">Active Strategy</p>
+                           <h4 className="text-xs font-bold text-white uppercase tracking-tight">{aiSynthesizedStrategy.name}</h4>
+                           <p className="text-[10px] text-slate-300 mt-1.5 leading-relaxed">
+                             {aiSynthesizedStrategy.description}
+                           </p>
+                           <p className="text-[9px] text-slate-400 font-mono mt-2 font-medium">
+                             Mode: {aiSynthesizedStrategy.mode} | Updated: {new Date(aiSynthesizedStrategy.updatedAt).toLocaleTimeString()}
+                           </p>
+                         </div>
 
-                    {aiAnalysisResult && (
-                      <div className="p-3 bg-indigo-500/10 border border-indigo-500/25 text-indigo-200 text-xs rounded-lg font-mono leading-relaxed max-h-48 overflow-y-auto whitespace-pre-line">
-                        {aiAnalysisResult}
-                      </div>
-                    )}
+                         {aiSynthesizedStrategy.rules && Object.keys(aiSynthesizedStrategy.rules).length > 0 && (
+                           <div className="space-y-2 pt-2 border-t border-slate-700/60">
+                             <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Strategy Parameters</p>
+                             <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                               {Object.entries(aiSynthesizedStrategy.rules).map(([key, value]) => (
+                                 <div key={key} className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
+                                   <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                                   <span className="text-white font-bold">{typeof value === 'number' ? value.toFixed(2) : String(value)}</span>
+                                 </div>
+                               ))}
+                             </div>
+                           </div>
+                         )}
+                       </div>
+                     ) : (
+                       <div className="text-center py-6 text-[11px] text-slate-400 italic">
+                         No active strategy configured. Use MCP tools or select a strategy template below.
+                       </div>
+                     )}
+                   </div>
+                 </div>
+               </div>
 
-                    {!isAiLoading && !aiAnalysisResult && (
-                      <div className="text-center py-8 text-xs text-slate-400">
-                        Neural engine idle. Hit key below to consult cognitive analyzer.
-                      </div>
-                    )}
-                  </div>
+               {/* Strategy Performance Dashboard */}
+               <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                 <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
+                   <TrendingUp className="w-4 h-4 text-emerald-400" />
+                   <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Strategy Performance</h3>
+                 </div>
 
-                  <button
-                    type="button"
-                    onClick={generateAiReport}
-                    disabled={isAiLoading}
-                    className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-550 disabled:bg-indigo-900 disabled:text-indigo-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                  >
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>GENERATE COGNITIVE ANALYSIS</span>
-                  </button>
-                </div>
-              </div>
+                 <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60">
+                   {strategiesList.length > 0 ? (
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                       {strategiesList.map((strategy) => (
+                         <div key={strategy.id} className="bg-slate-800/90 border border-slate-700/60 p-3 rounded-lg">
+                           <div className="flex items-center justify-between mb-2">
+                             <h4 className="text-[11px] font-bold text-white">{strategy.name}</h4>
+                             <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-mono ${
+                               strategy.category === "scalping" ? "bg-emerald-500/20 text-emerald-300" :
+                               strategy.category === "day_trading" ? "bg-blue-500/20 text-blue-300" :
+                               strategy.category === "adaptive" ? "bg-purple-500/20 text-purple-300" :
+                               "bg-slate-700 text-slate-400"
+                             }`}>
+                               {strategy.category}
+                             </span>
+                           </div>
+                           
+                           <p className="text-[10px] text-slate-400 mb-2 line-clamp-2">{strategy.description}</p>
+                           
+                           {strategy.performance ? (
+                             <div className="grid grid-cols-3 gap-2 text-[9px] font-mono">
+                               <div className="bg-slate-900/60 p-1.5 rounded">
+                                 <span className="text-slate-500 block">Win Rate</span>
+                                 <span className={`font-bold ${strategy.performance.winRate >= 50 ? "text-emerald-400" : "text-rose-400"}`}>
+                                   {strategy.performance.winRate}%
+                                 </span>
+                               </div>
+                               <div className="bg-slate-900/60 p-1.5 rounded">
+                                 <span className="text-slate-500 block">Profit</span>
+                                 <span className={`font-bold ${strategy.performance.profitFactor >= 1 ? "text-emerald-400" : "text-rose-400"}`}>
+                                   {strategy.performance.profitFactor}x
+                                 </span>
+                               </div>
+                               <div className="bg-slate-900/60 p-1.5 rounded">
+                                 <span className="text-slate-500 block">Trades</span>
+                                 <span className="font-bold text-slate-300">{strategy.performance.totalTrades}</span>
+                               </div>
+                             </div>
+                           ) : (
+                             <div className="text-[9px] text-slate-500 italic">No performance data yet</div>
+                           )}
+                           
+                           <div className="mt-2 pt-2 border-t border-slate-700/40">
+                             <span className="text-[9px] text-slate-500 uppercase tracking-wider">Mode: {strategy.mode.replace("_", " ")}</span>
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+                   ) : (
+                     <div className="text-center py-6 text-[11px] text-slate-400">
+                       Loading strategies...
+                     </div>
+                   )}
+                 </div>
+               </div>
 
-              {/* Dynamic AI Synthesized Strategy Card */}
-              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
-                  <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
-                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">AI Synthesized Strategy</h3>
-                </div>
+               {/* Strategy Library Card */}
+               <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
+                 <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
+                   <Layers className="w-4 h-4 text-indigo-400" />
+                   <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Strategy Templates</h3>
+                 </div>
 
-                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <p className="text-xs text-slate-350 leading-relaxed text-left">
-                      Triggers real-time synthesis of dynamic execution constraints based on historical profiles, current speed metrics, and raw tick flows.
-                    </p>
+                 <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60">
+                   <p className="text-[10px] text-slate-400 leading-relaxed mb-3">
+                     Available strategy templates for different trading styles. Create and activate strategies using MCP tools.
+                   </p>
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                     {[
+                       { id: "scalping_ema_cross", name: "Quick Scalp EMA Cross", category: "scalping", mode: "TREND_FOLLOWING" },
+                       { id: "scalping_momentum", name: "Velocity Scalper", category: "scalping", mode: "AI_ADAPTIVE" },
+                       { id: "day_trading_trend", name: "Day Trend Rider", category: "day_trading", mode: "TREND_FOLLOWING" },
+                       { id: "day_trading_breakout", name: "Opening Range Breakout", category: "day_trading", mode: "CUSTOM" },
+                       { id: "momentum_bb_momentum", name: "Bollinger Momentum", category: "momentum", mode: "MEAN_REVERSION" },
+                       { id: "breakout_atr", name: "ATR Breakout", category: "breakout", mode: "CUSTOM" },
+                       { id: "reversal_rsi", name: "RSI Reversal", category: "reversal", mode: "MEAN_REVERSION" },
+                       { id: "adaptive_velocity", name: "Adaptive Velocity", category: "adaptive", mode: "AI_ADAPTIVE" },
+                     ].map(template => (
+                       <div key={template.id} className="bg-slate-800/90 border border-slate-700/60 p-2 rounded flex flex-col gap-1">
+                         <span className="text-slate-200 font-semibold">{template.name}</span>
+                         <div className="flex gap-1.5">
+                           <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-[9px] uppercase font-mono">
+                             {template.category}
+                           </span>
+                           <span className="px-1.5 py-0.5 bg-slate-700 text-slate-400 rounded text-[9px] uppercase font-mono">
+                             {template.mode.replace("_", " ")}
+                           </span>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               </div>
 
-                    {isSynthesizingStrategy && (
-                      <div className="flex flex-col items-center justify-center py-8 text-xs text-slate-400 space-y-2">
-                        <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
-                        <span className="font-mono font-medium text-slate-300">Synthesizing live algorithmic rules...</span>
-                      </div>
-                    )}
+             </div>
 
-                    {!isSynthesizingStrategy && aiSynthesizedStrategy && (
-                      <div className="space-y-4 text-left">
-                        {/* Strategy Identity Header */}
-                        <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-lg">
-                          <p className="text-[9px] font-bold text-amber-400 uppercase tracking-wider mb-1 font-mono">Active Paradigm</p>
-                          <h4 className="text-xs font-bold text-white uppercase tracking-tight">{aiSynthesizedStrategy.strategyName}</h4>
-                          <p className="text-[10px] text-slate-300 mt-1.5 leading-relaxed">
-                            {aiSynthesizedStrategy.rationale}
-                          </p>
-                          <p className="text-[9px] text-slate-400 font-mono mt-2 font-medium">
-                            Synthesized: {new Date(aiSynthesizedStrategy.lastSynthesized).toLocaleTimeString()}
-                          </p>
-                        </div>
-
-                        {/* Observations List */}
-                        {aiSynthesizedStrategy.observationsUsed && aiSynthesizedStrategy.observationsUsed.length > 0 && (
-                          <div className="space-y-1.5">
-                            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Underlying Observations</p>
-                            <ul className="space-y-1 pl-3 list-disc">
-                              {aiSynthesizedStrategy.observationsUsed.map((obs, oIdx) => (
-                                <li key={oIdx} className="text-[10px] text-slate-200 leading-normal">
-                                  {obs}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {/* Compiled Live Rules Grid */}
-                        {aiSynthesizedStrategy.compiledRules && (
-                          <div className="space-y-2 pt-2 border-t border-slate-700/60">
-                            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Compiled Live Parameters</p>
-                            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
-                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">Min Velocity Filter</span>
-                                <span className="text-white font-bold">{aiSynthesizedStrategy.compiledRules.minVelocityFilter?.toFixed(3) || "0.150"} pt/s</span>
-                              </div>
-                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
-                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">Max Position Div.</span>
-                                <span className="text-white font-bold">{aiSynthesizedStrategy.compiledRules.maxAllowedPositionDivergence?.toFixed(2) || "2.00"}x</span>
-                              </div>
-                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
-                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">SL Points Scale</span>
-                                <span className="text-emerald-400 font-bold">{aiSynthesizedStrategy.compiledRules.slPointsMultiplier?.toFixed(2) || "1.00"}x</span>
-                              </div>
-                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded">
-                                <span className="text-slate-400 block text-[9px] uppercase tracking-wider mb-0.5">TP Points Scale</span>
-                                <span className="text-emerald-400 font-bold">{aiSynthesizedStrategy.compiledRules.tpPointsMultiplier?.toFixed(2) || "1.00"}x</span>
-                              </div>
-                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded col-span-2 flex justify-between items-center px-2 py-1.5">
-                                <span className="text-slate-400 text-[9px] uppercase tracking-wider">EMA Filter Confirmation</span>
-                                <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase rounded ${
-                                  aiSynthesizedStrategy.compiledRules.useEmaConfirmation 
-                                    ? "bg-indigo-500/20 text-indigo-300" 
-                                    : "bg-slate-700 text-slate-400"
-                                }`}>
-                                  {aiSynthesizedStrategy.compiledRules.useEmaConfirmation ? "Enabled" : "Disabled"}
-                                </span>
-                              </div>
-                              <div className="bg-slate-800/90 border border-slate-700/60 p-2 rounded col-span-2 flex justify-between items-center px-2 py-1.5">
-                                <span className="text-slate-400 text-[9px] uppercase tracking-wider">Allow Counter-Trend Trades</span>
-                                <span className={`text-[9px] px-1.5 py-0.5 font-bold uppercase rounded ${
-                                  aiSynthesizedStrategy.compiledRules.allowCounterTrend 
-                                    ? "bg-rose-500/20 text-rose-300" 
-                                    : "bg-emerald-500/20 text-emerald-300"
-                                }`}>
-                                  {aiSynthesizedStrategy.compiledRules.allowCounterTrend ? "Enabled" : "Disabled (Strict Flow)"}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {!isSynthesizingStrategy && !aiSynthesizedStrategy && (
-                      <div className="text-center py-6 text-[11px] text-slate-400 italic">
-                        No dynamic strategy synthesized yet. Click the button below to formulate active paradigms.
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={synthesizeStrategy}
-                    disabled={isSynthesizingStrategy}
-                    className="w-full mt-4 py-2.5 bg-amber-600 hover:bg-amber-550 disabled:bg-amber-900 disabled:text-amber-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                  >
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>SYNTHESIZE ACTIVE STRATEGY</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Step Index EA Meta-Analysis Summary Card */}
-              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-5 flex flex-col gap-4 shadow-sm">
-                <div className="flex items-center gap-2 pb-3 border-b border-slate-700/70">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest">Step Index Summary</h3>
-                </div>
-
-                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <p className="text-xs text-slate-350 leading-relaxed text-left">
-                      Activate the <strong>Meta-Analysis Synthesis Agent</strong> to translate raw mathematical telemetry, execution variables, and historical logs into high-level plain-language operational summaries.
-                    </p>
-
-                    {isMetaAnalysisLoading && (
-                      <div className="flex flex-col items-center justify-center py-8 text-xs text-slate-400 space-y-2">
-                        <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
-                        <span className="font-mono font-medium text-slate-300">Synthesizing telemetry data stream...</span>
-                      </div>
-                    )}
-
-                    {metaAnalysisError && (
-                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-300 text-[11px] rounded-lg leading-normal text-left">
-                        {metaAnalysisError}
-                      </div>
-                    )}
-
-                    {metaAnalysisInsights && metaAnalysisInsights.length > 0 && (
-                      <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-                        {metaAnalysisInsights.map((insight, idx) => {
-                          const categoryLower = insight.category?.toLowerCase() || "";
-                          const tagBg = categoryLower.includes("market")
-                            ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"
-                            : categoryLower.includes("risk") || categoryLower.includes("adjust")
-                            ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
-                            : "bg-amber-500/15 text-amber-300 border-amber-500/30";
-
-                          return (
-                            <div key={idx} className="p-3 bg-slate-800/90 border border-slate-700/60 rounded-xl space-y-2 text-left">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border tracking-wider uppercase ${tagBg}`}>
-                                  {insight.category}
-                                </span>
-                                <span className="text-[10px] font-mono text-slate-400 font-medium">
-                                  {insight.metric}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-200 leading-relaxed">
-                                {insight.explanation}
-                              </p>
-                              <div className="pt-2 border-t border-slate-700/40">
-                                <p className="text-[9px] font-mono text-slate-300 font-semibold bg-slate-900/60 px-2 py-1 rounded border border-slate-700/30 truncate" title={insight.summary}>
-                                  📝 {insight.summary}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {!isMetaAnalysisLoading && !metaAnalysisInsights && (
-                      <div className="text-center py-6 text-[11px] text-slate-400 italic">
-                        No telemetry synthesized yet. Run agent analysis below.
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={runMetaAnalysis}
-                    disabled={isMetaAnalysisLoading}
-                    className="w-full mt-4 py-2.5 bg-emerald-600 hover:bg-emerald-550 disabled:bg-emerald-900 disabled:text-emerald-400 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                  >
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>RUN META-ANALYSIS SUMMARY</span>
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            {/* RIGHT COLUMN: Live Price Graph & Metrics (lg:col-span-8) */}
+             {/* RIGHT COLUMN: Live Price Graph & Metrics (lg:col-span-8) */}
             <div className="lg:col-span-8 flex flex-col gap-6 order-1 lg:order-2">
               
               {/* Visualizer: Step Index Price Graph */}
               <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl overflow-hidden flex flex-col shadow-sm">
                   
-                  {/* Graph Headers & Taps */}
-                  <div className="p-4 border-b border-slate-700/60 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-850/50">
-                    <span className="text-xs font-bold text-slate-200 flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse"></span>
-                      LIVE STEP INDEX REAL-TIME STREAM (M1)
-                    </span>
-                    <div className="flex gap-4 font-mono text-[10px] text-slate-400">
-                      <span>Index Value: <strong className="text-indigo-400">{currentPrice.toFixed(2)}</strong></span>
-                      <span>Tick Depth: <strong className="text-slate-200">{history.length}/150</strong></span>
-                      <span>Execution Speed: <strong className="text-slate-300">{latency}ms</strong></span>
-                    </div>
-                  </div>
+                   {/* Graph Headers & Taps */}
+                   <div className="p-4 border-b border-slate-700/60 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-850/50">
+                     <span className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                       <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse"></span>
+                        LIVE {activeSymbol || "SYMBOL"} REAL-TIME STREAM (M1)
+                     </span>
+                     <div className="flex flex-wrap items-center gap-3">
+                       <div className="flex gap-2">
+                         <button
+                           onClick={() => setShowEma(!showEma)}
+                           className={`px-2 py-1 rounded text-[10px] font-mono transition-all ${
+                             showEma ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-slate-800 text-slate-500 border border-slate-700"
+                           }`}
+                         >
+                           EMA
+                         </button>
+                         <button
+                           onClick={() => setShowBollingerBands(!showBollingerBands)}
+                           className={`px-2 py-1 rounded text-[10px] font-mono transition-all ${
+                             showBollingerBands ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-slate-800 text-slate-500 border border-slate-700"
+                           }`}
+                         >
+                           BB
+                         </button>
+                       </div>
+                       <div className="flex gap-4 font-mono text-[10px] text-slate-400">
+                         <span>Index Value: <strong className="text-indigo-400">{currentPrice.toFixed(2)}</strong></span>
+                         <span>Candles: <strong className="text-slate-200">{candleData.length}</strong></span>
+                         <span>Execution Speed: <strong className="text-slate-300">{latency}ms</strong></span>
+                       </div>
+                     </div>
+                   </div>
 
-                  {/* Sparkline Canvas Area */}
-                  <div className="h-64 relative p-4 flex flex-col justify-end overflow-hidden bg-[#000000] border border-slate-800 rounded-xl">
-                    {/* Grid completely disabled (grid=0) - no helper grid lines */}
+                   {/* Sparkline Canvas Area */}
+                   <div className="h-[500px] relative p-4 flex flex-col justify-end overflow-hidden bg-[#000000] border border-slate-800 rounded-xl">
+                     {/* Grid completely disabled (grid=0) - no helper grid lines */}
 
-                    {history.length > 1 ? (
-                      <div className="w-full h-full">
-                        <svg viewBox="0 0 800 260" className="w-full h-full overflow-visible">
-                          {/* Live Candlestick Bars */}
-                          {(() => {
-                            const width = 800;
-                            const height = 260;
-                            const padding = 20;
-                            
-                            const candleWidth = 6;
-                            const gap = 2;
-                            const step = candleWidth + gap; // 8px total per candle
-                            
-                            // To prevent candles from merging into a dense vertical wall, we compute maximum visible candles
-                            const maxCandles = Math.floor((width - 2 * padding) / step);
-                            const visibleHistory = history.slice(-maxCandles);
-                            
-                            return (
-                              <>
-                                {visibleHistory.map((tick, idx) => {
-                                  const openPrice = tick.open !== undefined ? tick.open : tick.price;
-                                  const highPrice = tick.high !== undefined ? tick.high : tick.price;
-                                  const lowPrice = tick.low !== undefined ? tick.low : tick.price;
-                                  const closePrice = tick.close !== undefined ? tick.close : tick.price;
+                      {displayCandles.length > 1 ? (
+                        <div className="w-full h-full">
+                          <svg viewBox="0 0 800 500" className="w-full h-full overflow-visible">
+                            {/* Live Candlestick Bars */}
+                            {(() => {
+                              const width = 800;
+                              const height = 500;
+                              const padding = 20;
+                              
+                              const candleWidth = 8;
+                              const gap = 2;
+                              const step = candleWidth + gap;
+                              
+                              const maxCandles = Math.floor((width - 2 * padding) / step);
+                              const visibleCandles = displayCandles.slice(-maxCandles);
+                              
+                              return (
+                                <>
+                                  {visibleCandles.map((candle, idx) => {
+                                    const openPrice = candle.open;
+                                    const highPrice = candle.high;
+                                    const lowPrice = candle.low;
+                                    const closePrice = candle.close;
 
-                                  // Align from the right of the screen (most recent) to the left (older history)
-                                  const x = width - padding - (visibleHistory.length - 1 - idx) * step - candleWidth / 2;
-                                  
-                                  const y_high = padding + (1 - (highPrice - minPrice) / priceRange) * (height - 2 * padding);
-                                  const y_low = padding + (1 - (lowPrice - minPrice) / priceRange) * (height - 2 * padding);
-                                  const y_open = padding + (1 - (openPrice - minPrice) / priceRange) * (height - 2 * padding);
-                                  const y_close = padding + (1 - (closePrice - minPrice) / priceRange) * (height - 2 * padding);
+                                    const x = width - padding - (visibleCandles.length - 1 - idx) * step - candleWidth / 2;
+                                    
+                                    const y_high = padding + (1 - (highPrice - minPrice) / priceRange) * (height - 2 * padding);
+                                    const y_low = padding + (1 - (lowPrice - minPrice) / priceRange) * (height - 2 * padding);
+                                    const y_open = padding + (1 - (openPrice - minPrice) / priceRange) * (height - 2 * padding);
+                                    const y_close = padding + (1 - (closePrice - minPrice) / priceRange) * (height - 2 * padding);
 
-                                  const bodyY = Math.min(y_open, y_close);
-                                  const bodyHeight = Math.max(1.5, Math.abs(y_open - y_close));
+                                    const bodyY = Math.min(y_open, y_close);
+                                    const bodyHeight = Math.max(1.5, Math.abs(y_open - y_close));
 
-                                  const isBullish = closePrice >= openPrice;
-                                  // Vibrant Neon Green (#54f354) and Solid Trading Red (#ff4a4a) matching MT5 workspace
-                                  const strokeColor = isBullish ? "#54f354" : "#ff4a4a";
-                                  const fillColor = isBullish ? "#54f354" : "#ff4a4a";
+                                    const isBullish = closePrice >= openPrice;
+                                    const isLastCandle = idx === visibleCandles.length - 1;
+                                    
+                                    // MT5-style colors: bullish = green/white, bearish = red/black
+                                    const bullishColor = "#54f354";
+                                    const bearishColor = "#ff4a4a";
+                                    const strokeColor = isBullish ? bullishColor : bearishColor;
 
-                                  return (
-                                    <g key={(tick.time || idx) + "-" + idx}>
-                                      {/* Wick (Center vertical line, drawn as 1px thin line) */}
-                                      <line
-                                        x1={x}
-                                        y1={y_high}
-                                        x2={x}
-                                        y2={y_low}
-                                        stroke={strokeColor}
-                                        strokeWidth="1"
-                                      />
-                                      {/* Solid Real Body */}
-                                      <rect
-                                        x={x - candleWidth / 2}
-                                        y={bodyY}
-                                        width={candleWidth}
-                                        height={bodyHeight}
-                                        fill={fillColor}
-                                        stroke={strokeColor}
-                                        strokeWidth="1"
-                                      />
-                                    </g>
-                                  );
-                                })}
+                                    return (
+                                      <g key={candle.time + "-" + idx}>
+                                        {/* Wick */}
+                                        <line
+                                          x1={x}
+                                          y1={y_high}
+                                          x2={x}
+                                          y2={y_low}
+                                          stroke={strokeColor}
+                                          strokeWidth="1"
+                                        />
+                                        {/* Body */}
+                                        {isLastCandle ? (
+                                          <rect
+                                            x={x - candleWidth / 2}
+                                            y={bodyY}
+                                            width={candleWidth}
+                                            height={bodyHeight}
+                                            fill="none"
+                                            stroke={strokeColor}
+                                            strokeWidth="1.5"
+                                          />
+                                        ) : (
+                                          <rect
+                                            x={x - candleWidth / 2}
+                                            y={bodyY}
+                                            width={candleWidth}
+                                            height={bodyHeight}
+                                            fill={isBullish ? bullishColor : bearishColor}
+                                            stroke={strokeColor}
+                                            strokeWidth="1"
+                                          />
+                                        )}
+                                      </g>
+                                    );
+                                  })}
 
-                                {/* Last tick tracker glowing pulse dot over the latest candlestick close price */}
-                                {(() => {
-                                  const lastIndex = visibleHistory.length - 1;
-                                  if (lastIndex < 0) return null;
-                                  const lastTick = visibleHistory[lastIndex];
-                                  const lastClose = lastTick.close !== undefined ? lastTick.close : lastTick.price;
-                                  const lastOpen = lastTick.open !== undefined ? lastTick.open : lastTick.price;
-                                  
-                                  const x = width - padding - candleWidth / 2;
-                                  const y = padding + (1 - (lastClose - minPrice) / priceRange) * (height - 2 * padding);
-                                  const isBullish = lastClose >= lastOpen;
-                                  const glowColor = isBullish ? "#54f354" : "#ff4a4a";
-                                  return (
-                                    <g>
-                                      <circle cx={x} cy={y} r="8" fill={glowColor} className="opacity-30 animate-pulse" />
-                                      <circle cx={x} cy={y} r="4" fill={glowColor} />
-                                    </g>
-                                  );
-                                })()}
-                              </>
-                            );
-                          })()}
-                        </svg>
-                      </div>
+                                  {/* Last candle tracker - pulsing dot at the latest close price */}
+                                  {(() => {
+                                    const lastIndex = visibleCandles.length - 1;
+                                    if (lastIndex < 0) return null;
+                                    const lastCandle = visibleCandles[lastIndex];
+                                    const lastClose = lastCandle.close;
+                                    const lastOpen = lastCandle.open;
+                                    
+                                    const x = width - padding - candleWidth / 2;
+                                    const y = padding + (1 - (lastClose - minPrice) / priceRange) * (height - 2 * padding);
+                                    const isBullish = lastClose >= lastOpen;
+                                    const glowColor = isBullish ? "#54f354" : "#ff4a4a";
+                                    return (
+                                      <g>
+                                        <circle cx={x} cy={y} r="8" fill={glowColor} className="opacity-30 animate-pulse" />
+                                        <circle cx={x} cy={y} r="4" fill={glowColor} />
+                                      </g>
+                                    );
+                                  })()}
+                                </>
+                              );
+                            })()}
+                          </svg>
+                        </div>
                     ) : (
                       <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-xs gap-1.5 py-12">
                         <RefreshCw className="w-8 h-8 animate-spin mb-1 text-indigo-400" />
@@ -2250,15 +2265,16 @@ setInterval(pollTrades, 1500);
 
                     <div className="flex items-center gap-2.5">
                       <div className="bg-indigo-950/60 border border-indigo-500/30 py-1 px-3 rounded-lg flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></span>
-                        <span className="text-[9px] text-indigo-300 font-semibold tracking-wider uppercase">AI Prediction:</span>
-                        <span className="text-[11px] font-black text-white tracking-wide uppercase">
-                          {config.selectedStrategy === StrategyMode.TREND_FOLLOWING 
-                            ? "BULLISH BIAS" 
-                            : config.selectedStrategy === StrategyMode.MEAN_REVERSION 
-                            ? "CONTRARIAN FLUID" 
-                            : "REINFORCEMENT CALIBRATION"
-                          }
+                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                          lastStrategySignal?.type === "BUY" ? "bg-emerald-500" :
+                          lastStrategySignal?.type === "SELL" ? "bg-rose-500" : "bg-indigo-500"
+                        }`}></span>
+                        <span className="text-[9px] text-indigo-300 font-semibold tracking-wider uppercase">Signal:</span>
+                        <span className={`text-[11px] font-black tracking-wide uppercase ${
+                          lastStrategySignal?.type === "BUY" ? "text-emerald-400" :
+                          lastStrategySignal?.type === "SELL" ? "text-rose-400" : "text-white"
+                        }`}>
+                          {lastStrategySignal?.type || config.selectedStrategy.replace("_", " ")}
                         </span>
                       </div>
                     </div>
@@ -2709,7 +2725,7 @@ setInterval(pollTrades, 1500);
                     <div>
                       <h4 className="font-bold text-white text-xs uppercase tracking-wider">Enable Algorithmic Trading</h4>
                       <p className="text-slate-300 text-xs mt-1 leading-relaxed">
-                        Enable algorithmic trading globally via the green button in the top panel of MT5. Finally, drag the expert advisor MQ5 file onto any <span className="text-emerald-400 font-semibold font-mono">Step Index</span> chart. Check your MT5 Expert Logs to verify connection registration.
+                         Enable algorithmic trading globally via the green button in the top panel of MT5. Finally, drag the expert advisor MQ5 file onto any <span className="text-emerald-400 font-semibold font-mono">{activeSymbol || "Step Index"}</span> chart. Check your MT5 Expert Logs to verify connection registration.
                       </p>
                     </div>
                   </div>
@@ -3000,7 +3016,7 @@ setInterval(pollTrades, 1500);
         </div>
 
         <div className="sm:ml-auto flex gap-4 uppercase font-bold tracking-tight text-[9px] whitespace-nowrap">
-          <span className="text-slate-300">Step Index (Synthetic M1)</span>
+          <span className="text-slate-300">{(activeSymbol || "Symbol") + " (Synthetic M1)"}</span>
           <span className="text-slate-500">v1.20-Production</span>
         </div>
       </footer>

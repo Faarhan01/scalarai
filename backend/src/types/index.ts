@@ -1,7 +1,8 @@
 export enum StrategyMode {
   TREND_FOLLOWING = "TREND_FOLLOWING",
   MEAN_REVERSION = "MEAN_REVERSION",
-  AI_ADAPTIVE = "AI_ADAPTIVE"
+  AI_ADAPTIVE = "AI_ADAPTIVE",
+  CUSTOM = "CUSTOM"
 }
 
 export interface TradeConfig {
@@ -36,6 +37,11 @@ export interface Tick {
   high?: number;
   low?: number;
   close?: number;
+  velocity?: number;
+  buyLocked?: boolean;
+  sellLocked?: boolean;
+  spread?: number;
+  session?: string;
 }
 
 export interface TradeRecord {
@@ -68,21 +74,63 @@ export interface EAConnectionDetails {
   broker: string | null;
   accountNumber: string | null;
   balance: number | null;
+  symbol: string | null;
+  symbolDigits: number | null;
+  symbolTickSize: number | null;
+  symbolDescription: string | null;
+  spread: number | null;
+  session: string | null;
+  margin: number | null;
+  leverage: number | null;
+  swapLong: number | null;
+  swapShort: number | null;
+  profitCalcMode: number | null;
+}
+
+export interface SymbolMetadata {
+  symbol: string;
+  description: string | null;
+  digits: number | null;
+  tickSize: number | null;
+  broker: string | null;
+  accountNumber: string | null;
+  lastConnected: string | null;
+}
+
+export interface CandleBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+  direction: "up" | "down" | "flat";
+}
+
+export interface SymbolState {
+  metadata: SymbolMetadata;
+  ticks: Tick[];
+  candles: CandleBar[];
+  telemetry: MarketTelemetry[];
+  connection: EAConnectionDetails;
 }
 
 export interface AiSynthesizedStrategy {
-  lastSynthesized: string;
-  strategyName: string;
-  rationale: string;
-  observationsUsed: string[];
-  compiledRules: {
-    minVelocityFilter: number;
-    slPointsMultiplier: number;
-    tpPointsMultiplier: number;
-    allowCounterTrend: boolean;
-    useEmaConfirmation: boolean;
-    maxAllowedPositionDivergence: number;
-  };
+  id?: string;
+  name: string;
+  description: string;
+  mode: StrategyMode;
+  rules: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StrategyRule {
+  indicator: string;
+  condition: string;
+  value: number | string | boolean;
+  action: "BUY" | "SELL" | "HOLD";
+  priority: number;
 }
 
 export interface AiKnowledgeBase {

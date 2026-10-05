@@ -85,3 +85,24 @@ export interface AiSynthesizedStrategy {
   };
 }
 
+export interface AiKnowledgeBase {
+  totalObservations: number;
+  globalAverageSpeed: number;
+  peakVelocityRegistered: number;
+  timeOfDayPatterns: Record<string, { count: number; avgSpeed: number }>;
+  lastUpdated: string;
+}
+
+export interface EAConnectionDetails {
+  isEaConnected: boolean;
+  clientIp: string | null;
+  lastPing: string | null;
+  broker: string | null;
+  accountNumber: string | null;
+  balance: number | null;
+  symbol: string | null;
+  symbolDigits: number | null;
+  symbolTickSize: number | null;
+  symbolDescription: string | null;
+}
+

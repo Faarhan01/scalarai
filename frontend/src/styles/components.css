@@ -1,0 +1,187 @@
+@import "tailwindcss";
+
+@layer components {
+  /* Card variants */
+  .card-glass {
+    border-radius: 1rem;
+    border: 1px solid theme(colors.slate.700 / 0.7);
+    background-color: theme(colors.slate.800 / 0.9);
+    padding: 1.25rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    backdrop-filter: blur(8px);
+  }
+
+  .card-elevated {
+    border-radius: 1rem;
+    border: 1px solid theme(colors.slate.700 / 0.7);
+    background-color: theme(colors.slate.800);
+    padding: 1.25rem;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  }
+
+  /* Button variants */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    background-color: theme(colors.brand.600);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: theme(colors.brand.500);
+  }
+
+  .btn-success {
+    background-color: theme(colors.emerald.600);
+    color: white;
+  }
+
+  .btn-success:hover {
+    background-color: theme(colors.emerald.500);
+  }
+
+  .btn-danger {
+    background-color: theme(colors.rose.600);
+    color: white;
+  }
+
+  .btn-danger:hover {
+    background-color: theme(colors.rose.500);
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    color: theme(colors.slate.300);
+    border: 1px solid theme(colors.slate.700);
+  }
+
+  .btn-ghost:hover {
+    background-color: theme(colors.slate.800);
+    color: theme(colors.slate.200);
+  }
+
+  /* Badge variants */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 0.375rem;
+    border: 1px solid theme(colors.slate.700);
+    padding: 0.125rem 0.5rem;
+    font-size: 0.625rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .badge-success {
+    border-color: theme(colors.emerald.500 / 0.3);
+    background-color: theme(colors.emerald.500 / 0.1);
+    color: theme(colors.emerald.300);
+  }
+
+  .badge-danger {
+    border-color: theme(colors.rose.500 / 0.3);
+    background-color: theme(colors.rose.500 / 0.1);
+    color: theme(colors.rose.400);
+  }
+
+  .badge-warning {
+    border-color: theme(colors.amber.500 / 0.3);
+    background-color: theme(colors.amber.500 / 0.1);
+    color: theme(colors.amber.400);
+  }
+
+  .badge-info {
+    border-color: theme(colors.brand.500 / 0.3);
+    background-color: theme(colors.brand.500 / 0.1);
+    color: theme(colors.brand.300);
+  }
+
+  /* Input variants */
+  .input {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid theme(colors.slate.700);
+    background-color: theme(colors.slate.900);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: var(--font-mono);
+    color: theme(colors.slate.100);
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: theme(colors.brand.500);
+  }
+
+  .input::placeholder {
+    color: theme(colors.slate.500);
+  }
+
+  /* Status indicators */
+  .status-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+  }
+
+  .status-dot-success {
+    background-color: theme(colors.emerald.500);
+  }
+
+  .status-dot-danger {
+    background-color: theme(colors.rose.500);
+  }
+
+  .status-dot-warning {
+    background-color: theme(colors.amber.500);
+  }
+
+  .status-dot-info {
+    background-color: theme(colors.brand.500);
+  }
+
+  /* Animations */
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Utility */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme(colors.slate.600) theme(colors.slate.800);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}

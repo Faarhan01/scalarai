@@ -27,20 +27,18 @@ export function getDefaultAiKnowledgeBase(): AiKnowledgeBase {
 
 export function getDefaultAiSynthesizedStrategy(): AiSynthesizedStrategy {
   return {
-    lastSynthesized: new Date().toISOString(),
-    strategyName: "Adaptive Micro-Volatility Escalator",
-    rationale: "Initial structural preset. Regulates velocity noise components and aligns trades with secondary EMA moving averages.",
-    observationsUsed: [
-      "Awaiting micro-tick observation cycle. Click 'Synthesize AI Strategy' to scan live telemetry bounds.",
-    ],
-    compiledRules: {
+    id: "ai_adaptive",
+    name: "AI Adaptive",
+    description: "Adaptive strategy using velocity, acceleration, and EMA trend confirmation.",
+    mode: StrategyMode.AI_ADAPTIVE,
+    rules: {
       minVelocityFilter: 0.15,
-      slPointsMultiplier: 1.0,
-      tpPointsMultiplier: 1.0,
-      allowCounterTrend: false,
+      maxAllowedPositionDivergence: 2.0,
       useEmaConfirmation: true,
-      maxAllowedPositionDivergence: 1.5,
+      allowCounterTrend: false,
     },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 

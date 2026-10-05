@@ -18,26 +18,54 @@ export function registerEaRoutes(app: any, getStatus: () => any, onTick: (data: 
   });
 
   app.post("/api/ea/tick", (req: Request, res: Response) => {
-    console.log("MT5 WebRequest received. Body:", JSON.stringify(req.body), "Headers:", req.headers);
-    const { account, broker, balance, profit, bid, ask, strategy, version } = req.body;
-    if (account) {
-      const originIp = req.ip || "127.0.0.1";
-      onTick(req.body);
+    try {
+      const body = req.body || {};
+      const account = body.account;
+      if (!account) {
+        return res.status(400).json({ error: "Missing account info" });
+      }
+
+      const symbol = body.symbol || "Step Index";
+      const digits = body.digits !== undefined ? Number(body.digits) : null;
+      const tickSize = body.tickSize !== undefined ? Number(body.tickSize) : null;
+      
+      if (digits !== null && (!Number.isInteger(digits) || digits < 0)) {
+        return res.status(400).json({ error: "Invalid digits" });
+      }
+      if (tickSize !== null && (!isFinite(tickSize) || tickSize <= 0)) {
+        return res.status(400).json({ error: "Invalid tickSize" });
+      }
+
+      const payload = {
+        ...body,
+        symbol,
+        digits,
+        tickSize,
+        description: body.description || undefined,
+      };
+
+      onTick(payload);
+      const status = getStatus();
       res.json({
-        isActive: false,
-        selectedStrategy: "TREND_FOLLOWING",
-        lotSize: 0.1,
-        takeProfitPoints: 300,
-        stopLossPoints: 150,
-        trailingStopPoints: 100,
-        useTrailingStop: true,
+        isActive: status.config.isActive,
+        selectedStrategy: status.config.selectedStrategy,
+        lotSize: status.config.lotSize,
+        takeProfitPoints: status.config.takeProfitPoints,
+        stopLossPoints: status.config.stopLossPoints,
+        trailingStopPoints: status.config.trailingStopPoints,
+        useTrailingStop: status.config.useTrailingStop,
+        maxTrades: status.config.maxTrades,
+        tradingMode: status.config.tradingMode,
+        isAiModeEnabled: status.config.isAiModeEnabled,
+        selectedAssets: status.config.selectedAssets,
         pendingAction: "NONE",
-        pendingLot: 0.1,
-        pendingSL: 150,
-        pendingTP: 300,
+        pendingLot: 0,
+        pendingSL: 0,
+        pendingTP: 0,
       });
-    } else {
-      res.status(400).json({ error: "Missing account info" });
+    } catch (err: any) {
+      console.error("EA tick handler error:", err);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 

@@ -7,7 +7,13 @@ export interface StatusResponse {
   history: any[];
   status: string;
   currentPrice: number;
-  hasGeminiKey: boolean;
+  activeSymbol: string;
+  symbolStates: Array<{
+    symbol: string;
+    connection: any;
+    currentPrice: number;
+    tickCount: number;
+  }>;
   aiSynthesizedStrategy: any;
   stats: any;
   webRequestStatus: any;
