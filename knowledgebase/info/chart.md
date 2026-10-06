@@ -1,4 +1,4 @@
-# Chart History — MT5 Candlestick Fix & Current Issues
+# Chart History — MT5 Candlestick Fix & Current Implementation
 
 ## 1. Original Problem
 
@@ -49,15 +49,24 @@ export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: nu
     lastCandle.high = Math.max(lastCandle.high, targetPrice);
     lastCandle.low = Math.min(lastCandle.low, targetPrice);
     lastCandle.close = targetPrice;
+    if (lastCandle.close > lastCandle.open) {
+      lastCandle.direction = "up";
+    } else if (lastCandle.close < lastCandle.open) {
+      lastCandle.direction = "down";
+    } else {
+      lastCandle.direction = "flat";
+    }
   } else {
+    const openPrice = lastCandle.close;
+    const direction = targetPrice > openPrice ? "up" : targetPrice < openPrice ? "down" : "flat";
     candles.push({
       time: now,
-      open: targetPrice,
+      open: openPrice,
       high: targetPrice,
       low: targetPrice,
       close: targetPrice,
       volume: null,
-      direction: "flat",
+      direction,
       minuteBucket: currentBucket,
     });
     if (candles.length > 200) candles.shift();
@@ -65,64 +74,58 @@ export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: nu
 }
 ```
 
-### Backend: `backend/src/index.ts` (later `backend/src/services/app-store.ts`)
+### Backend: `backend/src/services/app-store.ts`
 
-Replaced global singletons with per-symbol state management:
-
-```typescript
-// Before (globals):
-let tickHistory: Tick[] = [];
-let currentPrice = 0;
-let marketTelemetryData: any[] = [];
-let eaConnection: EAConnectionDetails = { ... };
-
-// After (per-symbol):
-const symbolStates = createSymbolStates("Step Index");
-
-export function getSymbolState(symbolStates: SymbolStates, symbol?: string): SymbolStateEntry {
-  const targetSymbol = (symbol && symbol.trim()) || symbolStates.activeSymbol || "";
-  if (!targetSymbol) {
-    if (symbolStates.map.size > 0) {
-      const first = symbolStates.map.keys().next().value;
-      if (first) return symbolStates.map.get(first)!;
-    }
-    return createBlankSymbolState("");
-  }
-  if (!symbolStates.map.has(targetSymbol)) {
-    symbolStates.map.set(targetSymbol, createBlankSymbolState(targetSymbol));
-  }
-  return symbolStates.map.get(targetSymbol)!;
-}
-```
-
-Updated `updateMarket()` to use per-symbol state:
+Replaced global singletons with per-symbol state management and removed duplicate early return that prevented broadcast:
 
 ```typescript
-function updateMarket(data: UpdateMarketPayload, clientIp?: string) {
-  const result = updateMarketState(symbolStates, data);
+updateMarket(data: UpdateMarketPayload, clientIp?: string): void {
+  const symbol = (data.symbol && data.symbol.trim()) || this.activeSymbol || "Step Index";
+  if (!this.activeSymbol || this.activeSymbol === "") {
+    this.activeSymbol = symbol;
+  }
+  const result = updateMarketState(this.symbolStates, { ...data, symbol });
   const state = result.symbol;
-  const symbol = data.symbol || symbolStates.activeSymbol || "Step Index";
 
-  // ... early return for duplicate ticks ...
+  if (result.switched) {
+    this.addLog("SERVER", "INFO", `Active market symbol updated to: ${this.symbolStates.activeSymbol}`);
+  }
 
-  aggregateTickIntoCandle(getSymbolState(symbolStates, symbolStates.activeSymbol), targetPrice);
+  const rawPrice = data.price !== undefined ? Number(data.price) : (data.close !== undefined ? Number(data.close) : state.currentPrice);
+  if (!isFinite(rawPrice) || rawPrice <= 0) {
+    return;
+  }
+  const targetPrice = rawPrice;
 
-  // ... broadcast includes candles ...
-  broadcastToDashboards({
-    type: "tick",
-    symbol,
-    tick: state.ticks[state.ticks.length - 1],
-    currentPrice: state.currentPrice,
-    connection: state.connection,
-    candles: state.candles.slice(-100),
-    stats: getFullStatusPayload().stats,
-  });
+  const numVelocity = data.velocity !== undefined ? Number(data.velocity) : 0;
+  if (!isFinite(numVelocity)) return;
+
+  const isBuyLocked = data.buyLocked !== undefined ? Boolean(data.buyLocked) : false;
+  const isSellLocked = data.sellLocked !== undefined ? Boolean(data.sellLocked) : false;
+  this.latestBuyLockedFromEa = isBuyLocked;
+  this.latestSellLockedFromEa = isSellLocked;
+
+  const absVelocity = Math.abs(numVelocity);
+  this.aiKnowledgeBase.totalObservations += 1;
+  const obs = this.aiKnowledgeBase.totalObservations;
+  this.aiKnowledgeBase.globalAverageSpeed = Number((((obs - 1) * this.aiKnowledgeBase.globalAverageSpeed + absVelocity) / obs).toFixed(4));
+  if (absVelocity > this.aiKnowledgeBase.peakVelocityRegistered) {
+    this.aiKnowledgeBase.peakVelocityRegistered = Number(absVelocity.toFixed(4));
+  }
+  if (obs % 25 === 0) {
+    persistAiKnowledge(this.aiKnowledgeBase);
+  }
+
+  if (!state.connection.isEaConnected) {
+    this.addLog("EA", "SUCCESS", `${symbol} MT5 Expert Advisor linked! Real-time velocity baseline metric: ${numVelocity.toFixed(4)} pt/s.`);
+  }
+  // ... broadcast with updated candles
 }
 ```
 
 ### Frontend: `frontend/src/hooks/useChartData.ts`
 
-Updated to prefer candle data over raw ticks:
+Updated to prefer candle data over raw ticks and enforce minimum price range:
 
 ```typescript
 export function useChartData(
@@ -143,185 +146,105 @@ export function useChartData(
           }));
 
     const displayCandles = candleData.slice(-maxVisibleCandles);
-    // ... min/max calculation ...
+    let minPrice = displayCandles.length > 0 ? displayCandles[0].low : 0;
+    let maxPrice = displayCandles.length > 0 ? displayCandles[0].high : 0;
+    for (let i = 1; i < displayCandles.length; i++) {
+      if (displayCandles[i].low < minPrice) minPrice = displayCandles[i].low;
+      if (displayCandles[i].high > maxPrice) maxPrice = displayCandles[i].high;
+    }
+    let priceRange = maxPrice - minPrice || 1.0;
+    const minRange = 1.5;
+    if (priceRange < minRange) {
+      const center = (maxPrice + minPrice) / 2;
+      minPrice = center - minRange / 2;
+      maxPrice = center + minRange / 2;
+      priceRange = minRange;
+    }
+    const paddingPrice = priceRange * 0.05;
+    minPrice -= paddingPrice;
+    maxPrice += paddingPrice;
+
     return { candleData, displayCandles, minPrice, maxPrice, priceRange };
   }, [candles, history, maxVisibleCandles]);
 }
 ```
 
-### Frontend: `frontend/src/components/charts/CandlestickChart.tsx`
+### Frontend: `frontend/src/components/charts/CandlestickChart/`
 
-Enhanced rendering with MT5-style visuals:
+Reorganized into a dedicated subfolder with standardized constants:
 
-```typescript
-const candleWidth = 8;
-const gap = 2;
-const step = candleWidth + gap;
-const maxCandles = Math.floor((width - 2 * padding) / step);
-const visibleCandles = displayCandles.slice(-maxCandles);
-
-{visibleCandles.map((candle, idx) => {
-  const x = width - padding - (visibleCandles.length - 1 - idx) * step - candleWidth / 2;
-  const y_high = padding + (1 - (highPrice - minPrice) / priceRange) * (height - 2 * padding);
-  const y_low = padding + (1 - (lowPrice - minPrice) / priceRange) * (height - 2 * padding);
-  const bodyY = Math.min(y_open, y_close);
-  const bodyHeight = Math.max(1.5, Math.abs(y_open - y_close));
-
-  // Wick
-  <line x1={x} y1={y_high} x2={x} y2={y_low} stroke={strokeColor} strokeWidth="1" />
-  // Body
-  <rect x={x - candleWidth/2} y={bodyY} width={candleWidth} height={bodyHeight}
-        fill={isBullish ? bullishColor : bearishColor} stroke={strokeColor} strokeWidth="1" />
-})}
+```
+frontend/src/components/charts/CandlestickChart/
+├── index.ts                      # barrel export
+├── types.ts                      # CandlestickChartProps, PriceTick
+├── constants.ts                  # all chart dimensions, colors, spacing
+└── CandlestickChart.tsx          # actual component
 ```
 
-### Frontend: `frontend/src/components/dashboard/PriceChart.tsx`
+Key visual improvements:
+- Right-side price axis with 5 labeled ticks
+- Time axis at bottom with HH:MM labels
+- Grid lines for price levels
+- Current price dashed line
+- Standard green/red filled candles
+- Thinner wicks (1px)
+- Last-price tracker dot
 
-Updated header to use dynamic `activeSymbol`:
+### Backend: `backend/src/utils/time.ts`
 
-```tsx
-<span className="text-xs font-bold text-slate-200 flex items-center gap-2 font-mono">
-  <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-  LIVE {activeSymbol || "SYMBOL"} STREAM (M1)
-</span>
+Created centralized timestamp utility:
+
+```typescript
+export function toIso8601(date: Date): string
+export function toEpochMs(date: Date): number
+export function fromEpochMs(epochMs: number): Date
+export function formatTime(epochMs: number): string
+export function formatDateTime(epochMs: number): string
+export function getMinuteBucket(epochMs: number): number
+export function getHourBucket(epochMs: number): number
+export function isSameMinute(a: number, b: number): boolean
+export function timeAgo(epochMs: number): string
+export function nowEpochMs(): number
+export function nowIso8601(): string
 ```
 
 ## 4. How It Was Verified
 
 - Backend `npx tsc --noEmit` — passes clean
 - Frontend `npx tsc --noEmit` — passes clean
-- Frontend `vite build` — completes successfully (1674 modules transformed, no JSX errors)
+- Frontend `vite build` — completes successfully
 - Dev server confirmed running and serving dashboard
 - `/api/status` returns proper candle data with OHLC fields
 - WebSocket `init` message includes `candles` array with OHLC data
 - Chart renders proper candlesticks with bodies and wicks
+- Candle direction now correctly shows `up`/`down`/`flat`
 
-## 5. Current Issue: Chart Stuck in One Position
+## 5. Current Implementation Status
 
-### Symptoms
-- Ticks and candlesticks appear stuck in one position instead of expanding/moving
-- Chart does not scroll to show new candles
-- Price movement is not reflected visually
+### Completed
+- ✅ Backend candle aggregation (`aggregateTickIntoCandle`)
+- ✅ Per-symbol state management (`symbolStates`)
+- ✅ Duplicate tick early return fixed (broadcast always happens)
+- ✅ Frontend candle rendering with proper MT5-style visuals
+- ✅ Time axis and price axis
+- ✅ Centralized time utility (`backend/src/utils/time.ts`)
+- ✅ Chart component standardized in dedicated subfolder
 
-### Root Cause Analysis
+### Not Yet Implemented
+See `knowledgebase/plans/historical-data/` for:
+- Stage 2: Enhanced database schema (`market_candles`, `observations`, `backtest_results`, `strategy_templates`)
+- Stage 3: EA historical data support (CopyRates lookback, CopyTicks)
+- Stage 4: Backend history routes & WebSocket messages
+- Stage 5: Observations service & AI insights
+- Stage 6: Enhanced MCP tools for historical data
+- Stage 7: Strategy creation & backtesting
 
-**Primary suspect: Early return in `backend/src/services/app-store.ts` `updateMarket()`**
+## 6. Remaining Issues / Future Work
 
-```typescript
-if (state.ticks.length > 0 && Math.abs(targetPrice - state.currentPrice) < 0.0001 && state.telemetry.length > 0) {
-  const lastTel = state.telemetry[state.telemetry.length - 1];
-  const newVelocity = data.velocity !== undefined ? Number(data.velocity) : lastTel.velocity;
-  if (Math.abs(newVelocity - lastTel.velocity) < 0.00001 && data.buyLocked === lastTel.buyLocked && data.sellLocked === lastTel.sellLocked) {
-    return;  // ❌ Broadcast skipped!
-  }
-}
-```
+1. **Historical data from MT5** — EA cannot yet respond to history requests
+2. **Observations storage** — AI observations not yet stored with timestamps in dedicated table
+3. **Backtesting** — No backtest engine using historical data
+4. **Strategy creation from observations** — No workflow to create strategies from AI patterns
+5. **MCP historical tools** — No MCP tools to request MT5 history on demand
 
-**The problem:**
-1. `updateMarketState()` is called FIRST, which already:
-   - Creates/updates the tick record
-   - Updates telemetry
-   - Calls `aggregateTickIntoCandle()` → updates/creates candle
-   - Updates connection fields
-
-2. THEN the early return check happens. If price/velocity/locks haven't changed, the function returns **WITHOUT broadcasting**.
-
-3. Result: Backend has updated candle data, but frontend never receives the update. Frontend's `candles` state becomes stale.
-
-**Why this causes "stuck" behavior:**
-- Backend candle array grows/updates internally
-- Frontend `candles` state stays frozen at last broadcast value
-- Chart renders from stale data → appears stuck
-
-### Contributing Factors
-
-1. **Redundant `aggregateTickIntoCandle` calls**
-   - Called inside `updateMarketState()` AND again in `app-store.ts`'s `updateMarket()`
-   - This is redundant but not the root cause
-
-2. **Frontend fallback to tick-based candles**
-   - In `useChartData.ts`: if `candles` is empty, falls back to mapping raw `history` ticks to candles
-   - Each tick becomes a candle with `open === close === price` → thin line appearance
-   - If backend stops broadcasting candles, frontend silently falls back to tick-based rendering
-
-3. **Empty array truthiness in WebSocket handler**
-   - Frontend checks `if (msg.candles)` before updating
-   - Empty array `[]` is truthy in JS, so this is fine
-   - But if backend sends `candles: undefined`, update is skipped
-
-### Exact Files Involved
-
-| File | Issue |
-|------|-------|
-| `backend/src/services/app-store.ts` | Early return prevents broadcast (line 164-170) |
-| `backend/src/services/market-ingestion.ts` | `updateMarketState` updates candles before early return check |
-| `frontend/src/hooks/useChartData.ts` | Falls back to tick-based candles if `candles` is empty |
-| `frontend/src/components/charts/CandlestickChart.tsx` | Renders from `displayCandles` which comes from `candles` state |
-| `frontend/src/App.tsx` | `onTick` handler only updates `candles` if `msg.candles` is truthy |
-
-## 6. Recommended Fix
-
-Move the broadcast BEFORE the early return, or remove the early return for candle updates:
-
-```typescript
-updateMarket(data: UpdateMarketPayload, clientIp?: string): void {
-  const result = updateMarketState(this.symbolStates, { ...data, symbol });
-  const state = result.symbol;
-
-  // ... symbol switch logging ...
-
-  const rawPrice = data.price !== undefined ? Number(data.price) : (data.close !== undefined ? Number(data.close) : state.currentPrice);
-  if (!isFinite(rawPrice) || rawPrice <= 0) {
-    return;
-  }
-  const targetPrice = rawPrice;
-
-  // ALWAYS broadcast current state, even for "duplicate" ticks
-  this.broadcastToDashboards({
-    type: "tick",
-    symbol,
-    activeSymbol: this.activeSymbol,
-    tick: state.ticks[state.ticks.length - 1],
-    currentPrice: state.currentPrice,
-    connection: state.connection,
-    candles: state.candles.slice(-100),
-    stats: this.getFullStatusPayload().stats,
-    symbolStates: Array.from(this.symbolStates.map.entries()).map(([sKey, sState]) => ({
-      symbol: sKey,
-      connection: sState.connection,
-      currentPrice: sState.currentPrice,
-      tickCount: sState.ticks.length,
-    })),
-  });
-
-  // Early return AFTER broadcast for duplicate ticks
-  if (state.ticks.length > 0 && Math.abs(targetPrice - state.currentPrice) < 0.0001 && state.telemetry.length > 0) {
-    const lastTel = state.telemetry[state.telemetry.length - 1];
-    const newVelocity = data.velocity !== undefined ? Number(data.velocity) : lastTel.velocity;
-    if (Math.abs(newVelocity - lastTel.velocity) < 0.00001 && data.buyLocked === lastTel.buyLocked && data.sellLocked === lastTel.sellLocked) {
-      return;
-    }
-  }
-
-  // ... rest of function (AI updates, etc) ...
-}
-```
-
-## 7. Git History of Chart-Related Changes
-
-| Commit | Change |
-|--------|--------|
-| `91f8e5e` | Initial tick persistence and EA integration |
-| `6f2ed6f` | Created `CandlestickChart.tsx` with MT5-style rendering |
-| `05e633d` | Extracted `AppStore` class, moved `updateMarket` into `app-store.ts` |
-| `2eef91b` | Added multi-symbol support, `symbolStates` Map |
-| `e8480b4` | Type safety improvements, extracted `AppShell` and `useElapsedTimer` |
-
-## 8. What Could Cause the Chart to Change Again
-
-1. **Modifying `updateMarket` early return logic** — any change to the duplicate-tick filter affects broadcast frequency
-2. **Changing `aggregateTickIntoCandle`** — modifying minute bucket logic or candle limits affects chart data
-3. **Frontend WebSocket handler changes** — modifying `onTick` in `App.tsx` or `useWebSocket.ts` affects how candles are received
-4. **`useChartData` fallback behavior** — if `candles` becomes empty, fallback to tick-based rendering changes appearance
-5. **EA route auth changes** — if EA endpoints gain auth requirements, ticks stop flowing entirely
-6. **Git operations during compaction** — file changes can be lost/unstaged during interrupted sessions
+See `knowledgebase/plans/historical-data/` for detailed implementation stages.

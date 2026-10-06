@@ -5,6 +5,7 @@ import {
   CHART_HEIGHT,
   CHART_PADDING,
   LEFT_AXIS_WIDTH,
+  RIGHT_AXIS_WIDTH,
   BOTTOM_AXIS_HEIGHT,
   CANDLE_WIDTH,
   CANDLE_GAP,
@@ -27,6 +28,8 @@ import {
   TRACKER_GLOW_OPACITY,
   AXIS_FONT_SIZE,
   AXIS_FONT_FAMILY,
+  TIME_AXIS_HEIGHT,
+  TIME_TICK_INTERVAL,
 } from "./constants";
 
 export const CandlestickChart: React.FC<CandlestickChartProps> = ({
@@ -47,7 +50,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }
 
   const priceRange = maxPrice - minPrice || 1.0;
-  const chartWidth = CHART_WIDTH - LEFT_AXIS_WIDTH - CHART_PADDING;
+  const chartWidth = CHART_WIDTH - LEFT_AXIS_WIDTH - RIGHT_AXIS_WIDTH;
   const chartHeight = CHART_HEIGHT - CHART_PADDING - BOTTOM_AXIS_HEIGHT;
   const maxCandles = Math.floor(chartWidth / CANDLE_STEP);
   const visibleCandles = displayCandles.slice(-maxCandles);
@@ -57,6 +60,18 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const p = minPrice + (priceRange * i) / PRICE_TICK_COUNT;
     const y = CHART_PADDING + (1 - (p - minPrice) / priceRange) * chartHeight;
     priceTicks.push({ p, y, label: p.toFixed(1) });
+  }
+
+  const timeTicks = [];
+  const timeTickCount = Math.min(6, visibleCandles.length);
+  for (let i = 0; i < timeTickCount; i++) {
+    const idx = Math.floor((visibleCandles.length - 1) * (i / (timeTickCount - 1 || 1)));
+    const candle = visibleCandles[idx];
+    if (!candle) continue;
+    const x = LEFT_AXIS_WIDTH + idx * CANDLE_STEP + CANDLE_WIDTH / 2;
+    const date = new Date(candle.time);
+    const label = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+    timeTicks.push({ x, label, idx });
   }
 
   return (
@@ -77,12 +92,26 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         {priceTicks.map((t, i) => (
           <text
             key={`price-${i}`}
-            x={CHART_WIDTH - 4}
+            x={CHART_WIDTH - RIGHT_AXIS_WIDTH + 6}
             y={t.y + 3}
             fill={AXIS_TEXT_COLOR}
             fontSize={AXIS_FONT_SIZE}
             fontFamily={AXIS_FONT_FAMILY}
-            textAnchor="end"
+            textAnchor="start"
+          >
+            {t.label}
+          </text>
+        ))}
+
+        {timeTicks.map((t, i) => (
+          <text
+            key={`time-${i}`}
+            x={t.x}
+            y={CHART_HEIGHT - 4}
+            fill={AXIS_TEXT_COLOR}
+            fontSize={AXIS_FONT_SIZE}
+            fontFamily={AXIS_FONT_FAMILY}
+            textAnchor="middle"
           >
             {t.label}
           </text>
