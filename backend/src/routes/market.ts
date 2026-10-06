@@ -39,7 +39,7 @@ export function registerMarketRoutes(
         maxTrades: currentConfig ? currentConfig.maxTrades : 3,
         tradingMode: currentConfig ? currentConfig.tradingMode : "Scalping",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Market update error:", err);
       res.status(500).json({ error: "Internal server error" });
     }
@@ -74,7 +74,7 @@ export function registerMarketRoutes(
         from: from || null,
         to: to || null,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Market history error:", err);
       res.status(500).json({ error: "Internal server error" });
     }

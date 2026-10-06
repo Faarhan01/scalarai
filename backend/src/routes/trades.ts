@@ -13,8 +13,8 @@ export function registerTradeRoutes(app: Application, toggleTrade: (isActive: bo
       }
       toggleTrade(isActive);
       res.json({ status: "ok", config: { isActive } });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to toggle trading" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to toggle trading" });
     }
   });
 
@@ -22,8 +22,8 @@ export function registerTradeRoutes(app: Application, toggleTrade: (isActive: bo
     try {
       resetStats();
       res.json({ status: "ok" });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to reset stats" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to reset stats" });
     }
   });
 }

@@ -1,6 +1,6 @@
 import { Request, Response, Application } from "express";
 import { scalarAiDb } from "../db";
-import { StrategyMode } from "../types";
+import { StrategyMode, StrategyRow } from "../types";
 import { STRATEGY_TEMPLATES, getStrategyTemplateById } from "../services/strategy-templates";
 
 export function registerStrategyRoutes(app: Application) {
@@ -16,7 +16,7 @@ export function registerStrategyRoutes(app: Application) {
         defaultConfig: t.defaultConfig,
       }));
 
-      const customStrategies = scalarAiDb.getAllStrategies().map((s: any) => ({
+      const customStrategies = scalarAiDb.getAllStrategies().map((s: StrategyRow) => ({
         id: s.id,
         name: s.name,
         description: s.description,
@@ -28,8 +28,8 @@ export function registerStrategyRoutes(app: Application) {
       }));
 
       res.json([...templates, ...customStrategies]);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to fetch strategies" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to fetch strategies" });
     }
   });
 
@@ -58,8 +58,8 @@ export function registerStrategyRoutes(app: Application) {
       }
 
       return res.status(404).json({ error: "Strategy not found" });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to fetch strategy" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to fetch strategy" });
     }
   });
 
@@ -90,8 +90,8 @@ export function registerStrategyRoutes(app: Application) {
 
       scalarAiDb.insertStrategy(strategy);
       res.json({ success: true, strategy });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to create strategy" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to create strategy" });
     }
   });
 }

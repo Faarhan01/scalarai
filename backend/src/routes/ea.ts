@@ -28,7 +28,7 @@ export function registerEaRoutes(
       res.setHeader("Content-Disposition", "attachment; filename=StepIndex_AI_Scalper_EA.mq5");
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.send(mql5Code);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("EA download generator error:", err);
       res.status(500).send("// Failed to generate MQL5 EA");
     }
@@ -41,7 +41,7 @@ export function registerEaRoutes(
       const code = generateMql5Code(appUrl, currentConfig);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.send(code);
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: "Failed to fetch generator source" });
     }
   });
@@ -95,7 +95,7 @@ export function registerEaRoutes(
         pendingSL: pendingCmd ? pendingCmd.sl : 0,
         pendingTP: pendingCmd ? pendingCmd.tp : 0,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("EA tick handler error:", err);
       res.status(500).json({ error: "Internal server error" });
     }

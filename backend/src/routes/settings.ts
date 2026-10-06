@@ -18,8 +18,8 @@ export function registerSettingsRoutes(
     try {
       const testState = getWebRequestTest();
       res.json({ ...getSettings(), triggerWebRequestTest: testState.triggerTest });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to fetch settings" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to fetch settings" });
     }
   });
 
@@ -55,8 +55,8 @@ export function registerSettingsRoutes(
       }
       updateSettings(body);
       res.json({ status: "ok", config: getSettings() });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to update settings" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to update settings" });
     }
   });
 
@@ -65,8 +65,8 @@ export function registerSettingsRoutes(
       triggerTest();
       const testState = getWebRequestTest();
       res.json({ status: "ok", testState });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to trigger test" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to trigger test" });
     }
   });
 
@@ -77,8 +77,8 @@ export function registerSettingsRoutes(
       const protocol = req.protocol || "http";
       const suggestedUrl = `${protocol}://${host}`;
       res.json({ testState, suggestedUrl });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to get test status" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to get test status" });
     }
   });
 
@@ -87,8 +87,8 @@ export function registerSettingsRoutes(
       const { status, error, details } = req.body || {};
       reportTest({ status: status || "success", error: error || "", details: details || "" });
       res.json({ status: "ok" });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to process report" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to process report" });
     }
   });
 
@@ -99,8 +99,8 @@ export function registerSettingsRoutes(
         logRetentionDays: 30,
         lastCleanup: new Date().toISOString(),
       });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to get retention settings" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to get retention settings" });
     }
   });
 
@@ -112,8 +112,8 @@ export function registerSettingsRoutes(
         logRetentionDays: logRetentionDays || 30,
         updatedAt: new Date().toISOString(),
       });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to update retention settings" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) || "Failed to update retention settings" });
     }
   });
 }
