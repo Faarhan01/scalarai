@@ -1,9 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { Server } from "http";
 
-export function createDashboardServer(server: any, sendInit: () => string, onMessage: (ws: WebSocket, rawMsg: string) => void) {
+export function createDashboardServer(server: Server, sendInit: () => string, onMessage: (ws: WebSocket, rawMsg: string) => void) {
   const wssDashboard = new WebSocketServer({ noServer: true });
 
-  server.on("upgrade", (request: any, socket: any, head: Buffer) => {
+  server.on("upgrade", (request: import("http").IncomingMessage, socket: import("net").Socket, head: Buffer) => {
     try {
       const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
       if (urlObj.pathname === "/ws/live" || urlObj.pathname === "/ws" || urlObj.pathname === "/live-feed") {

@@ -1,18 +1,14 @@
-# Database Plan — SQLite 3 Migration
-
-## Current State
-
-- Persistence was handled via flat JSON files:
-  - `ai_knowledge_profile.json`
-  - `ai_synthesized_strategy.json`
-- Data was loaded into memory at startup and written back to disk on changes.
-- No relational structure, no querying, no transactions, no schema enforcement.
+# Database Plan — Stage 1: Schema Implementation
 
 ## Status: ✅ DONE
 
-SQLite 3 migration is **fully implemented and operational**.
+## Objective
 
-### Implemented Files
+Design and implement the SQLite 3 schema for all application data.
+
+## Completed
+
+### Schema Files
 
 - `backend/src/db/schema.sql` — Full schema with 8 tables and 5 indexes
 - `backend/src/db/migrate.ts` — Migration runner with JSON-to-SQLite data migration
@@ -20,7 +16,7 @@ SQLite 3 migration is **fully implemented and operational**.
 - `backend/src/db/index.ts` — Database singleton
 - `backend/data/scalarai.sqlite` — Active database file
 
-### Implemented Schema
+### Tables Implemented
 
 - `trades` — Trade records with status, profit, strategy, reason
 - `system_logs` — Structured logs with level, source, timestamp
@@ -31,15 +27,8 @@ SQLite 3 migration is **fully implemented and operational**.
 - `ea_connections` — Singleton EA connection state
 - `symbol_metadata` — Per-symbol metadata registry
 
-### Implemented Features
+## Verification
 
+- Database file exists at `backend/data/scalarai.sqlite`
+- All tables created successfully
 - WAL journal mode and foreign keys enabled
-- Automatic JSON-to-SQLite migration on first run
-- Periodic cleanup of old ticks (>7 days) and logs (>30 days)
-- Full integration with `backend/src/index.ts` for state hydration and persistence
-
-### Remaining Items
-
-- Remove legacy JSON files after validation period:
-  - `ai_knowledge_profile.json`
-  - `ai_synthesized_strategy.json`

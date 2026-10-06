@@ -1,9 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { Server } from "http";
 
-export function createBridgeServer(server: any, onMessage: (ws: WebSocket, rawMsg: string) => void) {
+export function createBridgeServer(server: Server, onMessage: (ws: WebSocket, rawMsg: string) => void) {
   const wssBridge = new WebSocketServer({ noServer: true });
 
-  server.on("upgrade", (request: any, socket: any, head: Buffer) => {
+  server.on("upgrade", (request: import("http").IncomingMessage, socket: import("net").Socket, head: Buffer) => {
     try {
       const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
       if (urlObj.pathname === "/mt5-bridge") {

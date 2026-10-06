@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { McpContext } from "./types";
+import { McpContext, StrategyMode, TradeRecord, SystemLog } from "./types";
 import { scalarAiDb } from "./db";
 import { evaluateStrategyBacktest } from "./services/strategy";
 import { updateKnowledgeBaseFromTelemetry, formatKnowledgeBase } from "./services/knowledge";
@@ -442,7 +442,7 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
               if (!strategy) {
                 return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: `Strategy not found: ${args.id}` } });
               }
-              await ctx.updateSettings({ selectedStrategy: "CUSTOM" });
+              await ctx.updateSettings({ selectedStrategy: StrategyMode.CUSTOM });
               result = { content: [{ type: "text", text: JSON.stringify({ success: true, activeStrategy: strategy }, null, 2) }] };
             } else {
               return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: "Provide id or mode" } });
@@ -478,15 +478,15 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
           }
           case "get_trade_history": {
             let trades = ctx.getTrades();
-            if (args.status) trades = trades.filter((t: any) => t.status === args.status);
+            if (args.status) trades = trades.filter((t: TradeRecord) => t.status === args.status);
             const limit = typeof args.limit === "number" ? args.limit : 100;
             result = { content: [{ type: "text", text: JSON.stringify(trades.slice(0, limit), null, 2) }] };
             break;
           }
           case "get_system_logs": {
             let logs = ctx.getLogs();
-            if (args.source) logs = logs.filter((l: any) => l.source === args.source);
-            if (args.level) logs = logs.filter((l: any) => l.level === args.level);
+            if (args.source) logs = logs.filter((l: SystemLog) => l.source === args.source);
+            if (args.level) logs = logs.filter((l: SystemLog) => l.level === args.level);
             const limit = typeof args.limit === "number" ? args.limit : 50;
             result = { content: [{ type: "text", text: JSON.stringify(logs.slice(0, limit), null, 2) }] };
             break;
@@ -529,14 +529,14 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             const mode = args.mode || "TREND_FOLLOWING";
             const limit = typeof args.limit === "number" ? args.limit : 100;
             const allTrades = scalarAiDb.getTrades();
-            const modeTrades = allTrades.filter((t: any) => t.strategy === mode).slice(0, limit);
-            const closed = modeTrades.filter((t: any) => t.status === "CLOSED");
-            const wins = closed.filter((t: any) => t.profit > 0);
-            const losses = closed.filter((t: any) => t.profit <= 0);
+            const modeTrades = allTrades.filter((t: TradeRecord) => t.strategy === mode).slice(0, limit);
+            const closed = modeTrades.filter((t: TradeRecord) => t.status === "CLOSED");
+            const wins = closed.filter((t: TradeRecord) => t.profit > 0);
+            const losses = closed.filter((t: TradeRecord) => t.profit <= 0);
             const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
-            const totalProfit = closed.reduce((sum: number, t: any) => sum + t.profit, 0);
-            const avgWin = wins.length > 0 ? wins.reduce((sum: number, t: any) => sum + t.profit, 0) / wins.length : 0;
-            const avgLoss = losses.length > 0 ? losses.reduce((sum: number, t: any) => sum + t.profit, 0) / losses.length : 0;
+            const totalProfit = closed.reduce((sum: number, t: TradeRecord) => sum + t.profit, 0);
+            const avgWin = wins.length > 0 ? wins.reduce((sum: number, t: TradeRecord) => sum + t.profit, 0) / wins.length : 0;
+            const avgLoss = losses.length > 0 ? losses.reduce((sum: number, t: TradeRecord) => sum + t.profit, 0) / losses.length : 0;
             const profitFactor = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : 0;
             result = { content: [{ type: "text", text: JSON.stringify({
               mode,
@@ -558,7 +558,7 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
               result = { content: [{ type: "text", text: "No knowledge base found. Initialize it first." }] };
               break;
             }
-            const telemetry = scalarAiDb.rawQuery("SELECT velocity, timestamp FROM market_ticks ORDER BY timestamp DESC LIMIT 500", []);
+            const telemetry = scalarAiDb.rawQuery("SELECT velocity, timestamp FROM market_ticks ORDER BY timestamp DESC LIMIT 500", []) as Array<{ velocity: number; timestamp: number }>;
             const updateResult = updateKnowledgeBaseFromTelemetry(symbol, telemetry.reverse());
             result = { content: [{ type: "text", text: JSON.stringify({
               success: true,
@@ -645,8 +645,8 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             const type = args.type || "trades";
             const limit = typeof args.limit === "number" ? args.limit : 500;
             const format = args.format || "json";
-            
-            let data: any;
+
+            let data: TradeRecord[] | SystemLog[] | unknown[];
             switch (type) {
               case "trades":
                 data = scalarAiDb.getTrades().slice(0, limit);

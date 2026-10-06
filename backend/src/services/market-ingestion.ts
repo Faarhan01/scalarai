@@ -1,4 +1,4 @@
-import { Tick, EAConnectionDetails } from "../types";
+import { Tick, EAConnectionDetails, CandleBar } from "../types";
 
 export interface SymbolStateEntry {
   ticks: Tick[];
@@ -8,15 +8,6 @@ export interface SymbolStateEntry {
   currentPrice: number;
   lastDirection: "up" | "down" | "flat";
   tickCount: number;
-}
-
-export interface CandleBar {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  minuteBucket: number;
 }
 
 export interface TelemetryRecord {
@@ -86,6 +77,8 @@ export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: nu
       high: targetPrice,
       low: targetPrice,
       close: targetPrice,
+      volume: null,
+      direction: "flat",
       minuteBucket: currentBucket,
     }];
     return;
@@ -103,6 +96,8 @@ export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: nu
       high: targetPrice,
       low: targetPrice,
       close: targetPrice,
+      volume: null,
+      direction: "flat",
       minuteBucket: currentBucket,
     });
     if (candles.length > 200) candles.shift();

@@ -1,17 +1,9 @@
-import { Request, Response } from "express";
-import { AiKnowledgeBase, AiSynthesizedStrategy, Tick } from "../types";
+import { Request, Response, Application } from "express";
+import { AiKnowledgeBase, AiSynthesizedStrategy, Tick, AiStudyFeedPayload } from "../types";
 
 export function registerAiRoutes(
-  app: any,
-  getAiStudyData?: () => {
-    status: string;
-    message: string;
-    count: number;
-    aiKnowledgeBase: AiKnowledgeBase;
-    aiSynthesizedStrategy: AiSynthesizedStrategy;
-    candleStream: Tick[];
-    averageVelocity: number;
-  }
+  app: Application,
+  getAiStudyData?: () => AiStudyFeedPayload
 ) {
   app.get("/api/ai-study-feed", (req: Request, res: Response) => {
     if (getAiStudyData) {

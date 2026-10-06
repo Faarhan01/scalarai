@@ -13,7 +13,59 @@ Local trading dashboard and strategy engine for MetaTrader 5, with an MCP interf
 
 - Node.js 18+
 - npm
+- SQLite 3 — required at runtime for local persistence (`better-sqlite3` is used; prebuilt binaries are downloaded during `npm install` on most platforms)
 - MetaTrader 5 with the generated EA attached to a chart
+
+## Project structure
+
+```
+.
+├── backend/
+│   ├── src/
+│   │   ├── db/                  # SQLite schema, migration, repository
+│   │   ├── middleware/          # CORS, auth, logging, rate limiting
+│   │   ├── routes/              # Express route handlers
+│   │   ├── services/            # Business logic
+│   │   │   ├── app-state.ts            # App state orchestration
+│   │   │   ├── state-persistence.ts    # DB hydration + persist helpers
+│   │   │   ├── trade-execution.ts      # Trade lifecycle + strategy triggers
+│   │   │   ├── market-ingestion.ts     # Symbol state + candle aggregation
+│   │   │   ├── strategy.ts             # Strategy evaluation + indicator math
+│   │   │   ├── defaults.ts             # Default config factories
+│   │   │   ├── ea-generator.ts         # MQL5/Node bridge code generation
+│   │   │   └── ...
+│   │   ├── types/               # TypeScript interfaces
+│   │   ├── utils/               # Validators, auth helpers
+│   │   ├── websockets/          # MT5 bridge + dashboard WebSocket servers
+│   │   ├── mcp_server.ts        # MCP JSON-RPC 2.0 handler
+│   │   └── index.ts             # Express app + server bootstrap
+│   └── data/
+│       ├── scalarai.sqlite      # Active SQLite database
+│       └── backups/             # Legacy JSON backups
+├── frontend/
+│   ├── src/
+│   │   ├── components/          # React components
+│   │   ├── hooks/               # Custom hooks
+│   │   ├── services/            # API + WebSocket clients
+│   │   ├── styles/              # Tailwind + semantic CSS
+│   │   ├── tokens/              # Design tokens
+│   │   ├── types/               # Frontend TypeScript interfaces
+│   │   ├── App.tsx              # Root component
+│   │   └── main.tsx             # Entry point
+│   ├── index.html
+│   └── vite.config.ts
+├── tests/                       # vitest unit tests
+├── knowledgebase/
+│   └── plans/                   # Implementation plans by domain
+│       ├── backend/
+│       ├── frontend/
+│       ├── database/
+│       └── style/
+├── package.json
+├── tsconfig.json
+├── .env.example
+└── README.md
+```
 
 ## Quick start
 
@@ -73,9 +125,44 @@ Set these in `.env`:
 - `GEMINI_API_KEY` — Google Gemini API key (optional)
 - `FRONTEND_URL` — allowed CORS origin (default: `http://localhost:5173`)
 
+### Environment variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `3000` | Backend server port |
+| `SCALARAI_MCP_API_KEY` | No | — | Bearer token for `/mcp` and state-changing routes |
+| `FRONTEND_URL` | No | `http://localhost:5173` | Allowed CORS origin for the frontend |
+| `GEMINI_API_KEY` | No | — | Google Gemini API key |
+| `APP_URL` | No | — | Host URL used for EA generator and self-referential links |
+| `GITHUB_CLIENT_ID` | No | — | GitHub OAuth client ID |
+| `GITHUB_CLIENT_SECRET` | No | — | GitHub OAuth client secret |
+| `GITHUB_REPO_OWNER` | No | `Faarhan01` | GitHub repo owner for sync |
+| `GITHUB_REPO_NAME` | No | `Scalarai` | GitHub repo name for sync |
+
 ## Notes
 
 - The backend binds to `0.0.0.0:3000` by default; set `PORT` in `.env` to override
 - State-changing routes (`/api/settings`, `/api/toggle-trade`, `/api/reset-stats`, etc.) require `SCALARAI_MCP_API_KEY` Bearer token
 - Do not commit real secrets; `.env.example` uses placeholders only
 - SQLite database is stored in `backend/data/scalarai.sqlite`
+
+## Multi-computer workflow
+
+This repo is edited from multiple machines and synced via GitHub. To avoid merge noise and machine-specific conflicts:
+
+- `backend/data/scalarai.sqlite-shm` and `backend/data/scalarai.sqlite-wal` are ignored via `.gitignore`
+- The main database file `backend/data/scalarai.sqlite` is still tracked
+- If you need machine-local DB behavior, keep `scalarai.sqlite` uncommitted and rely on `backend/data/backups/` for portable data
+
+## Development
+
+```bash
+# Type check
+npm run lint
+
+# Run tests
+npm run test
+
+# Start dev server with hot reload
+npm run dev
+```

@@ -1,9 +1,10 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, Application } from "express";
 import { requireApiKey } from "../middleware/auth";
+import { FullStatusPayload } from "../types";
 
 export function registerStatusRoute(
-  app: any,
-  getStatus: () => any,
+  app: Application,
+  getStatus: () => FullStatusPayload,
   switchSymbol: (symbol: string) => void,
   getAndClearPendingOrders?: () => any[],
   apiKey?: string

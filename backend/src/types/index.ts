@@ -105,6 +105,7 @@ export interface CandleBar {
   close: number;
   volume: number | null;
   direction: "up" | "down" | "flat";
+  minuteBucket?: number;
 }
 
 export interface SymbolState {
@@ -157,9 +158,62 @@ export interface WebRequestTestState {
   triggerTest: boolean;
 }
 
+export interface UpdateMarketPayload {
+  symbol?: string;
+  price?: number;
+  close?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  velocity?: number;
+  buyLocked?: boolean;
+  sellLocked?: boolean;
+  spread?: number;
+  session?: string;
+  broker?: string;
+  account?: string;
+  balance?: number;
+  digits?: number;
+  tickSize?: number;
+  description?: string;
+  margin?: number;
+  leverage?: number;
+  swapLong?: number;
+  swapShort?: number;
+  profitCalcMode?: number;
+}
+
+export interface FullStatusPayload {
+  config: TradeConfig;
+  connection: EAConnectionDetails;
+  isBridgeConnected: boolean;
+  logs: SystemLog[];
+  trades: TradeRecord[];
+  history: Tick[];
+  candles: CandleBar[];
+  status: string;
+  currentPrice: number;
+  activeSymbol: string;
+  symbolStates: Array<{ symbol: string; connection: EAConnectionDetails; currentPrice: number; tickCount: number }>;
+  aiSynthesizedStrategy: AiSynthesizedStrategy;
+  lastStrategySignal: { type: string; reason: string; confidence?: number } | null;
+  stats: TradeSessionStats;
+  webRequestStatus: WebRequestTestState;
+}
+
+export interface AiStudyFeedPayload {
+  status: string;
+  message: string;
+  count: number;
+  aiKnowledgeBase: AiKnowledgeBase;
+  aiSynthesizedStrategy: AiSynthesizedStrategy;
+  candleStream: Tick[];
+  averageVelocity: number;
+}
+
 export interface McpContext {
-  getStatus: () => any;
-  getAiStudyFeed: () => any;
+  getStatus: () => FullStatusPayload;
+  getAiStudyFeed: () => Promise<AiStudyFeedPayload>;
   getTrades: () => TradeRecord[];
   getLogs: () => SystemLog[];
   getConfig: () => TradeConfig;
@@ -168,9 +222,86 @@ export interface McpContext {
   getAiKnowledgeBase: () => AiKnowledgeBase;
   analyzeMarket: () => Promise<string>;
   synthesizeStrategy: () => Promise<AiSynthesizedStrategy>;
-  updateSettings: (params: any) => Promise<TradeConfig>;
+  updateSettings: (params: Partial<TradeConfig>) => Promise<TradeConfig>;
   toggleTrading: (isActive: boolean) => Promise<TradeConfig>;
-  placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<any>;
-  closeTrade: (tradeId: string) => Promise<any>;
+  placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<{ success: boolean; message: string }>;
+  closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
   resetStats: () => Promise<void>;
+}
+
+export interface SettingsRow {
+  id: number;
+  is_active: number;
+  selected_strategy: string;
+  lot_size: number;
+  take_profit_points: number;
+  stop_loss_points: number;
+  trailing_stop_points: number;
+  use_trailing_stop: number;
+  max_trades: number;
+  trading_mode: string;
+  is_ai_mode_enabled: number;
+  mt5_path: string | null;
+  app_endpoint: string | null;
+  selected_assets: string;
+}
+
+export interface EaConnectionRow {
+  id: number;
+  is_ea_connected: number;
+  client_ip: string | null;
+  last_ping: string | null;
+  broker: string | null;
+  account_number: string | null;
+  balance: number | null;
+  symbol: string | null;
+  symbol_digits: number | null;
+  symbol_tick_size: number | null;
+  symbol_description: string | null;
+  spread: number | null;
+  session: string | null;
+  margin: number | null;
+  leverage: number | null;
+  swap_long: number | null;
+  swap_short: number | null;
+  profit_calc_mode: number | null;
+}
+
+export interface AiKnowledgeRow {
+  id: number;
+  total_observations: number;
+  global_average_speed: number;
+  peak_velocity_registered: number;
+  time_of_day_patterns: string;
+  last_updated: string;
+}
+
+export interface AiStrategyRow {
+  id: number;
+  name: string;
+  description: string;
+  mode: string;
+  rules: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StrategyRow {
+  id: string;
+  name: string;
+  description: string;
+  mode: string;
+  rules: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SymbolMetadataRow {
+  symbol: string;
+  description: string | null;
+  digits: number | null;
+  tick_size: number | null;
+  broker: string | null;
+  account_number: string | null;
+  last_connected: string | null;
 }

@@ -1,15 +1,15 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, Application } from "express";
 import path from "path";
 import fs from "fs";
 import { generateMql5Code } from "../services/ea-generator";
-import { TradeConfig } from "../types";
+import { TradeConfig, UpdateMarketPayload, FullStatusPayload } from "../types";
 import { requireApiKey } from "../middleware/auth";
 
 export function registerEaRoutes(
-  app: any,
-  getStatus: () => any,
+  app: Application,
+  getStatus: () => FullStatusPayload,
   getConfig: () => TradeConfig,
-  onTick: (data: any, clientIp?: string) => void,
+  onTick: (data: UpdateMarketPayload, clientIp?: string) => void,
   getPendingEaCommand?: () => { action: string; lot: number; sl: number; tp: number } | null,
   apiKey?: string
 ) {

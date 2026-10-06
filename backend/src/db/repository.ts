@@ -7,6 +7,8 @@ import {
   EAConnectionDetails,
   AiKnowledgeBase,
   AiSynthesizedStrategy,
+  SymbolMetadataRow,
+  StrategyRow,
 } from "../types";
 
 export class ScalarAiDb {
@@ -34,7 +36,7 @@ export class ScalarAiDb {
 
   updateTrade(id: string, updates: Partial<TradeRecord>): void {
     const sets: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     if (updates.closePrice !== undefined) { sets.push("close_price = ?"); values.push(updates.closePrice); }
     if (updates.profit !== undefined) { sets.push("profit = ?"); values.push(updates.profit); }
     if (updates.status !== undefined) { sets.push("status = ?"); values.push(updates.status); }
@@ -272,12 +274,12 @@ export class ScalarAiDb {
     );
   }
 
-  getSymbolMetadata(symbol: string): any {
-    return this.db.prepare(`SELECT * FROM symbol_metadata WHERE symbol = ?`).get(symbol);
+  getSymbolMetadata(symbol: string): SymbolMetadataRow | undefined {
+    return this.db.prepare(`SELECT * FROM symbol_metadata WHERE symbol = ?`).get(symbol) as SymbolMetadataRow | undefined;
   }
 
   // Strategies
-  insertStrategy(strategy: any): void {
+  insertStrategy(strategy: StrategyRow): void {
     this.db.prepare(
       `INSERT INTO strategies (id, name, description, mode, rules, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
@@ -291,15 +293,15 @@ export class ScalarAiDb {
     );
   }
 
-  getAllStrategies(): any[] {
-    return this.db.prepare(`SELECT * FROM strategies ORDER BY updated_at DESC`).all();
+  getAllStrategies(): StrategyRow[] {
+    return this.db.prepare(`SELECT * FROM strategies ORDER BY updated_at DESC`).all() as StrategyRow[];
   }
 
-  getStrategyById(id: string): any {
-    return this.db.prepare(`SELECT * FROM strategies WHERE id = ?`).get(id);
+  getStrategyById(id: string): StrategyRow | undefined {
+    return this.db.prepare(`SELECT * FROM strategies WHERE id = ?`).get(id) as StrategyRow | undefined;
   }
 
-  updateStrategy(id: string, updates: any): void {
+  updateStrategy(id: string, updates: Partial<StrategyRow>): void {
     const existing = this.getStrategyById(id);
     if (!existing) return;
     const merged = {
@@ -317,7 +319,7 @@ export class ScalarAiDb {
     this.db.prepare(`DELETE FROM strategies WHERE id = ?`).run(id);
   }
 
-  rawQuery(sql: string, params: any[] = []): any[] {
+  rawQuery(sql: string, params: unknown[] = []): unknown[] {
     const normalized = sql.trim().replace(/\s+/g, " ").toUpperCase();
     if (!normalized.startsWith("SELECT")) return [];
     if (normalized.includes(";")) return [];

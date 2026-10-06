@@ -1,11 +1,11 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, Application } from "express";
 import { scalarAiDb } from "../db";
-import { TradeConfig } from "../types";
+import { TradeConfig, UpdateMarketPayload } from "../types";
 import { requireApiKey } from "../middleware/auth";
 
 export function registerMarketRoutes(
-  app: any,
-  updateMarket: (data: any) => void,
+  app: Application,
+  updateMarket: (data: UpdateMarketPayload) => void,
   getConfig?: () => TradeConfig,
   apiKey?: string
 ) {

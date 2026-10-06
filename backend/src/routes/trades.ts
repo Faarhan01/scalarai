@@ -1,8 +1,8 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, Application } from "express";
 import { isValidTradeType } from "../utils/validators";
 import { requireApiKey } from "../middleware/auth";
 
-export function registerTradeRoutes(app: any, toggleTrade: (isActive: boolean) => void, resetStats: () => void, apiKey?: string) {
+export function registerTradeRoutes(app: Application, toggleTrade: (isActive: boolean) => void, resetStats: () => void, apiKey?: string) {
   const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
 
   app.post("/api/toggle-trade", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {

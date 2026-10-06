@@ -1,9 +1,9 @@
-import { Request, Response } from "express";
+import { Request, Response, Application } from "express";
 import { scalarAiDb } from "../db";
 import { StrategyMode } from "../types";
 import { STRATEGY_TEMPLATES, getStrategyTemplateById } from "../services/strategy-templates";
 
-export function registerStrategyRoutes(app: any) {
+export function registerStrategyRoutes(app: Application) {
   app.get("/api/strategies", (req: Request, res: Response) => {
     try {
       const templates = STRATEGY_TEMPLATES.map(t => ({

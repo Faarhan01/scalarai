@@ -1,11 +1,12 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, Application } from "express";
 import { isValidStrategyMode, isValidTradingMode } from "../utils/validators";
 import { requireApiKey } from "../middleware/auth";
+import { TradeConfig } from "../types";
 
 export function registerSettingsRoutes(
-  app: any,
-  updateSettings: (params: any) => void,
-  getSettings: () => any,
+  app: Application,
+  updateSettings: (params: Partial<TradeConfig>) => void,
+  getSettings: () => TradeConfig,
   getWebRequestTest: () => { status: string; lastTested: string; error: string; details: string; triggerTest: boolean },
   triggerTest: () => void,
   reportTest: (report: { status: string; error?: string; details?: string }) => void,
