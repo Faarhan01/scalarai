@@ -12,7 +12,7 @@ import {
 } from "../types";
 
 export class ScalarAiDb {
-  constructor(private db: any) {}
+  constructor(private db: InstanceType<typeof Database>) {}
 
   // Trades
   insertTrade(trade: TradeRecord): void {

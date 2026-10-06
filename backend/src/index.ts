@@ -34,6 +34,8 @@ import {
   Tick,
   SystemLog,
   FullStatusPayload,
+  UpdateMarketPayload,
+  TradeConfig,
 } from "./types";
 import { scalarAiDb } from "./db";
 import { evaluateStrategy, buildContext, evaluateStrategyBacktest } from "./services/strategy";
@@ -191,7 +193,7 @@ function getMinuteBucket(ts: number): number {
   return Math.floor(ts / 60000);
 }
 
-function updateMarket(data: any, clientIp?: string) {
+function updateMarket(data: UpdateMarketPayload, clientIp?: string) {
   const result = updateMarketState(appState.symbolStates, data);
   const state = result.symbol;
   const symbol = data.symbol || appState.symbolStates.activeSymbol || "Step Index";
@@ -336,7 +338,7 @@ async function startServer() {
   registerMarketRoutes(app, updateMarket, () => appState.tradeConfig, process.env.SCALARAI_MCP_API_KEY);
   registerSettingsRoutes(
     app,
-    (params: any) => updateSettings(appState, params, appCallbacks),
+    (params: Partial<TradeConfig>) => updateSettings(appState, params, appCallbacks),
     () => appState.tradeConfig,
     () => webRequestTest,
     () => {

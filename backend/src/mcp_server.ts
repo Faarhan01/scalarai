@@ -461,9 +461,10 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             try {
               const rows = scalarAiDb.rawQuery(args.sql, args.params || []);
               result = { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
-            } catch (err: any) {
-              return res.json({ jsonrpc: "2.0", id, error: { code: -32603, message: `Query failed: ${err.message}` } });
-            }
+             } catch (err: unknown) {
+               const message = err instanceof Error ? err.message : String(err);
+               return res.json({ jsonrpc: "2.0", id, error: { code: -32603, message: `Query failed: ${message}` } });
+             }
             break;
           }
           case "update_trading_settings": {
@@ -636,9 +637,10 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
               const strategy = createStrategyFromTemplate(templateId, args.overrides);
               scalarAiDb.upsertAiStrategy(strategy);
               result = { content: [{ type: "text", text: JSON.stringify({ success: true, strategy }, null, 2) }] };
-            } catch (err: any) {
-              result = { content: [{ type: "text", text: `Error: ${err.message}` }] };
-            }
+             } catch (err: unknown) {
+               const message = err instanceof Error ? err.message : String(err);
+               result = { content: [{ type: "text", text: `Error: ${message}` }] };
+             }
             break;
           }
           case "export_data": {
@@ -679,8 +681,9 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
       }
 
       return res.json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
-    } catch (error: any) {
-      return res.json({ jsonrpc: "2.0", id, error: { code: -32603, message: `Internal error: ${error.message || error}` } });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return res.json({ jsonrpc: "2.0", id, error: { code: -32603, message: `Internal error: ${message}` } });
     }
   };
 }

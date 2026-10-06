@@ -116,22 +116,31 @@ export interface SymbolState {
   connection: EAConnectionDetails;
 }
 
+export interface StrategyRules {
+  telemetry?: Record<string, unknown>;
+  minVelocityFilter?: number;
+  maxAllowedPositionDivergence?: number;
+  useEmaConfirmation?: boolean;
+  allowCounterTrend?: boolean;
+  conditions?: Array<{
+    indicator: string;
+    condition: string;
+    value: number | string | boolean;
+    action: "BUY" | "SELL" | "HOLD";
+    priority: number;
+  }>;
+  slPointsMultiplier?: number;
+  tpPointsMultiplier?: number;
+}
+
 export interface AiSynthesizedStrategy {
   id?: string;
   name: string;
   description: string;
   mode: StrategyMode;
-  rules: Record<string, any>;
+  rules: StrategyRules;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface StrategyRule {
-  indicator: string;
-  condition: string;
-  value: number | string | boolean;
-  action: "BUY" | "SELL" | "HOLD";
-  priority: number;
 }
 
 export interface AiKnowledgeBase {
