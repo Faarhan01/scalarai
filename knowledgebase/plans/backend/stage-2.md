@@ -1,5 +1,7 @@
 # Backend Plan — Stage 2: Type Safety Sweep
 
+> **Canonical structure:** See `knowledgebase/site-structure/backend/index.md` for the actual committed file layout before editing anything.
+
 ## Objective
 
 Replace high-value `: any` types with proper interfaces across the backend.

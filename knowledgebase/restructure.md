@@ -1,5 +1,7 @@
 # ScalarAI Restructure Plan
 
+> **Canonical structure:** See `knowledgebase/site-structure/backend/index.md` and `knowledgebase/site-structure/frontend/index.md` for the exact committed file layout.
+
 ## Current Actual Structure
 
 ```

@@ -1,5 +1,7 @@
 # Backend Plan — Stage 3: Hardcoded Values Cleanup
 
+> **Canonical structure:** See `knowledgebase/site-structure/backend/index.md` for the actual committed file layout before editing anything.
+
 ## Objective
 
 Remove hardcoded fallback values for ticket seeds, IP addresses, and URLs.

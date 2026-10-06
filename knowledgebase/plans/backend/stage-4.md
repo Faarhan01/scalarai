@@ -1,5 +1,7 @@
 # Backend Plan — Stage 4: AppStore Class
 
+> **Canonical structure:** See `knowledgebase/site-structure/backend/index.md` for the actual committed file layout before editing anything.
+
 ## Objective
 
 Encapsulate all application state and business logic into a single testable `AppStore` class.

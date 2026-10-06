@@ -1,5 +1,7 @@
 # Backend Plan — Stage 1: Service Extraction
 
+> **Canonical structure:** See `knowledgebase/site-structure/backend/index.md` for the actual committed file layout before editing anything.
+
 ## Objective
 
 Extract focused services from `backend/src/index.ts` to reduce god-file complexity.

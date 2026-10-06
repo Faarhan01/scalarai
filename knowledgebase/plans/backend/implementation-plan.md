@@ -1,5 +1,7 @@
 # Implementation Plan — Backend Refactoring Status
 
+> **Canonical structure:** See `knowledgebase/site-structure/backend/index.md` for the actual committed file layout before editing anything.
+
 ## Completed Work
 
 ### Priority 1: Critical Bugs ✅
