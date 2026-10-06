@@ -9,6 +9,12 @@ import {
   AiSynthesizedStrategy,
   SymbolMetadataRow,
   StrategyRow,
+  TradeRow,
+  SettingsRow,
+  EaConnectionRow,
+  AiKnowledgeRow,
+  AiStrategyRow,
+  StrategyMode,
 } from "../types";
 
 export class ScalarAiDb {
@@ -49,7 +55,7 @@ export class ScalarAiDb {
     this.db.prepare(`UPDATE trades SET ${sets.join(", ")} WHERE id = ?`).run(...values);
   }
 
-  private mapTradeRow(row: any): TradeRecord {
+  private mapTradeRow(row: TradeRow): TradeRecord {
     return {
       id: row.id,
       ticket: row.ticket,
@@ -62,7 +68,7 @@ export class ScalarAiDb {
       status: row.status,
       openTime: row.open_time,
       closeTime: row.close_time ?? undefined,
-      strategy: row.strategy,
+      strategy: row.strategy as StrategyMode,
       reason: row.reason,
     };
   }
@@ -70,7 +76,7 @@ export class ScalarAiDb {
   getTrades(status?: string, symbol?: string): TradeRecord[] {
     let query = `SELECT * FROM trades`;
     const clauses: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     if (status) {
       clauses.push(`status = ?`);
       params.push(status);
@@ -83,12 +89,12 @@ export class ScalarAiDb {
       query += ` WHERE ${clauses.join(" AND ")}`;
     }
     query += ` ORDER BY open_time DESC`;
-    const rows = this.db.prepare(query).all(...params) as any[];
+    const rows = this.db.prepare(query).all(...params) as TradeRow[];
     return rows.map((r) => this.mapTradeRow(r));
   }
 
   getOpenTrades(): TradeRecord[] {
-    const rows = this.db.prepare(`SELECT * FROM trades WHERE status = 'OPEN' ORDER BY open_time DESC`).all() as any[];
+    const rows = this.db.prepare(`SELECT * FROM trades WHERE status = 'OPEN' ORDER BY open_time DESC`).all() as TradeRow[];
     return rows.map((r) => this.mapTradeRow(r));
   }
 
@@ -160,7 +166,7 @@ export class ScalarAiDb {
 
   // AI Knowledge
   getAiKnowledge(): AiKnowledgeBase | null {
-    const row = this.db.prepare(`SELECT * FROM ai_knowledge WHERE id = 1`).get() as any;
+    const row = this.db.prepare(`SELECT * FROM ai_knowledge WHERE id = 1`).get() as AiKnowledgeRow;
     if (!row) return null;
     return {
       totalObservations: row.total_observations,
@@ -185,13 +191,13 @@ export class ScalarAiDb {
 
   // AI Strategy
   getAiStrategy(): AiSynthesizedStrategy | null {
-    const row = this.db.prepare(`SELECT * FROM ai_strategy WHERE id = 1`).get() as any;
+    const row = this.db.prepare(`SELECT * FROM ai_strategy WHERE id = 1`).get() as AiStrategyRow;
     if (!row) return null;
     return {
       id: "ai_adaptive",
       name: row.name || "AI Adaptive",
       description: row.description || "",
-      mode: row.mode || "AI_ADAPTIVE",
+      mode: (row.mode || "AI_ADAPTIVE") as StrategyMode,
       rules: JSON.parse(row.rules || "{}"),
       createdAt: row.created_at || new Date().toISOString(),
       updatedAt: row.updated_at || new Date().toISOString(),
@@ -213,18 +219,18 @@ export class ScalarAiDb {
 
   // Settings
   getSettings(): TradeConfig | null {
-    const row = this.db.prepare(`SELECT * FROM settings WHERE id = 1`).get() as any;
+    const row = this.db.prepare(`SELECT * FROM settings WHERE id = 1`).get() as SettingsRow;
     if (!row) return null;
     return {
       isActive: !!row.is_active,
-      selectedStrategy: row.selected_strategy,
+      selectedStrategy: row.selected_strategy as StrategyMode,
       lotSize: row.lot_size,
       takeProfitPoints: row.take_profit_points,
       stopLossPoints: row.stop_loss_points,
       trailingStopPoints: row.trailing_stop_points,
       useTrailingStop: !!row.use_trailing_stop,
       maxTrades: row.max_trades,
-      tradingMode: row.trading_mode,
+      tradingMode: row.trading_mode as "Scalping" | "Swing",
       isAiModeEnabled: !!row.is_ai_mode_enabled,
       mt5Path: row.mt5_path || undefined,
       appEndpoint: row.app_endpoint || undefined,
@@ -254,7 +260,7 @@ export class ScalarAiDb {
 
   // EA Connection
   getEaConnection(): EAConnectionDetails | null {
-    const row = this.db.prepare(`SELECT * FROM ea_connections WHERE id = 1`).get() as any;
+    const row = this.db.prepare(`SELECT * FROM ea_connections WHERE id = 1`).get() as EaConnectionRow;
     if (!row) return null;
     return {
       isEaConnected: !!row.is_ea_connected,
@@ -331,7 +337,7 @@ export class ScalarAiDb {
   }
 
   getAllSymbolConnections(): EAConnectionDetails[] {
-    const rows = this.db.prepare(`SELECT * FROM symbol_connections`).all() as any[];
+    const rows = this.db.prepare(`SELECT * FROM symbol_connections`).all() as EaConnectionRow[];
     return rows.map((row) => ({
       isEaConnected: !!row.is_ea_connected,
       clientIp: row.client_ip ?? null,
@@ -443,9 +449,9 @@ export class ScalarAiDb {
   }
 
   getDbStats(): { tickCount: number; logCount: number; tradeCount: number; dbSizeBytes: number } {
-    const tickCount = (this.db.prepare(`SELECT COUNT(*) as count FROM market_ticks`).get() as any).count;
-    const logCount = (this.db.prepare(`SELECT COUNT(*) as count FROM system_logs`).get() as any).count;
-    const tradeCount = (this.db.prepare(`SELECT COUNT(*) as count FROM trades`).get() as any).count;
+    const tickCount = (this.db.prepare(`SELECT COUNT(*) as count FROM market_ticks`).get() as { count: number }).count;
+    const logCount = (this.db.prepare(`SELECT COUNT(*) as count FROM system_logs`).get() as { count: number }).count;
+    const tradeCount = (this.db.prepare(`SELECT COUNT(*) as count FROM trades`).get() as { count: number }).count;
     
     const dbPath = process.cwd() + "/backend/data/scalarai.sqlite";
     const fs = require("fs");

@@ -1,13 +1,13 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
-import { ErrorBoundary } from './App.tsx';
+import { AppShell } from './components';
 import './styles/index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ErrorBoundary>
+    <AppShell>
       <App />
-    </ErrorBoundary>
+    </AppShell>
   </StrictMode>,
 );

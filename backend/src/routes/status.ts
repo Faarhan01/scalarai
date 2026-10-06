@@ -1,12 +1,12 @@
 import { Request, Response, NextFunction, Application } from "express";
 import { requireApiKey } from "../middleware/auth";
-import { FullStatusPayload } from "../types";
+import { FullStatusPayload, BridgeOrder } from "../types";
 
 export function registerStatusRoute(
   app: Application,
   getStatus: () => FullStatusPayload,
   switchSymbol: (symbol: string) => void,
-  getAndClearPendingOrders?: () => any[],
+  getAndClearPendingOrders?: () => BridgeOrder[],
   apiKey?: string
 ) {
   const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
@@ -15,8 +15,8 @@ export function registerStatusRoute(
     try {
       const status = getStatus();
       return res.json(status);
-    } catch (error: any) {
-      return res.status(500).json({ error: error.message || "Failed to fetch status" });
+    } catch (error: unknown) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to fetch status" });
     }
   });
 
@@ -28,8 +28,8 @@ export function registerStatusRoute(
       }
       switchSymbol(symbol);
       return res.json({ success: true, activeSymbol: symbol });
-    } catch (error: any) {
-      return res.status(500).json({ error: error.message || "Failed to switch symbol" });
+    } catch (error: unknown) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to switch symbol" });
     }
   });
 
@@ -38,8 +38,8 @@ export function registerStatusRoute(
     try {
       const pendingTrades = getAndClearPendingOrders ? getAndClearPendingOrders() : [];
       res.json(pendingTrades);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to get pending trades" });
+    } catch (error: unknown) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to get pending trades" });
     }
   };
 

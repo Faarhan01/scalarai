@@ -1,4 +1,4 @@
-import { TradeRecord, TradeConfig, AiSynthesizedStrategy, AiKnowledgeBase, Tick, CandleBar } from "../types";
+import { TradeRecord, TradeConfig, AiSynthesizedStrategy, AiKnowledgeBase, Tick, CandleBar, BridgeOrder } from "../types";
 import { SymbolStates, getSymbolState } from "./market-ingestion";
 import { buildContext, evaluateStrategy } from "./strategy";
 import { scalarAiDb } from "../db";
@@ -21,7 +21,7 @@ export interface TradeState {
   latestBuyLockedFromEa: boolean;
   latestSellLockedFromEa: boolean;
   nextTicket: { value: number };
-  pendingBridgeOrders: any[];
+  pendingBridgeOrders: BridgeOrder[];
   pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
   mt5BridgeClients: Set<WebSocket>;
 }
@@ -219,7 +219,7 @@ export function closeSimulatedPosition(state: TradeState, trade: TradeRecord, re
     // quiet persistence
   }
   callbacks.addLog("SERVER", "SUCCESS", `Simulated Trade #${trade.ticket} [${trade.symbol || state.activeSymbol}] CLOSED. Profit: ${finalProfit > 0 ? "+" : ""}$${finalProfit}`);
-  const closePayload = { action: "CLOSE_ALL", symbol: state.activeSymbol, volume: trade.lotSize, sl: 0, tp: 0 };
+  const closePayload = { action: "CLOSE_ALL", symbol: state.activeSymbol, volume: trade.lotSize, sl: 0, tp: 0, ticket: trade.ticket };
   state.pendingBridgeOrders.push({ ...closePayload, id: trade.id, timestamp: Date.now() });
   state.pendingEaCommand = { action: "CLOSE_ALL", lot: trade.lotSize, sl: 0, tp: 0 };
   state.mt5BridgeClients.forEach((client: WebSocket) => {

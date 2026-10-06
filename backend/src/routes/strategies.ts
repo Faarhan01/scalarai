@@ -1,6 +1,6 @@
 import { Request, Response, Application } from "express";
 import { scalarAiDb } from "../db";
-import { StrategyMode, StrategyRow } from "../types";
+import { StrategyMode, StrategyRow, TradeRecord } from "../types";
 import { STRATEGY_TEMPLATES, getStrategyTemplateById } from "../services/strategy-templates";
 
 export function registerStrategyRoutes(app: Application) {
@@ -98,13 +98,13 @@ export function registerStrategyRoutes(app: Application) {
 
 function analyzeStrategyPerformance(strategyId: string): { winRate: number; profitFactor: number; totalTrades: number } {
   try {
-    const allTrades = scalarAiDb.getTrades().filter((t: any) => t.strategy === strategyId);
-    const closedTrades = allTrades.filter((t: any) => t.status === "CLOSED");
-    const wins = closedTrades.filter((t: any) => t.profit > 0);
-    const losses = closedTrades.filter((t: any) => t.profit <= 0);
+    const allTrades = scalarAiDb.getTrades().filter((t: TradeRecord) => t.strategy === strategyId);
+    const closedTrades = allTrades.filter((t: TradeRecord) => t.status === "CLOSED");
+    const wins = closedTrades.filter((t: TradeRecord) => t.profit > 0);
+    const losses = closedTrades.filter((t: TradeRecord) => t.profit <= 0);
     const winRate = closedTrades.length > 0 ? Math.round((wins.length / closedTrades.length) * 100) : 0;
-    const avgWin = wins.length > 0 ? wins.reduce((sum: number, t: any) => sum + t.profit, 0) / wins.length : 0;
-    const avgLoss = losses.length > 0 ? losses.reduce((sum: number, t: any) => sum + t.profit, 0) / losses.length : 0;
+    const avgWin = wins.length > 0 ? wins.reduce((sum: number, t: TradeRecord) => sum + t.profit, 0) / wins.length : 0;
+    const avgLoss = losses.length > 0 ? losses.reduce((sum: number, t: TradeRecord) => sum + t.profit, 0) / losses.length : 0;
     const profitFactor = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : 0;
 
     return {

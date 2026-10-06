@@ -1,7 +1,7 @@
-import { StrategyMode, TradeConfig, Tick, AiKnowledgeBase, AiSynthesizedStrategy } from "../types";
+import { StrategyMode, TradeConfig, Tick, AiKnowledgeBase, AiSynthesizedStrategy, StrategyCondition } from "../types";
 import { scalarAiDb } from "../db";
 
-export type { StrategyMode, TradeConfig, Tick, AiKnowledgeBase, AiSynthesizedStrategy } from "../types";
+export type { StrategyMode, TradeConfig, Tick, AiKnowledgeBase, AiSynthesizedStrategy, StrategyCondition } from "../types";
 
 export interface StrategyContext {
   prices: number[];
@@ -230,7 +230,7 @@ export function evaluateCustomStrategy(ctx: StrategyContext, config: TradeConfig
   return { type: "HOLD", reason: "No custom rule matched" };
 }
 
-function evaluateRule(rule: any, ctx: StrategyContext): boolean {
+function evaluateRule(rule: StrategyCondition, ctx: StrategyContext): boolean {
   const indicatorValue = getIndicatorValue(rule.indicator, ctx);
   if (indicatorValue === null || indicatorValue === undefined) return false;
   switch (rule.condition) {

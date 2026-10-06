@@ -136,6 +136,14 @@ export interface StrategyRules {
   tpPointsMultiplier?: number;
 }
 
+export interface StrategyCondition {
+  indicator: string;
+  condition: string;
+  value: number | string | boolean;
+  action: "BUY" | "SELL" | "HOLD";
+  priority: number;
+}
+
 export interface AiSynthesizedStrategy {
   id?: string;
   name: string;
@@ -246,6 +254,17 @@ export interface McpContext {
   resetStats: () => Promise<void>;
 }
 
+export interface BridgeOrder {
+  action: string;
+  symbol: string;
+  volume: number;
+  sl: number;
+  tp: number;
+  id: string;
+  ticket: number;
+  timestamp: number;
+}
+
 export interface SettingsRow {
   id: number;
   is_active: number;
@@ -311,6 +330,22 @@ export interface StrategyRow {
   rules: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TradeRow {
+  id: string;
+  ticket: number;
+  symbol: string;
+  type: "BUY" | "SELL";
+  entry_price: number;
+  close_price: number | null;
+  lot_size: number;
+  profit: number;
+  status: "OPEN" | "CLOSED";
+  open_time: string;
+  close_time: string | null;
+  strategy: string;
+  reason: string;
 }
 
 export interface SymbolMetadataRow {

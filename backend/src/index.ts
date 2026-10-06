@@ -57,8 +57,8 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store), process.env.SCALARAI_MCP_API_KEY);
-  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig, process.env.SCALARAI_MCP_API_KEY);
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
+  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig);
   registerSettingsRoutes(
     app,
     (params) => store.updateSettings(params),

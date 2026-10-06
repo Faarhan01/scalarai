@@ -5,7 +5,6 @@ import {
   Download,
   Terminal,
   Settings,
-  AlertCircle,
 } from "lucide-react";
 import {
   StrategyMode,
@@ -37,6 +36,7 @@ import {
   ModalFooter,
   Badge,
   Button,
+  AppShell,
 } from "./components";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useChartData } from "./hooks/useChartData";
@@ -45,57 +45,7 @@ import { useAiStudyFeed } from "./hooks/useAiStudyFeed";
 import { useTradingControls } from "./hooks/useTradingControls";
 import { useSettings, type SettingsState } from "./hooks/useSettings";
 import { useErrorHandler } from "./hooks/useErrorHandler";
-
-class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean; error?: Error }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("React error boundary caught:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
-          <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md w-full">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertCircle className="w-8 h-8 text-red-400" />
-              <h1 className="text-xl font-bold text-white">Something went wrong</h1>
-            </div>
-            <p className="text-sm text-slate-300 mb-4">
-              The application encountered an unexpected error. Please refresh the page.
-            </p>
-            {this.state.error && (
-              <pre className="bg-slate-900 p-3 rounded-lg text-xs text-red-300 overflow-auto max-h-32 mb-4">
-                {this.state.error.message}
-              </pre>
-            )}
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-bold transition-all cursor-pointer"
-            >
-              Refresh Page
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
-
-export { ErrorBoundary };
+import { useElapsedTimer } from "./hooks/useElapsedTimer";
 
 export default function App() {
   // Config & State
@@ -173,8 +123,7 @@ export default function App() {
   const [telemetryStream, setTelemetryStream] = useState<any[]>([]);
 
   // Session elapsed counter
-  const [elapsedTime, setElapsedTime] = useState<string>("00:00:00");
-  const startTimeRef = useRef<number>(Date.now());
+  const { elapsedTime } = useElapsedTimer();
 
   // RAF chart throttling
   const pendingChartUpdate = useRef<{ history?: Tick[]; candles?: any[]; currentPrice?: number } | null>(null);
@@ -335,18 +284,6 @@ export default function App() {
     fetchStrategies();
   }, [fetchStatus, fetchStrategies]);
 
-  // Elapsed time ticker
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const diff = Math.floor((Date.now() - startTimeRef.current) / 1000);
-      const hours = String(Math.floor(diff / 3600)).padStart(2, "0");
-      const mins = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
-      const secs = String(diff % 60).padStart(2, "0");
-      setElapsedTime(`${hours}:${mins}:${secs}`);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Poll AI study feed periodically
   const aiStudy = useAiStudyFeed(sendWsMessage);
 
@@ -401,10 +338,11 @@ export default function App() {
   const chartData = useChartData(candles, history, 80);
 
   return (
-    <div
-      id="app-container"
-      className="min-h-screen bg-slate-900 text-slate-100 font-sans flex flex-col selection:bg-indigo-500 selection:text-white antialiased"
-    >
+    <AppShell>
+      <div
+        id="app-container"
+        className="min-h-screen bg-slate-900 text-slate-100 font-sans flex flex-col selection:bg-indigo-500 selection:text-white antialiased"
+      >
       {/* 1. Header with dynamic symbol and status indicators */}
       <Header
         config={config}
@@ -687,6 +625,7 @@ export default function App() {
         elapsedTime={elapsedTime}
         activeSymbol={activeSymbol}
       />
-    </div>
+      </div>
+    </AppShell>
   );
 }

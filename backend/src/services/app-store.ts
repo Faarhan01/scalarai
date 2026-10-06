@@ -1,4 +1,4 @@
-import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload } from "../types";
+import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder } from "../types";
 import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState, aggregateTickIntoCandle } from "./market-ingestion";
 import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
@@ -20,7 +20,7 @@ export class AppStore {
   nextTicket: { value: number };
   latestBuyLockedFromEa: boolean;
   latestSellLockedFromEa: boolean;
-  pendingBridgeOrders: any[];
+  pendingBridgeOrders: BridgeOrder[];
   pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
   mt5BridgeClients: Set<WebSocket>;
   webDashboardClients: Set<WebSocket>;
@@ -129,7 +129,7 @@ export class AppStore {
     };
   }
 
-  getAndClearPendingOrders(): any[] {
+  getAndClearPendingOrders(): BridgeOrder[] {
     const list = [...this.pendingBridgeOrders];
     this.pendingBridgeOrders = [];
     return list;

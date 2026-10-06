@@ -10,6 +10,7 @@ function createMemoryDb() {
     CREATE TABLE IF NOT EXISTS trades (
       id TEXT PRIMARY KEY,
       ticket INTEGER,
+      symbol TEXT NOT NULL DEFAULT 'Step Index',
       type TEXT NOT NULL CHECK (type IN ('BUY', 'SELL')),
       entry_price REAL NOT NULL,
       close_price REAL,
@@ -30,6 +31,7 @@ function createMemoryDb() {
     );
     CREATE TABLE IF NOT EXISTS market_ticks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL DEFAULT 'Step Index',
       time INTEGER NOT NULL,
       price REAL NOT NULL,
       direction TEXT NOT NULL CHECK (direction IN ('up', 'down', 'flat')),

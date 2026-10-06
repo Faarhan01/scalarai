@@ -10,6 +10,7 @@ export { Header } from "./layout/Header";
 export { MobileDrawer } from "./layout/MobileDrawer";
 export { StatusBar } from "./layout/StatusBar";
 export { TabBar } from "./layout/TabBar";
+export { AppShell } from "./layout/AppShell";
 
 // Dashboard
 export { TradePanel } from "./dashboard/TradePanel";
