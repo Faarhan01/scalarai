@@ -36,6 +36,16 @@ Create TypeScript design tokens for colors, spacing, typography, and shadows.
 #### Spacing Scale (`@tokens/spacing`)
 - Strict 4px modular scale: `spacing[1]` = 4px, `spacing[2]` = 8px, `spacing[3]` = 12px, `spacing[4]` = 16px, `spacing[6]` = 24px, `spacing[8]` = 32px.
 
+## Critical Fragility Warnings
+
+### TOKEN STABILITY
+
+1. **Token values are used in multiple places**: `colors.ts` values are imported by components AND mirrored in `globals.css` as CSS variables. Changing a token value in `colors.ts` without updating the CSS variable breaks consistency.
+
+2. **Chart components depend on specific token values**: `CandlestickChart.tsx` uses `@tokens/colors` for bullish (emerald) and bearish (rose) candle colors. Changing these values changes chart appearance.
+
+3. **`tokens/index.ts` is the aggregator**: All tokens are exported from here. If you add new token files, import them here.
+
 ## Verification
 
 - `npx tsc --noEmit` passes

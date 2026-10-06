@@ -81,6 +81,26 @@ function validateAppUrl(appUrl: string | undefined): string {
 
 The EA generator still uses `"http://127.0.0.1:3000"` as a last-resort fallback in `backend/src/services/ea-generator.ts:29` and `frontend/src/lib/mql5_generator.ts:29`. This is intentional — when no host header is present, localhost is the only sensible default for development.
 
+## Critical Fragility Warnings
+
+### AUTHENTICATION BEHAVIOR IS FRAGILE
+
+1. **`SCALARAI_MCP_API_KEY` controls optional Bearer auth**: When this env var is NOT set, ALL routes except `/mcp` are unauthenticated. When it IS set, state-changing routes (`/api/settings`, `/api/toggle-trade`, `/api/reset-stats`, `/api/status/switch-symbol`) require Bearer auth.
+
+2. **EA routes MUST remain unauthenticated**: In `index.ts:60`, `registerEaRoutes()` is called WITHOUT the `apiKey` parameter. This is intentional — the MT5 EA cannot perform Bearer auth. **DO NOT add `apiKey` to `registerEaRoutes()`** or the EA will be blocked from sending ticks and the site will stop receiving updates.
+
+3. **Market routes MUST remain unauthenticated**: In `index.ts:61`, `registerMarketRoutes()` is called WITHOUT the `apiKey` parameter for the same reason.
+
+4. **MCP route ALWAYS requires auth**: `registerMcpRoute()` always requires a valid Bearer token regardless of `SCALARAI_MCP_API_KEY`. This is enforced in `mcp_server.ts`.
+
+5. **Health and strategy routes are always public**: `registerHealthRoutes()` and `registerStrategyRoutes()` do not accept or use `apiKey`.
+
+### WHAT HAPPENS WHEN AUTH BREAKS
+
+- If `SCALARAI_MCP_API_KEY` is set and EA routes accidentally get auth: EA can't send ticks → no market data → chart breaks → no trades execute → site appears frozen
+- If `SCALARAI_MCP_API_KEY` is set and frontend doesn't send Bearer token: settings changes fail, trade toggles fail, status sync fails → site becomes read-only
+- If `SCALARAI_MCP_API_KEY` is changed: all existing frontend sessions lose auth → must update `.env` and restart
+
 ## Verification
 
 - `npx tsc --noEmit` passes

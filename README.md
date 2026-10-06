@@ -26,7 +26,7 @@ Local trading dashboard and strategy engine for MetaTrader 5, with an MCP interf
 │   │   ├── middleware/          # CORS, auth, logging, rate limiting
 │   │   ├── routes/              # Express route handlers
 │   │   ├── services/            # Business logic
-│   │   │   ├── app-state.ts            # App state orchestration
+│   │   │   ├── app-store.ts            # App state orchestration
 │   │   │   ├── state-persistence.ts    # DB hydration + persist helpers
 │   │   │   ├── trade-execution.ts      # Trade lifecycle + strategy triggers
 │   │   │   ├── market-ingestion.ts     # Symbol state + candle aggregation
@@ -46,9 +46,10 @@ Local trading dashboard and strategy engine for MetaTrader 5, with an MCP interf
 │   ├── src/
 │   │   ├── components/          # React components
 │   │   ├── hooks/               # Custom hooks
-│   │   ├── services/            # API + WebSocket clients
-│   │   ├── styles/              # Tailwind + semantic CSS
-│   │   ├── tokens/              # Design tokens
+│   │   ├── lib/                    # MQL5 generator and utility libraries
+│   │   ├── services/               # API + WebSocket clients
+│   │   ├── styles/                 # Tailwind + semantic CSS
+│   │   ├── tokens/                 # Design tokens
 │   │   ├── types/               # Frontend TypeScript interfaces
 │   │   ├── App.tsx              # Root component
 │   │   └── main.tsx             # Entry point
@@ -56,7 +57,9 @@ Local trading dashboard and strategy engine for MetaTrader 5, with an MCP interf
 │   └── vite.config.ts
 ├── tests/                       # vitest unit tests
 ├── knowledgebase/
-│   └── plans/                   # Implementation plans by domain
+│   ├── plans/                   # Implementation plans by domain
+│   ├── site-structure/          # Split documentation for actual committed code
+│   └── ...
 │       ├── backend/
 │       ├── frontend/
 │       ├── database/
@@ -166,3 +169,14 @@ npm run test
 # Start dev server with hot reload
 npm run dev
 ```
+
+## Documentation
+
+Detailed documentation for the actual committed code lives in `knowledgebase/site-structure/`:
+
+- `backend/index.md` — backend overview with links to dedicated files
+- `frontend/index.md` — frontend overview with links to dedicated files
+- Backend dedicated files: routes, websockets, services, middleware, utils, db, mcp, types
+- Frontend dedicated files: hooks, components, services, tokens, styles, lib, types
+
+**Important:** `knowledgebase/site-structure/` reflects the committed code at HEAD. Do not refactor based on `knowledgebase/plans/` alone; always verify against the actual codebase first.

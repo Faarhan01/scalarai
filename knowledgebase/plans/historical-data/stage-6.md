@@ -1,5 +1,7 @@
 # Historical Data Plan — Stage 6: Enhanced MCP Tools
 
+## Status: ❌ NOT DONE
+
 ## Objective
 
 Add MCP tools for historical data requests, observation queries, and strategy creation.
@@ -73,11 +75,21 @@ Request tick-level history from MT5.
 }
 ```
 
+## Critical Fragility Warnings
+
+### MCP TOOL INTERFACE IS A CONTRACT
+
+1. **MCP tools are consumed by external clients**: Kilo and other AI tools call these tools via JSON-RPC 2.0. Changing tool names, input schemas, or return shapes breaks these clients.
+
+2. **`McpContext` must be updated for new tools**: If new MCP tools need access to `AppStore` methods, add them to the `McpContext` interface in `backend/src/types/index.ts` and wire them in `backend/src/services/app-store.ts:buildMcpContext()`.
+
+3. **Tool schemas must be valid JSON Schema**: The `inputSchema` in `McpTool` must follow JSON Schema specification. Invalid schemas cause MCP clients to reject the tool.
+
 ## Implementation Steps
 
 1. Update `backend/src/mcp_server.ts` with new tool definitions
 2. Update `backend/src/mcp_server.ts` with tool handlers
-3. Update `backend/src/services/app-state.ts` `buildMcpContext()` with new methods
+3. Update `backend/src/services/app-store.ts` `buildMcpContext()` with new methods
 4. Add WebSocket message handlers for history requests
 5. Verify with MCP client tests
 

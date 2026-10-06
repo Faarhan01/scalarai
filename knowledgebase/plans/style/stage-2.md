@@ -56,6 +56,16 @@ Create semantic CSS classes in `components.css` and integrate with Tailwind `@th
 - `.input-control`, `.slider-control`, `.nav-tab-btn`, `.nav-tab-active`
 - `.metric-box`, `.metric-val`
 
+## Critical Fragility Warnings
+
+### SEMANTIC CLASSES ARE COUPLED TO COMPONENTS
+
+1. **Class names are used in multiple components**: `.card-panel`, `.btn`, `.badge`, `.data-table`, etc. are used across many components. Renaming or removing any class breaks multiple components.
+
+2. **`globals.css` must be imported**: `frontend/src/styles/index.css` imports `globals.css` and `components.css`. If you split or rename these files, update the import chain.
+
+3. **Tailwind `@theme` must match CSS variables**: The `@theme` block in `globals.css` defines custom colors, spacing, typography, shadows. These must match the values in `frontend/src/tokens/`. Inconsistency causes visual bugs.
+
 ## Design Constitution
 
 | Principle | Implementation |

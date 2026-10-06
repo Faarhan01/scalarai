@@ -6,7 +6,7 @@
 
 ```
 frontend/src/
-├── App.tsx                        # Root component (~692 lines), exports ErrorBoundary class
+├── App.tsx                        # Root component (~631 lines), exports ErrorBoundary class
 ├── main.tsx                       # React entrypoint
 ├── types/
 │   ├── index.ts                   # Shared frontend types: StrategyMode, TradeConfig, TradeRecord, etc.
@@ -18,8 +18,13 @@ frontend/src/
 │   │   ├── KnowledgeBase.tsx      # Knowledge base viewer
 │   │   └── StrategyPanel.tsx      # Strategy configuration panel
 │   ├── charts/
-│   │   ├── CandlestickChart.tsx   # Lightweight-charts candlestick renderer
-│   │   └── TelemetryStream.tsx    # Live telemetry chart
+│   │   ├── CandlestickChart/      # Lightweight-charts candlestick renderer (directory)
+│   │   │   ├── CandlestickChart.tsx
+│   │   │   ├── types.ts
+│   │   │   ├── constants.ts
+│   │   │   └── index.ts
+│   │   ├── TelemetryStream.tsx    # Live telemetry chart
+│   │   └── index.ts               # Barrel export
 │   ├── dashboard/
 │   │   ├── PriceChart.tsx         # Price display
 │   │   ├── StatsCards.tsx         # Summary statistics
@@ -31,7 +36,8 @@ frontend/src/
 │   │   ├── MobileDrawer.tsx       # Mobile side menu
 │   │   ├── StatusBar.tsx          # Connection status indicator
 │   │   ├── SymbolSwitcher.tsx     # Active symbol selector
-│   │   └── TabBar.tsx             # Bottom tab navigation
+│   │   ├── TabBar.tsx             # Bottom tab navigation
+│   │   └── AppShell.tsx           # Root layout wrapper
 │   ├── logs/
 │   │   └── LogsViewer.tsx         # System log viewer
 │   ├── settings/
@@ -53,10 +59,11 @@ frontend/src/
 │   ├── useAppStatus.ts            # Full status polling/websocket sync (28 lines)
 │   ├── useChartData.ts            # Chart data transformation (54 lines)
 │   ├── useDownloadBridge.ts       # Download bridge state (117 lines)
+│   ├── useElapsedTimer.ts         # Session elapsed counter
 │   ├── useErrorHandler.ts         # Global error boundary helper (26 lines)
 │   ├── useNetworkStatus.ts        # Online/offline detection (43 lines)
 │   ├── useSettings.ts             # Settings form state + applySettings() (226 lines)
-│   ├── useSymbolState.ts          # Symbol state management (20 lines)
+│   ├── useSymbolState.ts          # Symbol switching + per-symbol state (20 lines)
 │   ├── useTradingControls.ts      # Trade toggle/close/reset (57 lines)
 │   └── useWebSocket.ts            # WS /ws/live connection + message routing (131 lines)
 ├── services/
@@ -79,53 +86,27 @@ frontend/src/
 
 ## Key Facts
 
-### `App.tsx` — Root Component (~692 lines)
+### `App.tsx` — Root Component (~631 lines)
 
-- Exports `ErrorBoundary` class (class component with error catching)
 - Orchestrates layout + hooks
 - Not fully decomposed yet; still imports most components directly
 - Manages tab navigation state locally
 - Wires WebSocket message handlers to hook setters
+- Uses `requestAnimationFrame` for chart throttling to avoid excessive re-renders
+- Fetches initial status on mount, then syncs via WebSocket
+- Blocks automated trading until AI calibration threshold (20 observations) is met
 
-### Hooks Architecture
+## Detailed Documentation
 
-| Hook | Responsibility | Lines |
-|------|---------------|-------|
-| `useWebSocket` | Low-level WS connection to `/ws/live`, reconnection, ping/pong, message dispatch by type | 131 |
-| `useAppStatus` | Polls `/api/status` + WS init messages, exposes full server state | 28 |
-| `useAiStudyFeed` | Polls `/api/ai-study-feed`, exposes AI knowledge/strategy | 44 |
-| `useSettings` | Settings form state, validation, `applySettings()` POST, WebRequest test trigger | 226 |
-| `useTradingControls` | Toggle trading, close all, reset stats | 57 |
-| `useChartData` | Transforms raw ticks/candles for chart libraries | 54 |
-| `useDownloadBridge` | Download bridge/EA generation state | 117 |
-| `useNetworkStatus` | `navigator.onLine` + online/offline events | 43 |
-| `useErrorHandler` | Global error boundary state | 26 |
-| `useSymbolState` | Symbol switching + per-symbol state | 20 |
+For detailed information on specific areas, see:
 
-### Services
-
-- `services/api.ts` — `ApiClient` class with typed methods for all REST endpoints
-- `services/ws.ts` — `WebSocketClient` class with connect/disconnect/handler registry
-
-### Design Tokens
-
-Located in `tokens/`. Imported via `@tokens/*` path alias (configured in `tsconfig.json`).
-
-- `colors.ts` — color scales (brand, slate, emerald, amber, rose, cyan)
-- `spacing.ts` — 4px modular spacing scale
-- `typography.ts` — font families and sizes
-- `shadows.ts` — shadow presets including glow effects
-- `index.ts` — re-exports all tokens
-
-### Types
-
-- `types/index.ts` — Shared frontend types: `StrategyMode`, `TradeConfig`, `TradeRecord`, `SystemLog`, `Tick`, `EAConnectionDetails`, `AiSynthesizedStrategy`, `AiKnowledgeBase`, etc.
-- `types/api.ts` — API response types: `StatusResponse`, `AiStudyFeedResponse`, `SettingsResponse`, `TradeResponse`, `WebSocketMessage`
-
-### Important: Do NOT Refactor Without Checking
-
-- `frontend/src/types/api.ts` — NOT empty; contains API response interfaces
-- `frontend/src/components/index.ts` — barrel export, must be kept in sync with component folder
+- [Hooks](hooks.md) — all custom hooks: useWebSocket, useSettings, useTradingControls, useChartData, etc.
+- [Components](components.md) — component architecture, barrel exports, catalog
+- [Services](services.md) — ApiClient, WebSocketClient
+- [Tokens](tokens.md) — design tokens (colors, spacing, typography, shadows)
+- [Styles](styles.md) — CSS architecture, component classes, Tailwind config
+- [Lib](lib.md) — mql5_generator details
+- [Types](types.md) — TypeScript interfaces and type definitions
 
 ## Dependencies
 
@@ -138,3 +119,69 @@ App.tsx
   → tokens/* (design tokens via @tokens/* alias)
   → lib/* (MQL5 generator, mirrors backend/services/ea-generator.ts)
 ```
+
+### Path Aliases
+
+Configured in both `tsconfig.json` and `vite.config.ts`:
+
+| Alias | Resolves To |
+|-------|-------------|
+| `@/*` | `frontend/src/*` |
+| `frontend/*` | `frontend/src/*` |
+| `@tokens/*` | `frontend/src/tokens/*` |
+| `@styles/*` | `frontend/src/styles/*` |
+
+### Frontend Config Files
+
+- `frontend/tsconfig.json` — TypeScript config targeting ES2022, React JSX, bundler module resolution, path aliases
+- `frontend/vite.config.ts` — Vite config with React + Tailwind plugins, path aliases, HMR enabled by default
+- `frontend/index.html` — SPA entry point
+- `frontend/dist/` — Production build output
+
+### State Management
+
+- No global state library — uses React `useState` + custom hooks
+- `App.tsx` holds master state, passes down via props
+- Hooks encapsulate reusable stateful logic
+- WebSocket messages update state via callbacks passed to `useWebSocket`
+- `requestAnimationFrame` throttling for chart updates to avoid excessive re-renders
+
+### API Communication
+
+- REST via `services/api.ts` (`ApiClient` class)
+- WebSocket via `services/ws.ts` + `useWebSocket.ts` hook
+- Fallback: if WS not available, uses REST polling (`useAppStatus`)
+- All API calls prefixed with `/api`
+
+### Chart Data Flow
+
+1. `App.tsx` receives `history` (ticks) and `candles` from WS/polling
+2. `useChartData()` transforms raw data for chart library
+3. `PriceChart` renders candlestick chart with optional EMA/Bollinger overlays
+4. Chart updates throttled via `requestAnimationFrame` in `App.tsx`
+
+### AI Calibration Gate
+
+Automated trading is blocked until `aiStudyStatus === "optimized"` or `"active"`, which requires `aiKnowledgeBase.totalObservations >= 20`. This safety check is enforced in `App.tsx` before allowing trade execution.
+
+### Tailwind CSS
+
+- Uses Tailwind CSS v4 with `@tailwindcss/vite` plugin
+- Custom theme in `styles/globals.css` using `@theme` directives
+- Custom colors defined in `tokens/colors.ts` and imported as CSS variables
+- Responsive design with mobile-first approach
+- Animations: `animate-fade-in` (from `fadeIn` keyframes), `shimmer` (skeleton loading)
+
+### Key Frontend Patterns
+
+- **Tab Navigation**: `currentNavTab` state in `App.tsx` controls which tab content is shown
+- **WS Message Routing**: `useWebSocket` dispatches messages to typed callbacks passed from `App.tsx`
+- **Chart Throttling**: `pendingChartUpdate` ref + `requestAnimationFrame` batches chart updates
+- **Settings Persistence**: Settings POSTed to backend, also saved to `localStorage` for endpoint
+- **Mobile Responsive**: `MobileDrawer` component for mobile navigation, responsive grid classes throughout
+
+### Important: Do NOT Refactor Without Checking
+
+- `frontend/src/types/api.ts` — NOT empty; contains API response interfaces
+- `frontend/src/components/index.ts` — barrel export, must be kept in sync with component folder
+- `frontend/src/hooks/useSettings.ts` — 226 lines, handles settings form state, validation, applySettings POST, WebRequest test trigger

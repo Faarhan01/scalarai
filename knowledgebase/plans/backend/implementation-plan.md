@@ -38,14 +38,14 @@
 
 ### Priority 5: AppStore Class ✅
 
-21. **Create `AppStore` class** — `backend/src/services/app-store.ts` (441 lines)
+21. **Create `AppStore` class** — `backend/src/services/app-store.ts` (453 lines)
     - Encapsulates all application state
     - Contains all state mutation methods
     - Provides typed getters for route handlers
     - Builds `McpContext` for MCP tools
     - Runs background analysis worker
 
-22. **Rewrite `backend/src/index.ts`** — Thin 160-line bootstrap
+22. **Rewrite `backend/src/index.ts`** — Thin 192-line bootstrap
     - Creates single `AppStore` instance
     - Passes store methods to route registrations
     - WebSocket handlers call store methods directly
@@ -57,15 +57,15 @@
 
 ### Immediate
 
-- Update route handlers to accept `AppStore` instance directly instead of individual closures (optional — current closure pattern works but is verbose)
-- Add unit tests for `AppStore` class methods
+- [ ] Add unit tests for `AppStore` class methods
+- [ ] Add integration tests for WebSocket handlers
+- [ ] Consider passing `AppStore` instance directly to routes instead of individual closures (current closure pattern works but is verbose)
 
 ### Future
 
-- Add integration tests for WebSocket handlers
-- Add Docker / process manager configs for local hosting
-- Remove dead/placeholder files: `frontend/src/types/api.ts`, `backend/src/utils/response.ts`
-- Fix `@tokens/colors` path alias resolution in `CandlestickChart.tsx` if still present
+- [ ] Add Docker / process manager configs for local hosting
+- [ ] Evaluate removing `frontend/src/types/api.ts` and `backend/src/utils/response.ts` ONLY after confirming they are truly unused (currently `api.ts` is imported by `services/api.ts` and `response.ts` contains `jsonSuccess`/`jsonError`)
+- [ ] Verify `@tokens/colors` path alias resolution in all chart components
 
 ## Verification
 

@@ -11,8 +11,8 @@ Encapsulate all application state and business logic into a single testable `App
 All module-level state and closures were migrated from `index.ts` into `backend/src/services/app-store.ts`. The intermediate `backend/src/services/app-state.ts` (which contained standalone functions taking `state` and `callbacks` parameters) was removed after the class-based approach proved cleaner.
 
 **Result:**
-- `backend/src/index.ts`: 160 lines (thin bootstrap)
-- `backend/src/services/app-store.ts`: 441 lines (all state + business logic)
+- `backend/src/index.ts`: 192 lines (thin bootstrap)
+- `backend/src/services/app-store.ts`: 453 lines (all state + business logic)
 - `backend/src/services/app-state.ts`: deleted
 
 ## Current Architecture
@@ -47,7 +47,7 @@ export class AppStore {
   nextTicket: { value: number };
   latestBuyLockedFromEa: boolean;
   latestSellLockedFromEa: boolean;
-  pendingBridgeOrders: any[];
+  pendingBridgeOrders: BridgeOrder[];
   pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
   mt5BridgeClients: Set<WebSocket>;
   webDashboardClients: Set<WebSocket>;
@@ -72,7 +72,7 @@ export class AppStore {
 
   // Status / payloads
   getFullStatusPayload(): FullStatusPayload;
-  getAndClearPendingOrders(): any[];
+  getAndClearPendingOrders(): BridgeOrder[];
   getPendingEaCommand(): { action: string; lot: number; sl: number; tp: number } | null;
 
   // Market ingestion
@@ -99,32 +99,32 @@ export class AppStore {
 }
 ```
 
-## State Categories
+## Critical Fragility Warnings
 
-### Application State (mutated by business logic)
-- `tradeConfig` — current trading configuration
-- `tradesList` — all trades (open + closed)
-- `systemLogs` — recent log entries (capped at 80)
-- `aiKnowledgeBase` — AI speed baseline
-- `aiSynthesizedStrategy` — AI strategy rules
-- `lastStrategySignal` — most recent strategy signal
-- `symbolStates` — per-symbol market state
-- `activeSymbol` — currently viewed symbol
-- `lastProcessedTelemetryIndex` — background worker cursor
+### STATE CONTRACT STABILITY
 
-### Transient/Request State
-- `pendingBridgeOrders` — orders queued for MT5 bridge
-- `pendingEaCommand` — single pending EA command
-- `webRequestTest` — WebRequest test state machine
-- `nextTicket` — monotonically increasing ticket counter
+1. **`AppStore` is the ONLY state container**: All application state lives in `AppStore`. Do NOT create new global stores, module-level state, or duplicate state in routes or WebSocket handlers. If you need new state, add it to `AppStore` and pass a getter/method to the route registration.
 
-### EA Telemetry State
-- `latestBuyLockedFromEa` — latest EA-reported BUY lock
-- `latestSellLockedFromEa` — latest EA-reported SELL lock
+2. **`getFullStatusPayload()` is a contract with the frontend**: This method returns the full state sent via WebSocket `init` message. The frontend `App.tsx` `onInit` handler destructures this payload. Removing or renaming fields breaks the dashboard.
 
-### Connection State
-- `mt5BridgeClients` — connected bridge WebSockets
-- `webDashboardClients` — connected dashboard WebSockets
+3. **`updateMarket()` is a contract with the EA**: This method processes incoming tick data from `/api/ea/tick` and `/api/update-market`. It broadcasts `tick` messages to dashboards. Changing the broadcast shape breaks the chart.
+
+4. **WebSocket broadcast methods are critical**:
+   - `broadcastToDashboards(payload)` — sends to ALL connected dashboard clients
+   - `broadcastTradesUpdate()` — sends `{type: "trades", trades, stats}`
+   - Both are called from many places. If you change the message format, update `frontend/src/hooks/useWebSocket.ts` and `frontend/src/App.tsx`.
+
+5. **`buildMcpContext()` is a contract with MCP tools**: The MCP server uses this context for all 25+ tools. If you add new store methods that MCP tools need, add them to `McpContext` in `backend/src/types/index.ts` and wire them here.
+
+6. **`pendingBridgeOrders` and `pendingEaCommand` are contracts with the EA bridge**:
+   - `getAndClearPendingOrders()` returns orders sent to `/mt5-bridge`
+   - `getPendingEaCommand()` returns commands sent via `/api/ea/tick` response
+   - Changing these shapes breaks the EA's ability to receive trade commands
+
+7. **Background workers are critical**:
+   - `runBackgroundAnalysisWorker()` runs every 5 minutes — processes unprocessed telemetry, updates AI knowledge
+   - DB cleanup runs every 1 hour — deletes old ticks/logs
+   - Do NOT remove or significantly slow these without understanding the impact on AI calibration and DB size
 
 ## `index.ts` Bootstrap Pattern
 
@@ -137,8 +137,8 @@ async function startServer() {
   setInterval(() => store.runBackgroundAnalysisWorker(), 300000);
   setInterval(() => { /* DB cleanup */ }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store), apiKey);
-  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig, apiKey);
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
+  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig);
   registerSettingsRoutes(app, (params) => store.updateSettings(params), () => store.tradeConfig, ...);
   registerTradeRoutes(app, (isActive) => store.toggleTrading(isActive), () => store.resetStats(), apiKey);
   registerAiRoutes(app, () => ({ /* derived from store */ }));
@@ -171,4 +171,5 @@ async function startServer() {
 - `npx tsc --noEmit` passes
 - All features work identically
 - `AppStore` can be instantiated in tests without Express server
-- `index.ts` remains under 200 lines
+- `index.ts` remains under 200 lines (actual: 192 lines)
+- `app-store.ts` is 453 lines (actual count at HEAD)

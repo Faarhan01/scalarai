@@ -12,7 +12,7 @@ Replace high-value `: any` types with proper interfaces across the backend.
 
 All route catch blocks and MCP server error handlers now use `unknown`:
 
-**Route files (commit `b5ec390`):**
+**Route files:**
 - `backend/src/routes/ea.ts` — 3 catch blocks updated
 - `backend/src/routes/market.ts` — 2 catch blocks updated
 - `backend/src/routes/settings.ts` — 7 catch blocks updated
@@ -114,6 +114,20 @@ export interface AiStudyFeedPayload {
   averageVelocity: number;
 }
 ```
+
+## Critical Fragility Warnings
+
+### TYPE CHANGES CAN BREAK THE FRONTEND/EA
+
+1. **`FullStatusPayload` is a contract with the frontend**: The `init` WebSocket message sends the full `FullStatusPayload`. The frontend `App.tsx` `onInit` handler expects ALL of these fields. Removing or renaming any field will cause runtime errors in the dashboard.
+
+2. **`UpdateMarketPayload` is a contract with the EA**: The EA sends data matching this shape to `/api/ea/tick`. If you remove fields that the EA sends, the tick will be rejected or processed incorrectly.
+
+3. **`AiStudyFeedPayload` is a contract with the frontend**: The frontend `useAiStudyFeed` hook expects `status`, `message`, `count`, `aiKnowledgeBase`, `aiSynthesizedStrategy`, `candleStream`, `averageVelocity`. Renaming any breaks the AI study feed UI.
+
+4. **`TradeConfig` is a contract with both frontend and EA**: The EA reads `selectedStrategy`, `lotSize`, `takeProfitPoints`, `stopLossPoints`, `trailingStopPoints`, `useTrailingStop`, `maxTrades`, `tradingMode`, `isAiModeEnabled`, `selectedAssets` from the `/api/ea/tick` response. The frontend also displays and edits these. Do NOT rename or remove fields without updating both.
+
+5. **Route response shapes are contracts**: Even if not fully typed, routes like `/api/status`, `/api/ea/tick`, `/api/settings` return specific JSON shapes that the frontend and EA depend on. Changing these shapes causes silent failures.
 
 ## Remaining Work
 
