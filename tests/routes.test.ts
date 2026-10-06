@@ -23,16 +23,26 @@ describe("Status routes", () => {
       activeSymbol: "Step Index",
     };
 
+    const getRoutes: Record<string, any> = {};
+    const postRoutes: Record<string, any> = {};
+
     const app: any = {
-      get: (_path: string, handler: any) => {
-        const req = {} as Request;
-        const { res } = mockRes();
-        return handler(req, res);
+      get: (path: string, ...handlers: any[]) => {
+        getRoutes[path] = handlers[handlers.length - 1];
+      },
+      post: (path: string, ...handlers: any[]) => {
+        postRoutes[path] = handlers[handlers.length - 1];
       },
     };
 
-    registerStatusRoute(app, () => payload, () => {}, undefined, "test-key");
-    expect(true).toBe(true);
+    registerStatusRoute(app, () => payload as any, () => {}, undefined);
+
+    const req = {} as Request;
+    const { res, jsonCalls } = mockRes();
+    getRoutes["/api/status"](req, res);
+
+    expect(jsonCalls.length).toBe(1);
+    expect(jsonCalls[0].activeSymbol).toBe("Step Index");
   });
 
   it("POST /api/status/switch-symbol updates symbol", () => {
@@ -41,15 +51,27 @@ describe("Status routes", () => {
       activeSymbol = symbol;
     };
 
+    const getRoutes: Record<string, any> = {};
+    const postRoutes: Record<string, any> = {};
+
     const app: any = {
-      post: (_path: string, handler: any) => {
-        const req = { body: { symbol: "EURUSD" } } as Request;
-        const { res } = mockRes();
-        return handler(req, res);
+      get: (path: string, ...handlers: any[]) => {
+        getRoutes[path] = handlers[handlers.length - 1];
+      },
+      post: (path: string, ...handlers: any[]) => {
+        postRoutes[path] = handlers[handlers.length - 1];
       },
     };
 
-    registerStatusRoute(app, () => ({}), switchSymbol, undefined, "test-key");
+    registerStatusRoute(app, () => ({} as any), switchSymbol, undefined);
+
+    const req = { body: { symbol: "EURUSD" } } as Request;
+    const { res, jsonCalls } = mockRes();
+    postRoutes["/api/status/switch-symbol"](req, res);
+
     expect(activeSymbol).toBe("EURUSD");
+    expect(jsonCalls.length).toBe(1);
+    expect(jsonCalls[0].success).toBe(true);
+    expect(jsonCalls[0].activeSymbol).toBe("EURUSD");
   });
 });

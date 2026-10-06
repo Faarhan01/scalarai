@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import type { StrategyMode, TradeConfig } from "../types";
 
 export interface SettingsState {
@@ -195,17 +195,32 @@ export function useSettings(config: TradeConfig): SettingsState & SettingsOption
     setParamInput((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  return {
-    paramInput,
-    saveSuccess,
-    copiedUrl,
-    webRequestStatus,
-    isVerifyingWebRequest,
-    setWebRequestStatus,
-    applySettings,
-    triggerWebRequestTest,
-    setCopiedUrl,
-    onParamInputChange,
-    getAppBaseUrl,
-  };
+  return useMemo(
+    () => ({
+      paramInput,
+      saveSuccess,
+      copiedUrl,
+      webRequestStatus,
+      isVerifyingWebRequest,
+      setWebRequestStatus,
+      applySettings,
+      triggerWebRequestTest,
+      setCopiedUrl,
+      onParamInputChange,
+      getAppBaseUrl,
+    }),
+    [
+      paramInput,
+      saveSuccess,
+      copiedUrl,
+      webRequestStatus,
+      isVerifyingWebRequest,
+      setWebRequestStatus,
+      applySettings,
+      triggerWebRequestTest,
+      setCopiedUrl,
+      onParamInputChange,
+      getAppBaseUrl,
+    ]
+  );
 }

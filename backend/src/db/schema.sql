@@ -4,6 +4,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS trades (
   id TEXT PRIMARY KEY,
   ticket INTEGER,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
   type TEXT NOT NULL CHECK (type IN ('BUY', 'SELL')),
   entry_price REAL NOT NULL,
   close_price REAL,
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS system_logs (
 
 CREATE TABLE IF NOT EXISTS market_ticks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
   time INTEGER NOT NULL,
   price REAL NOT NULL,
   direction TEXT NOT NULL CHECK (direction IN ('up', 'down', 'flat')),
@@ -97,6 +99,26 @@ CREATE TABLE IF NOT EXISTS ea_connections (
   profit_calc_mode INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS symbol_connections (
+  symbol TEXT PRIMARY KEY,
+  is_ea_connected INTEGER NOT NULL DEFAULT 0,
+  client_ip TEXT,
+  last_ping TEXT,
+  broker TEXT,
+  account_number TEXT,
+  balance REAL,
+  symbol_digits INTEGER,
+  symbol_tick_size REAL,
+  symbol_description TEXT,
+  spread REAL,
+  session TEXT,
+  margin REAL,
+  leverage INTEGER,
+  swap_long REAL,
+  swap_short REAL,
+  profit_calc_mode INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS symbol_metadata (
   symbol TEXT PRIMARY KEY,
   description TEXT,
@@ -119,7 +141,9 @@ CREATE TABLE IF NOT EXISTS strategies (
 
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_open_time ON trades(open_time);
+CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_system_logs_source ON system_logs(source);
 CREATE INDEX IF NOT EXISTS idx_market_ticks_time ON market_ticks(time);
+CREATE INDEX IF NOT EXISTS idx_market_ticks_symbol ON market_ticks(symbol);
 CREATE INDEX IF NOT EXISTS idx_strategies_mode ON strategies(mode);

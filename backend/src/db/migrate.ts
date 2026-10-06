@@ -19,6 +19,9 @@ export function openDb(): any {
 export function migrate(db: any): void {
   const schemaSql = fs.readFileSync(path.join(process.cwd(), "backend", "src", "db", "schema.sql"), "utf-8");
   db.exec(schemaSql);
+  // Migration for existing tables: safely add symbol columns if missing
+  try { db.exec("ALTER TABLE trades ADD COLUMN symbol TEXT NOT NULL DEFAULT 'Step Index'"); } catch {}
+  try { db.exec("ALTER TABLE market_ticks ADD COLUMN symbol TEXT NOT NULL DEFAULT 'Step Index'"); } catch {}
   seedDefaults(db);
   migrateJsonData(db);
 }

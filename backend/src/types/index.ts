@@ -30,6 +30,7 @@ export interface TradeSessionStats {
 }
 
 export interface Tick {
+  symbol?: string;
   time: number;
   price: number;
   direction: "up" | "down" | "flat";
@@ -37,6 +38,7 @@ export interface Tick {
   high?: number;
   low?: number;
   close?: number;
+  volume?: number | null;
   velocity?: number;
   buyLocked?: boolean;
   sellLocked?: boolean;
@@ -47,6 +49,7 @@ export interface Tick {
 export interface TradeRecord {
   id: string;
   ticket: number;
+  symbol?: string;
   type: "BUY" | "SELL";
   entryPrice: number;
   closePrice?: number;
@@ -174,6 +177,11 @@ export interface UpdateMarketPayload {
   open?: number;
   high?: number;
   low?: number;
+  bid?: number;
+  ask?: number;
+  volume?: number;
+  equity?: number;
+  currency?: string;
   velocity?: number;
   buyLocked?: boolean;
   sellLocked?: boolean;

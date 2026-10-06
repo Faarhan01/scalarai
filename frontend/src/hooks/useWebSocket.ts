@@ -84,8 +84,8 @@ export function useWebSocket(options: {
               optionsRef.current.onWebRequestTest(msg.testState);
             } else if (msg.type === "ai_strategy" && msg.aiSynthesizedStrategy) {
               optionsRef.current.onAiStrategy(msg.aiSynthesizedStrategy);
+              optionsRef.current.onFetchStrategies?.();
             }
-            optionsRef.current.onFetchStrategies();
           } catch {
             // ignore parse errors
           }

@@ -23,7 +23,7 @@ export interface SymbolStates {
   activeSymbol: string;
 }
 
-export function createSymbolStates(initialActiveSymbol = "Step Index"): SymbolStates {
+export function createSymbolStates(initialActiveSymbol = ""): SymbolStates {
   const map = new Map<string, SymbolStateEntry>();
 
   return {
@@ -32,37 +32,49 @@ export function createSymbolStates(initialActiveSymbol = "Step Index"): SymbolSt
   };
 }
 
-export function getSymbolState(symbolStates: SymbolStates, symbol: string): SymbolStateEntry {
-  if (!symbolStates.map.has(symbol)) {
-    symbolStates.map.set(symbol, {
-      ticks: [],
-      candles: [],
-      telemetry: [],
-      connection: {
-        isEaConnected: false,
-        clientIp: null,
-        lastPing: null,
-        broker: null,
-        accountNumber: null,
-        balance: null,
-        symbol: symbol as string | null,
-        symbolDigits: null,
-        symbolTickSize: null,
-        symbolDescription: null,
-        spread: null,
-        session: null,
-        margin: null,
-        leverage: null,
-        swapLong: null,
-        swapShort: null,
-        profitCalcMode: null,
-      },
-      currentPrice: 1250.0,
-      lastDirection: "flat",
-      tickCount: 0,
-    });
+export function createBlankSymbolState(symbol = ""): SymbolStateEntry {
+  return {
+    ticks: [],
+    candles: [],
+    telemetry: [],
+    connection: {
+      isEaConnected: false,
+      clientIp: null,
+      lastPing: null,
+      broker: null,
+      accountNumber: null,
+      balance: null,
+      symbol: symbol || null,
+      symbolDigits: null,
+      symbolTickSize: null,
+      symbolDescription: null,
+      spread: null,
+      session: null,
+      margin: null,
+      leverage: null,
+      swapLong: null,
+      swapShort: null,
+      profitCalcMode: null,
+    },
+    currentPrice: 0,
+    lastDirection: "flat",
+    tickCount: 0,
+  };
+}
+
+export function getSymbolState(symbolStates: SymbolStates, symbol?: string): SymbolStateEntry {
+  const targetSymbol = (symbol && symbol.trim()) || symbolStates.activeSymbol || "";
+  if (!targetSymbol) {
+    if (symbolStates.map.size > 0) {
+      const first = symbolStates.map.keys().next().value;
+      if (first) return symbolStates.map.get(first)!;
+    }
+    return createBlankSymbolState("");
   }
-  return symbolStates.map.get(symbol)!;
+  if (!symbolStates.map.has(targetSymbol)) {
+    symbolStates.map.set(targetSymbol, createBlankSymbolState(targetSymbol));
+  }
+  return symbolStates.map.get(targetSymbol)!;
 }
 
 export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: number): void {
@@ -131,9 +143,9 @@ export function updateMarket(
     profitCalcMode?: number;
   }
 ): { symbol: SymbolStateEntry; switched: boolean } {
-  const symbol = data.symbol || symbolStates.activeSymbol || "Step Index";
-  const switched = symbol !== symbolStates.activeSymbol;
-  if (switched) {
+  const symbol = (data.symbol && data.symbol.trim()) || symbolStates.activeSymbol || "Step Index";
+  const switched = !!symbolStates.activeSymbol && symbol !== symbolStates.activeSymbol;
+  if (!symbolStates.activeSymbol || switched) {
     symbolStates.activeSymbol = symbol;
   }
 
@@ -172,6 +184,7 @@ export function updateMarket(
   state.tickCount += 1;
 
   const tickRecord: Tick = {
+    symbol,
     time: Date.now(),
     price: state.currentPrice,
     direction,
@@ -179,6 +192,7 @@ export function updateMarket(
     high: data.high !== undefined ? Number(data.high) : state.currentPrice,
     low: data.low !== undefined ? Number(data.low) : state.currentPrice,
     close: Number(state.currentPrice),
+    volume: data.volume !== undefined ? Number(data.volume) : null,
     velocity: numVelocity,
     buyLocked: isBuyLocked,
     sellLocked: isSellLocked,

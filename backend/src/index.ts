@@ -57,8 +57,8 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store), process.env.SCALARAI_MCP_API_KEY);
-  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig, process.env.SCALARAI_MCP_API_KEY);
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
+  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig);
   registerSettingsRoutes(
     app,
     (params) => store.updateSettings(params),
@@ -93,7 +93,17 @@ async function startServer() {
     averageVelocity: store.aiKnowledgeBase.globalAverageSpeed,
   }));
   registerMcpRoute(app, store.buildMcpContext(), process.env.SCALARAI_MCP_API_KEY);
-  registerStatusRoute(app, store.getFullStatusPayload.bind(store), (symbol: string) => { store.activeSymbol = symbol; }, store.getAndClearPendingOrders.bind(store), process.env.SCALARAI_MCP_API_KEY);
+  registerStatusRoute(
+    app,
+    store.getFullStatusPayload.bind(store),
+    (symbol: string) => {
+      store.activeSymbol = symbol;
+      store.symbolStates.activeSymbol = symbol;
+      store.addLog("SERVER", "INFO", `Active market symbol switched to: ${symbol}`);
+      store.broadcastToDashboards({ type: "init", payload: store.getFullStatusPayload() });
+    },
+    store.getAndClearPendingOrders.bind(store)
+  );
   registerHealthRoutes(app);
   registerStrategyRoutes(app);
 
@@ -118,35 +128,56 @@ async function startServer() {
     console.log(`Step Index Scalper full-stack server running on http://localhost:${PORT}`);
   });
 
-  createBridgeServer(server, (ws: WebSocket, rawMsg: string) => {
-    try {
-      const message = JSON.parse(rawMsg.toString());
-      if (message.client) store.addLog("SERVER", "SUCCESS", `Bridge client registered: ${message.client} | Status: ${message.status}`);
-    } catch {
-      // Ignore malformed bridge messages
-    }
-  });
-
-  createDashboardServer(server, () => JSON.stringify({ type: "init", payload: store.getFullStatusPayload() }), (ws: WebSocket, rawMsg: string) => {
-    try {
-      const msg = JSON.parse(rawMsg.toString());
-      if (msg.type === "ping") {
-        ws.send(JSON.stringify({ type: "pong", clientTime: msg.clientTime, serverTime: Date.now() }));
-      } else if (msg.type === "toggle_trade") {
-        store.toggleTrading(!store.tradeConfig.isActive);
-      } else if (msg.type === "close_all") {
-        const tradeState = store.buildTradeState();
-        store.tradesList.forEach((t: TradeRecord) => {
-          if (t.status === "OPEN") closeSimulatedPosition(tradeState, t, "Closed from remote web dashboard.", store);
-        });
-        store.broadcastTradesUpdate();
-      } else if (msg.type === "reset_stats") {
-        store.resetStats();
+  createBridgeServer(
+    server,
+    (ws: WebSocket, rawMsg: string) => {
+      try {
+        const message = JSON.parse(rawMsg.toString());
+        if (message.client) store.addLog("SERVER", "SUCCESS", `Bridge client registered: ${message.client} | Status: ${message.status}`);
+      } catch {
+        // Ignore malformed bridge messages
       }
-    } catch {
-      // Ignore malformed dashboard messages
+    },
+    (ws: WebSocket) => {
+      store.mt5BridgeClients.add(ws);
+      store.broadcastToDashboards({ type: "connection", isBridgeConnected: true });
+    },
+    (ws: WebSocket) => {
+      store.mt5BridgeClients.delete(ws);
+      store.broadcastToDashboards({ type: "connection", isBridgeConnected: store.mt5BridgeClients.size > 0 });
     }
-  });
+  );
+
+  createDashboardServer(
+    server,
+    () => JSON.stringify({ type: "init", payload: store.getFullStatusPayload() }),
+    (ws: WebSocket, rawMsg: string) => {
+      try {
+        const msg = JSON.parse(rawMsg.toString());
+        if (msg.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong", clientTime: msg.clientTime, serverTime: Date.now() }));
+        } else if (msg.type === "toggle_trade") {
+          store.toggleTrading(!store.tradeConfig.isActive);
+        } else if (msg.type === "close_all") {
+          const tradeState = store.buildTradeState();
+          store.tradesList.forEach((t: TradeRecord) => {
+            if (t.status === "OPEN") closeSimulatedPosition(tradeState, t, "Closed from remote web dashboard.", store);
+          });
+          store.broadcastTradesUpdate();
+        } else if (msg.type === "reset_stats") {
+          store.resetStats();
+        }
+      } catch {
+        // Ignore malformed dashboard messages
+      }
+    },
+    (ws: WebSocket) => {
+      store.webDashboardClients.add(ws);
+    },
+    (ws: WebSocket) => {
+      store.webDashboardClients.delete(ws);
+    }
+  );
 
   process.on("uncaughtException", (err) => {
     store.addLog("SERVER", "ERROR", `Uncaught exception: ${err.message || err}`);

@@ -1,7 +1,13 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
 
-export function createDashboardServer(server: Server, sendInit: () => string, onMessage: (ws: WebSocket, rawMsg: string) => void) {
+export function createDashboardServer(
+  server: Server,
+  sendInit: () => string,
+  onMessage: (ws: WebSocket, rawMsg: string) => void,
+  onConnect?: (ws: WebSocket) => void,
+  onClose?: (ws: WebSocket) => void
+) {
   const wssDashboard = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request: import("http").IncomingMessage, socket: import("net").Socket, head: Buffer) => {
@@ -18,6 +24,9 @@ export function createDashboardServer(server: Server, sendInit: () => string, on
   });
 
   wssDashboard.on("connection", (ws: WebSocket) => {
+    if (onConnect) {
+      onConnect(ws);
+    }
     try {
       ws.send(sendInit());
     } catch (err) {
@@ -29,8 +38,16 @@ export function createDashboardServer(server: Server, sendInit: () => string, on
       onMessage(ws, rawMsg);
     });
 
-    ws.on("close", () => {});
-    ws.on("error", () => {});
+    ws.on("close", () => {
+      if (onClose) {
+        onClose(ws);
+      }
+    });
+    ws.on("error", () => {
+      if (onClose) {
+        onClose(ws);
+      }
+    });
   });
 
   return wssDashboard;

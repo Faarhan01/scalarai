@@ -18,6 +18,7 @@ export function useAiStudyFeed(sendWsMessage: (msg: any) => boolean) {
   });
 
   const poll = useCallback(async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
     try {
       const res = await fetch("/api/ai-study-feed");
       if (res.ok) {
@@ -35,7 +36,7 @@ export function useAiStudyFeed(sendWsMessage: (msg: any) => boolean) {
 
   useEffect(() => {
     poll();
-    const interval = setInterval(poll, 4000);
+    const interval = setInterval(poll, 15000);
     return () => clearInterval(interval);
   }, [poll]);
 

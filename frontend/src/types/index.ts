@@ -29,6 +29,7 @@ export interface TradeSessionStats {
 }
 
 export interface Tick {
+  symbol?: string;
   time: number;
   price: number;
   direction: "up" | "down" | "flat";
@@ -41,6 +42,7 @@ export interface Tick {
 export interface TradeRecord {
   id: string;
   ticket: number;
+  symbol?: string;
   type: "BUY" | "SELL";
   entryPrice: number;
   closePrice?: number;

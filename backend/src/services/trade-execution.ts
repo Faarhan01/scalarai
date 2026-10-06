@@ -167,6 +167,7 @@ export async function openSimulatedPosition(state: TradeState, type: "BUY" | "SE
   const newTrade: TradeRecord = {
     id: tId,
     ticket,
+    symbol: state.activeSymbol || "Step Index",
     type,
     entryPrice: currentPrice,
     lotSize: state.tradeConfig.lotSize,
@@ -178,7 +179,12 @@ export async function openSimulatedPosition(state: TradeState, type: "BUY" | "SE
   };
   state.tradesList.unshift(newTrade);
   state.nextTicket.value += 1;
-  callbacks.addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} - ${type} at ${currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
+  try {
+    scalarAiDb.insertTrade(newTrade);
+  } catch {
+    // quiet persistence
+  }
+  callbacks.addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} [${newTrade.symbol}] - ${type} at ${currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
   const orderPayload = { action: (type || "BUY").toUpperCase(), symbol: state.activeSymbol, volume: Number(state.tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
   state.pendingBridgeOrders.push({ ...orderPayload, id: newTrade.id, ticket: newTrade.ticket, timestamp: Date.now() });
   state.pendingEaCommand = { action: (type || "BUY").toUpperCase(), lot: Number(state.tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
@@ -201,7 +207,18 @@ export function closeSimulatedPosition(state: TradeState, trade: TradeRecord, re
   const finalProfit = Number((profitFactor * 10.0 * trade.lotSize).toFixed(2));
   trade.profit = finalProfit;
   trade.reason = reason;
-  callbacks.addLog("SERVER", "SUCCESS", `Simulated Trade #${trade.ticket} CLOSED. Profit: ${finalProfit > 0 ? "+" : ""}$${finalProfit}`);
+  try {
+    scalarAiDb.updateTrade(trade.id, {
+      closePrice: trade.closePrice,
+      profit: trade.profit,
+      status: trade.status,
+      closeTime: trade.closeTime,
+      reason: trade.reason,
+    });
+  } catch {
+    // quiet persistence
+  }
+  callbacks.addLog("SERVER", "SUCCESS", `Simulated Trade #${trade.ticket} [${trade.symbol || state.activeSymbol}] CLOSED. Profit: ${finalProfit > 0 ? "+" : ""}$${finalProfit}`);
   const closePayload = { action: "CLOSE_ALL", symbol: state.activeSymbol, volume: trade.lotSize, sl: 0, tp: 0 };
   state.pendingBridgeOrders.push({ ...closePayload, id: trade.id, timestamp: Date.now() });
   state.pendingEaCommand = { action: "CLOSE_ALL", lot: trade.lotSize, sl: 0, tp: 0 };

@@ -1,8 +1,8 @@
 // UI primitives
 export { Button } from "./ui/Button";
 export { Badge } from "./ui/Badge";
-export { Card } from "./ui/Card";
-export { Modal } from "./ui/Modal";
+export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./ui/Card";
+export { Modal, ModalFooter } from "./ui/Modal";
 export { ErrorBanner } from "./ui/ErrorBanner";
 
 // Layout

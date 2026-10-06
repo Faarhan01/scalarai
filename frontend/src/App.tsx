@@ -33,6 +33,10 @@ import {
   LogsViewer,
   TabBar,
   ErrorBanner,
+  Modal,
+  ModalFooter,
+  Badge,
+  Button,
 } from "./components";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useChartData } from "./hooks/useChartData";
@@ -140,6 +144,7 @@ export default function App() {
     Array<{ symbol: string; connection: any; currentPrice: number; tickCount: number }>
   >([]);
   const [tradesList, setTradesList] = useState<TradeRecord[]>([]);
+  const [selectedTradeForModal, setSelectedTradeForModal] = useState<TradeRecord | null>(null);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [isBridgeConnected, setIsBridgeConnected] = useState<boolean>(false);
 
@@ -241,7 +246,7 @@ export default function App() {
     } catch (err) {
       showError("Failed to fetch server status");
     }
-  }, [showError, settings]);
+  }, [showError, settings.setWebRequestStatus]);
 
   // Sync WebSocket
   const { sendWsMessage } = useWebSocket({
@@ -516,7 +521,97 @@ export default function App() {
               currentPrice={currentPrice}
               selectedStrategy={config.selectedStrategy}
               onCloseAllPositions={closeAllPositions}
+              onTradeClick={(trade) => setSelectedTradeForModal(trade)}
             />
+
+            {/* Trade Detail Modal */}
+            <Modal
+              open={!!selectedTradeForModal}
+              onClose={() => setSelectedTradeForModal(null)}
+              title={
+                <div className="flex items-center gap-2">
+                  <span>Trade Ticket #{selectedTradeForModal?.ticket}</span>
+                  {selectedTradeForModal && (
+                    <Badge
+                      variant={selectedTradeForModal.type === "BUY" ? "success" : "danger"}
+                      size="sm"
+                      dot
+                    >
+                      {selectedTradeForModal.type}
+                    </Badge>
+                  )}
+                </div>
+              }
+              size="md"
+            >
+              {selectedTradeForModal && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-slate-400 block text-[10px] uppercase">Status</span>
+                      <span className="font-bold text-white">{selectedTradeForModal.status}</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-slate-400 block text-[10px] uppercase">Lot Size</span>
+                      <span className="font-bold text-white tabular-nums">{selectedTradeForModal.lotSize}</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-slate-400 block text-[10px] uppercase">Entry Price</span>
+                      <span className="font-bold text-indigo-300 tabular-nums">{selectedTradeForModal.entryPrice.toFixed(2)}</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-slate-400 block text-[10px] uppercase">
+                        {selectedTradeForModal.status === "OPEN" ? "Current Price" : "Close Price"}
+                      </span>
+                      <span className="font-bold text-slate-200 tabular-nums">
+                        {(selectedTradeForModal.closePrice ?? currentPrice).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-slate-400 block text-[10px] uppercase">Profit / Floating</span>
+                      <span
+                        className={`font-bold tabular-nums ${
+                          (selectedTradeForModal.status === "OPEN"
+                            ? (selectedTradeForModal.type === "BUY" ? currentPrice - selectedTradeForModal.entryPrice : selectedTradeForModal.entryPrice - currentPrice) * 10 * selectedTradeForModal.lotSize
+                            : selectedTradeForModal.profit) >= 0
+                            ? "text-emerald-400"
+                            : "text-rose-400"
+                        }`}
+                      >
+                        $
+                        {(selectedTradeForModal.status === "OPEN"
+                          ? (selectedTradeForModal.type === "BUY" ? currentPrice - selectedTradeForModal.entryPrice : selectedTradeForModal.entryPrice - currentPrice) * 10 * selectedTradeForModal.lotSize
+                          : selectedTradeForModal.profit
+                        ).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-slate-400 block text-[10px] uppercase">Open Time</span>
+                      <span className="font-bold text-slate-300">{selectedTradeForModal.openTime}</span>
+                    </div>
+                  </div>
+
+                  {selectedTradeForModal.strategy && (
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
+                      <span className="text-slate-400 block text-[10px] uppercase font-mono mb-1">Strategy & Reason</span>
+                      <p className="text-slate-200 font-sans text-xs">
+                        <strong className="text-indigo-300 font-mono">{selectedTradeForModal.strategy}:</strong> {selectedTradeForModal.reason}
+                      </p>
+                    </div>
+                  )}
+
+                  <ModalFooter>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setSelectedTradeForModal(null)}
+                    >
+                      Close
+                    </Button>
+                  </ModalFooter>
+                </div>
+              )}
+            </Modal>
           </div>
         )}
 

@@ -17,10 +17,11 @@ export class ScalarAiDb {
   // Trades
   insertTrade(trade: TradeRecord): void {
     this.db.prepare(
-      `INSERT INTO trades (id, ticket, type, entry_price, close_price, lot_size, profit, status, open_time, close_time, strategy, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO trades (id, ticket, symbol, type, entry_price, close_price, lot_size, profit, status, open_time, close_time, strategy, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       trade.id,
       trade.ticket,
+      trade.symbol || "Step Index",
       trade.type,
       trade.entryPrice,
       trade.closePrice ?? null,
@@ -42,20 +43,53 @@ export class ScalarAiDb {
     if (updates.status !== undefined) { sets.push("status = ?"); values.push(updates.status); }
     if (updates.closeTime !== undefined) { sets.push("close_time = ?"); values.push(updates.closeTime); }
     if (updates.reason !== undefined) { sets.push("reason = ?"); values.push(updates.reason); }
+    if (updates.symbol !== undefined) { sets.push("symbol = ?"); values.push(updates.symbol); }
     if (!sets.length) return;
     values.push(id);
     this.db.prepare(`UPDATE trades SET ${sets.join(", ")} WHERE id = ?`).run(...values);
   }
 
-  getTrades(status?: string): TradeRecord[] {
+  private mapTradeRow(row: any): TradeRecord {
+    return {
+      id: row.id,
+      ticket: row.ticket,
+      symbol: row.symbol || "Step Index",
+      type: row.type,
+      entryPrice: row.entry_price,
+      closePrice: row.close_price ?? undefined,
+      lotSize: row.lot_size,
+      profit: row.profit,
+      status: row.status,
+      openTime: row.open_time,
+      closeTime: row.close_time ?? undefined,
+      strategy: row.strategy,
+      reason: row.reason,
+    };
+  }
+
+  getTrades(status?: string, symbol?: string): TradeRecord[] {
+    let query = `SELECT * FROM trades`;
+    const clauses: string[] = [];
+    const params: any[] = [];
     if (status) {
-      return this.db.prepare(`SELECT * FROM trades WHERE status = ? ORDER BY open_time DESC`).all(status) as TradeRecord[];
+      clauses.push(`status = ?`);
+      params.push(status);
     }
-    return this.db.prepare(`SELECT * FROM trades ORDER BY open_time DESC`).all() as TradeRecord[];
+    if (symbol) {
+      clauses.push(`symbol = ?`);
+      params.push(symbol);
+    }
+    if (clauses.length > 0) {
+      query += ` WHERE ${clauses.join(" AND ")}`;
+    }
+    query += ` ORDER BY open_time DESC`;
+    const rows = this.db.prepare(query).all(...params) as any[];
+    return rows.map((r) => this.mapTradeRow(r));
   }
 
   getOpenTrades(): TradeRecord[] {
-    return this.db.prepare(`SELECT * FROM trades WHERE status = 'OPEN' ORDER BY open_time DESC`).all() as TradeRecord[];
+    const rows = this.db.prepare(`SELECT * FROM trades WHERE status = 'OPEN' ORDER BY open_time DESC`).all() as any[];
+    return rows.map((r) => this.mapTradeRow(r));
   }
 
   closeTrade(id: string, closePrice: number, profit: number): void {
@@ -89,10 +123,12 @@ export class ScalarAiDb {
   }
 
   // Market ticks
-  insertTick(tick: Tick & { velocity?: number; buyLocked?: boolean; sellLocked?: boolean; spread?: number; session?: string }): void {
+  insertTick(tick: Tick & { velocity?: number; buyLocked?: boolean; sellLocked?: boolean; spread?: number; session?: string }, symbol?: string): void {
+    const sym = symbol || tick.symbol || "Step Index";
     this.db.prepare(
-      `INSERT INTO market_ticks (time, price, direction, open, high, low, close, velocity, buy_locked, sell_locked, spread, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO market_ticks (symbol, time, price, direction, open, high, low, close, velocity, buy_locked, sell_locked, spread, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
+      sym,
       tick.time,
       tick.price,
       tick.direction,
@@ -108,11 +144,17 @@ export class ScalarAiDb {
     );
   }
 
-  getTicks(limit = 150): Tick[] {
+  getTicks(limit = 150, symbol?: string): Tick[] {
+    if (symbol) {
+      return this.db.prepare(`SELECT * FROM market_ticks WHERE symbol = ? ORDER BY time DESC LIMIT ?`).all(symbol, limit) as Tick[];
+    }
     return this.db.prepare(`SELECT * FROM market_ticks ORDER BY time DESC LIMIT ?`).all(limit) as Tick[];
   }
 
-  getTicksSince(timestamp: number): Tick[] {
+  getTicksSince(timestamp: number, symbol?: string): Tick[] {
+    if (symbol) {
+      return this.db.prepare(`SELECT * FROM market_ticks WHERE time >= ? AND symbol = ? ORDER BY time ASC`).all(timestamp, symbol) as Tick[];
+    }
     return this.db.prepare(`SELECT * FROM market_ticks WHERE time >= ? ORDER BY time ASC`).all(timestamp) as Tick[];
   }
 
@@ -257,6 +299,58 @@ export class ScalarAiDb {
       conn.swapShort,
       conn.profitCalcMode
     );
+
+    if (conn.symbol) {
+      this.upsertSymbolConnection(conn);
+    }
+  }
+
+  upsertSymbolConnection(conn: EAConnectionDetails): void {
+    if (!conn.symbol) return;
+    this.db.prepare(
+      `INSERT INTO symbol_connections (symbol, is_ea_connected, client_ip, last_ping, broker, account_number, balance, symbol_digits, symbol_tick_size, symbol_description, spread, session, margin, leverage, swap_long, swap_short, profit_calc_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(symbol) DO UPDATE SET is_ea_connected = excluded.is_ea_connected, client_ip = excluded.client_ip, last_ping = excluded.last_ping, broker = excluded.broker, account_number = excluded.account_number, balance = excluded.balance, symbol_digits = excluded.symbol_digits, symbol_tick_size = excluded.symbol_tick_size, symbol_description = excluded.symbol_description, spread = excluded.spread, session = excluded.session, margin = excluded.margin, leverage = excluded.leverage, swap_long = excluded.swap_long, swap_short = excluded.swap_short, profit_calc_mode = excluded.profit_calc_mode`
+    ).run(
+      conn.symbol,
+      conn.isEaConnected ? 1 : 0,
+      conn.clientIp,
+      conn.lastPing,
+      conn.broker,
+      conn.accountNumber,
+      conn.balance,
+      conn.symbolDigits,
+      conn.symbolTickSize,
+      conn.symbolDescription,
+      conn.spread,
+      conn.session,
+      conn.margin,
+      conn.leverage,
+      conn.swapLong,
+      conn.swapShort,
+      conn.profitCalcMode
+    );
+  }
+
+  getAllSymbolConnections(): EAConnectionDetails[] {
+    const rows = this.db.prepare(`SELECT * FROM symbol_connections`).all() as any[];
+    return rows.map((row) => ({
+      isEaConnected: !!row.is_ea_connected,
+      clientIp: row.client_ip ?? null,
+      lastPing: row.last_ping ?? null,
+      broker: row.broker ?? null,
+      accountNumber: row.account_number ?? null,
+      balance: row.balance ?? null,
+      symbol: row.symbol ?? null,
+      symbolDigits: row.symbol_digits ?? null,
+      symbolTickSize: row.symbol_tick_size ?? null,
+      symbolDescription: row.symbol_description ?? null,
+      spread: row.spread ?? null,
+      session: row.session ?? null,
+      margin: row.margin ?? null,
+      leverage: row.leverage ?? null,
+      swapLong: row.swap_long ?? null,
+      swapShort: row.swap_short ?? null,
+      profitCalcMode: row.profit_calc_mode ?? null,
+    }));
   }
 
   // Symbol metadata
