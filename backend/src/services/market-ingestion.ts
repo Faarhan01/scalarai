@@ -125,6 +125,7 @@ export function updateMarket(
     open?: number;
     high?: number;
     low?: number;
+    volume?: number;
     velocity?: number;
     buyLocked?: boolean;
     sellLocked?: boolean;

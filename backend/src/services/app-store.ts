@@ -1,5 +1,5 @@
 import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload } from "../types";
-import { SymbolStates, createSymbolStates, getSymbolState, updateMarket as updateMarketState, aggregateTickIntoCandle } from "./market-ingestion";
+import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState, aggregateTickIntoCandle } from "./market-ingestion";
 import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
 import { evaluateSimulatedStrategy, openSimulatedPosition, closeSimulatedPosition, AppCallbacks, TradeState } from "./trade-execution";

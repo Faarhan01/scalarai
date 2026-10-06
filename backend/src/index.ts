@@ -57,8 +57,8 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
-  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig);
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store), process.env.SCALARAI_MCP_API_KEY);
+  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig, process.env.SCALARAI_MCP_API_KEY);
   registerSettingsRoutes(
     app,
     (params) => store.updateSettings(params),
@@ -102,7 +102,8 @@ async function startServer() {
       store.addLog("SERVER", "INFO", `Active market symbol switched to: ${symbol}`);
       store.broadcastToDashboards({ type: "init", payload: store.getFullStatusPayload() });
     },
-    store.getAndClearPendingOrders.bind(store)
+    store.getAndClearPendingOrders.bind(store),
+    process.env.SCALARAI_MCP_API_KEY
   );
   registerHealthRoutes(app);
   registerStrategyRoutes(app);
