@@ -6,11 +6,11 @@
 
 ```
 frontend/src/
-├── App.tsx                        # Root component (~692 lines), orchestrates layout + hooks
+├── App.tsx                        # Root component (~692 lines), exports ErrorBoundary class
 ├── main.tsx                       # React entrypoint
 ├── types/
-│   ├── index.ts                   # Re-exports from ./api
-│   └── api.ts                     # Empty placeholder
+│   ├── index.ts                   # Shared frontend types: StrategyMode, TradeConfig, TradeRecord, etc.
+│   └── api.ts                     # API response types: StatusResponse, AiStudyFeedResponse, etc. — NOT empty
 ├── components/
 │   ├── index.ts                   # Barrel export for all components
 │   ├── ai/
@@ -42,31 +42,31 @@ frontend/src/
 │   │   ├── TradeFilters.tsx       # Trade list filters
 │   │   ├── TradeList.tsx          # Trade list container
 │   │   └── TradeRow.tsx           # Single trade row
-│   ├── ui/
-│   │   ├── Badge.tsx              # Status badge
-│   │   ├── Button.tsx             # Button component
-│   │   ├── Card.tsx               # Card container
-│   │   ├── ErrorBanner.tsx        # Error display banner
-│   │   └── Modal.tsx              # Modal dialog
+│   └── ui/
+│       ├── Badge.tsx              # Status badge (variants: brand, primary, secondary, etc.)
+│       ├── Button.tsx             # Button component
+│       ├── Card.tsx               # Card container (variants: default, elevated, subtle)
+│       ├── ErrorBanner.tsx        # Error display banner
+│       └── Modal.tsx              # Modal dialog (sizes: sm, md, lg, xl)
 ├── hooks/
-│   ├── useAiStudyFeed.ts          # AI study feed state + polling
-│   ├── useAppStatus.ts            # Full status polling/websocket sync
-│   ├── useChartData.ts            # Chart data transformation
-│   ├── useDownloadBridge.ts       # Download bridge state
-│   ├── useErrorHandler.ts         # Global error boundary helper
-│   ├── useNetworkStatus.ts        # Online/offline detection
-│   ├── useSettings.ts             # Settings form state + applySettings()
-│   ├── useSymbolState.ts          # Symbol state management
-│   ├── useTradingControls.ts      # Trade toggle/close/reset
-│   └── useWebSocket.ts            # WS /ws/live connection + message routing
+│   ├── useAiStudyFeed.ts          # AI study feed state + polling (44 lines)
+│   ├── useAppStatus.ts            # Full status polling/websocket sync (28 lines)
+│   ├── useChartData.ts            # Chart data transformation (54 lines)
+│   ├── useDownloadBridge.ts       # Download bridge state (117 lines)
+│   ├── useErrorHandler.ts         # Global error boundary helper (26 lines)
+│   ├── useNetworkStatus.ts        # Online/offline detection (43 lines)
+│   ├── useSettings.ts             # Settings form state + applySettings() (226 lines)
+│   ├── useSymbolState.ts          # Symbol state management (20 lines)
+│   ├── useTradingControls.ts      # Trade toggle/close/reset (57 lines)
+│   └── useWebSocket.ts            # WS /ws/live connection + message routing (131 lines)
 ├── services/
 │   ├── api.ts                     # ApiClient class — fetch wrappers for /api/*
 │   └── ws.ts                      # WebSocketClient class — raw WS connection helper
 ├── styles/
 │   ├── globals.css                # Tailwind @theme, :root variables, base reset, animations
-│   ├── components.css             # Semantic UI utility classes
+│   ├── components.css             # Semantic UI utility classes (card-panel, etc.)
 │   ├── globals.d.ts               # TypeScript module declaration for stylesheets
-│   └── index.css                  # Root stylesheet entrypoint
+│   └── index.css                  # Root stylesheet entrypoint (imports globals + components)
 ├── tokens/
 │   ├── colors.ts                  # Palette: brand, slate, emerald, amber, rose, cyan
 │   ├── index.ts                   # Central token aggregator and type exports
@@ -81,25 +81,26 @@ frontend/src/
 
 ### `App.tsx` — Root Component (~692 lines)
 
+- Exports `ErrorBoundary` class (class component with error catching)
+- Orchestrates layout + hooks
 - Not fully decomposed yet; still imports most components directly
-- Uses extracted hooks for state management
 - Manages tab navigation state locally
 - Wires WebSocket message handlers to hook setters
 
 ### Hooks Architecture
 
-| Hook | Responsibility |
-|------|---------------|
-| `useWebSocket` | Low-level WS connection to `/ws/live`, reconnection, ping/pong, message dispatch by type |
-| `useAppStatus` | Polls `/api/status` + WS init messages, exposes full server state |
-| `useAiStudyFeed` | Polls `/api/ai-study-feed`, exposes AI knowledge/strategy |
-| `useSettings` | Settings form state, validation, `applySettings()` POST, WebRequest test trigger |
-| `useTradingControls` | Toggle trading, close all, reset stats |
-| `useChartData` | Transforms raw ticks/candles for chart libraries |
-| `useDownloadBridge` | Download bridge/EA generation state |
-| `useNetworkStatus` | `navigator.onLine` + online/offline events |
-| `useErrorHandler` | Global error boundary state |
-| `useSymbolState` | Symbol switching + per-symbol state |
+| Hook | Responsibility | Lines |
+|------|---------------|-------|
+| `useWebSocket` | Low-level WS connection to `/ws/live`, reconnection, ping/pong, message dispatch by type | 131 |
+| `useAppStatus` | Polls `/api/status` + WS init messages, exposes full server state | 28 |
+| `useAiStudyFeed` | Polls `/api/ai-study-feed`, exposes AI knowledge/strategy | 44 |
+| `useSettings` | Settings form state, validation, `applySettings()` POST, WebRequest test trigger | 226 |
+| `useTradingControls` | Toggle trading, close all, reset stats | 57 |
+| `useChartData` | Transforms raw ticks/candles for chart libraries | 54 |
+| `useDownloadBridge` | Download bridge/EA generation state | 117 |
+| `useNetworkStatus` | `navigator.onLine` + online/offline events | 43 |
+| `useErrorHandler` | Global error boundary state | 26 |
+| `useSymbolState` | Symbol switching + per-symbol state | 20 |
 
 ### Services
 
@@ -110,9 +111,20 @@ frontend/src/
 
 Located in `tokens/`. Imported via `@tokens/*` path alias (configured in `tsconfig.json`).
 
+- `colors.ts` — color scales (brand, slate, emerald, amber, rose, cyan)
+- `spacing.ts` — 4px modular spacing scale
+- `typography.ts` — font families and sizes
+- `shadows.ts` — shadow presets including glow effects
+- `index.ts` — re-exports all tokens
+
+### Types
+
+- `types/index.ts` — Shared frontend types: `StrategyMode`, `TradeConfig`, `TradeRecord`, `SystemLog`, `Tick`, `EAConnectionDetails`, `AiSynthesizedStrategy`, `AiKnowledgeBase`, etc.
+- `types/api.ts` — API response types: `StatusResponse`, `AiStudyFeedResponse`, `SettingsResponse`, `TradeResponse`, `WebSocketMessage`
+
 ### Important: Do NOT Refactor Without Checking
 
-- `frontend/src/types/api.ts` — empty placeholder, do not remove without checking imports
+- `frontend/src/types/api.ts` — NOT empty; contains API response interfaces
 - `frontend/src/components/index.ts` — barrel export, must be kept in sync with component folder
 
 ## Dependencies

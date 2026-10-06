@@ -29,15 +29,16 @@ backend/src/
 ├── services/
 │   ├── app-store.ts               # AppStore class — ALL state + business logic
 │   ├── defaults.ts                # Factories: getDefaultTradeConfig, getDefaultAiKnowledgeBase, etc.
-│   ├── ea-generator.ts            # generateMql5Code(), validateAppUrl()
-│   ├── knowledge.ts               # AI knowledge base calculations
+│   ├── ea-generator.ts            # generateMql5Code(), validateAppUrl() (internal)
+│   ├── knowledge.ts               # updateKnowledgeBaseFromTelemetry(), formatKnowledgeBase()
 │   ├── market-ingestion.ts        # SymbolStates, createSymbolStates, createBlankSymbolState,
 │   │                               # getSymbolState, updateMarket, aggregateTickIntoCandle
 │   ├── state-persistence.ts       # loadStateFromDb, persistTrade, persistLog, persistAiKnowledge, etc.
-│   ├── strategy.ts                # evaluateStrategy, buildContext, indicator math
-│   ├── strategy-research.ts       # Strategy analysis/optimization helpers
-│   ├── strategy-templates.ts      # Built-in strategy templates
+│   ├── strategy.ts                # evaluateStrategy, buildContext, StrategyContext, indicator math
+│   ├── strategy-research.ts       # analyzeMarket, analyzeStrategyPerformance, suggestStrategyOptimizations
+│   ├── strategy-templates.ts      # STRATEGY_TEMPLATES array, StrategyTemplate interface
 │   └── trade-execution.ts         # evaluateSimulatedStrategy, openSimulatedPosition, closeSimulatedPosition
+│                                   # AppCallbacks interface, TradeState interface
 ├── middleware/
 │   ├── auth.ts                    # requireApiKey(expectedApiKey?) — passes if empty/missing
 │   ├── cors.ts                    # Reflects request Origin, credentials allowed
@@ -45,13 +46,13 @@ backend/src/
 │   ├── logger.ts                  # HTTP request/response logging
 │   └── rateLimit.ts               # In-memory sliding-window rate limiter (default 1200 req/min)
 ├── utils/
-│   ├── auth.ts                    # MCP Bearer validation helper
-│   ├── index.ts                   # Re-exports
+│   ├── auth.ts                    # validateBearerToken() helper
+│   ├── index.ts                   # Re-exports validators
 │   ├── ip.ts                      # normalizeIp() — strips ::ffff: prefix
-│   ├── response.ts                # Empty placeholder
-│   └── validators.ts              # Request body validation helpers
+│   ├── response.ts                # ApiResponse<T>, jsonSuccess(), jsonError() — NOT empty
+│   └── validators.ts              # isValidStrategyMode, isValidTradingMode, isValidTradeType
 └── db/
-    ├── index.ts                   # openDb(), migrate()
+    ├── index.ts                   # openDb(), migrate(), exports scalarAiDb singleton
     ├── migrate.ts                 # Schema migration + seedDefaults + migrateJsonData
     ├── repository.ts              # ScalarAiDb — all SQL queries
     └── schema.sql                 # CREATE TABLE statements
@@ -126,10 +127,26 @@ createDashboardServer(server, sendInit, onMessage, onConnect?, onClose?)
 
 This means in development without `SCALARAI_MCP_API_KEY`, all protected routes are open.
 
+### `mcp_server.ts` Exports
+
+- `McpTool` interface
+- `McpToolCallResult` interface
+- `McpToolCallParams` interface
+- `createMcpHandler(ctx: McpContext, expectedApiKey: string)` — returns Express middleware
+
+### `types/index.ts` Key Exports
+
+- `StrategyMode` enum
+- `TradeConfig`, `TradeRecord`, `SystemLog`, `Tick`, `CandleBar`
+- `EAConnectionDetails`, `AiKnowledgeBase`, `AiSynthesizedStrategy`
+- `TradeSessionStats`, `StrategyRules`, `SymbolMetadata`, `StrategyRow`
+- `FullStatusPayload`, `UpdateMarketPayload`, `AiStudyFeedPayload`
+- `McpContext`, `WebRequestTestState`
+
 ### Important: Do NOT Delete or Rename
 
 - `backend/src/services/app-state.ts` — already deleted; do not recreate
-- `backend/src/utils/response.ts` — empty placeholder, do not remove without checking imports
+- `backend/src/utils/response.ts` — NOT empty; contains `ApiResponse<T>`, `jsonSuccess()`, `jsonError()`
 
 ### Current Dependencies Between Layers
 
