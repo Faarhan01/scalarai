@@ -1,36 +1,100 @@
-# Backend Plan — Stage 4: Global Mutable State Wrapper
+# Backend Plan — Stage 4: AppStore Class
 
 ## Objective
 
-Wrap module-level state into a testable `AppStore` class.
+Encapsulate all application state and business logic into a single testable `AppStore` class.
 
-## Current State
+## Actual Outcome
 
-Module-level state is hard to test. Exact state in `backend/src/index.ts` lines 41–63:
+All module-level state and closures were migrated from `index.ts` into `backend/src/services/app-store.ts`. The intermediate `backend/src/services/app-state.ts` (which contained standalone functions taking `state` and `callbacks` parameters) was removed after the class-based approach proved cleaner.
 
-```ts
-let tradeConfig = getDefaultTradeConfig();                    // line 42
-let pendingBridgeOrders: any[] = [];                          // line 43
-let pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null = null; // line 44
-const symbolStates = createSymbolStates("Step Index");        // line 45
-let activeSymbol = "Step Index";                              // line 46
+**Result:**
+- `backend/src/index.ts`: 160 lines (thin bootstrap)
+- `backend/src/services/app-store.ts`: 441 lines (all state + business logic)
+- `backend/src/services/app-state.ts`: deleted
 
-const webRequestTest: { status: ...; triggerTest: boolean } = { ... }; // line 48
-let systemLogs: SystemLog[] = [];                             // line 55
-let tradesList: TradeRecord[] = [];                           // line 56
-let nextTicket = 837201;                                      // line 57
-let latestBuyLockedFromEa = false;                            // line 58
-let latestSellLockedFromEa = false;                           // line 59
-let aiKnowledgeBase = getDefaultAiKnowledgeBase();            // line 60
-let lastStrategySignal: { type: string; reason: string; confidence?: number } | null = null; // line 61
-let aiSynthesizedStrategy = getDefaultAiSynthesizedStrategy(); // line 62
-let lastProcessedTelemetryIndex = 0;                          // line 63
+## Current Architecture
+
+```
+index.ts  →  creates AppStore instance  →  wires routes/websockets to store methods
 ```
 
-Plus WebSocket client sets:
+`index.ts` no longer contains:
+- Module-level state objects (`appState`, `appCallbacks`, `webRequestTest`, `mt5BridgeClients`, `webDashboardClients`)
+- State mutation functions (`getFullStatusPayload`, `updateMarket`, `broadcastToDashboards`, `toggleTrading`, `resetStats`, etc.)
+- `mcpContext` construction logic
+
+All of the above now live as methods on the `AppStore` class.
+
+## AppStore Class Structure
+
+**File:** `backend/src/services/app-store.ts`
+
 ```ts
-const mt5BridgeClients = new Set<WebSocket>();                // line 129
-const webDashboardClients = new Set<WebSocket>();             // line 130
+export class AppStore {
+  // State fields
+  tradeConfig: TradeConfig;
+  tradesList: TradeRecord[];
+  systemLogs: SystemLog[];
+  aiKnowledgeBase: AiKnowledgeBase;
+  aiSynthesizedStrategy: AiSynthesizedStrategy;
+  lastStrategySignal: { type: string; reason: string; confidence?: number } | null;
+  symbolStates: SymbolStates;
+  activeSymbol: string;
+  lastProcessedTelemetryIndex: number;
+  nextTicket: { value: number };
+  latestBuyLockedFromEa: boolean;
+  latestSellLockedFromEa: boolean;
+  pendingBridgeOrders: any[];
+  pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
+  mt5BridgeClients: Set<WebSocket>;
+  webDashboardClients: Set<WebSocket>;
+  webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
+
+  constructor() {
+    // Initializes all state fields from defaults + DB
+    this.loadAiSynthesizedStrategy();
+    this.loadAiKnowledgeBase();
+    this.nextTicket = { value: scalarAiDb.getMaxTicket() + 1 };
+  }
+
+  // Persistence
+  loadFromDb(): void;
+  loadAiSynthesizedStrategy(): void;
+  loadAiKnowledgeBase(): void;
+
+  // Logging + broadcasting
+  addLog(source, level, message): void;
+  broadcastToDashboards(payload): void;
+  broadcastTradesUpdate(): void;
+
+  // Status / payloads
+  getFullStatusPayload(): FullStatusPayload;
+  getAndClearPendingOrders(): any[];
+  getPendingEaCommand(): { action: string; lot: number; sl: number; tp: number } | null;
+
+  // Market ingestion
+  updateMarket(data: UpdateMarketPayload, clientIp?: string): void;
+
+  // Trade state builder
+  buildTradeState(): TradeState;
+
+  // MCP context factory
+  buildMcpContext(): McpContext;
+
+  // Background worker
+  runBackgroundAnalysisWorker(): void;
+
+  // Settings + trading controls
+  updateSettings(params: Partial<TradeConfig>): TradeConfig;
+  toggleTrading(isActive: boolean): TradeConfig;
+  async placeTrade(type: "BUY" | "SELL", reason: string): Promise<{ success: boolean; message: string }>;
+  async closeTrade(tradeId: string): Promise<{ success: boolean; message: string }>;
+  resetStats(): void;
+
+  // Stub for MCP type requirement
+  analyzeMarket(): Promise<string>;
+}
 ```
 
 ## State Categories
@@ -60,133 +124,49 @@ const webDashboardClients = new Set<WebSocket>();             // line 130
 - `mt5BridgeClients` — connected bridge WebSockets
 - `webDashboardClients` — connected dashboard WebSockets
 
-## Proposed Structure
-
-```
-backend/src/
-├── services/
-│   ├── app-store.ts          # Testable state container
-│   └── ...existing services
-```
-
-## `AppStore` Class Design
+## `index.ts` Bootstrap Pattern
 
 ```ts
-// backend/src/services/app-store.ts
-import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, Tick, EAConnectionDetails } from "../types";
-import { SymbolStates, createSymbolStates, getSymbolState, updateMarketState, aggregateTickIntoCandle } from "./market-ingestion";
-import { scalarAiDb } from "../db";
+const store = new AppStore();
 
-export class AppStore {
-  // Application state
-  tradeConfig: TradeConfig;
-  tradesList: TradeRecord[];
-  systemLogs: SystemLog[];
-  aiKnowledgeBase: AiKnowledgeBase;
-  aiSynthesizedStrategy: AiSynthesizedStrategy;
-  lastStrategySignal: { type: string; reason: string; confidence?: number } | null;
-  symbolStates: SymbolStates;
-  activeSymbol: string;
-  lastProcessedTelemetryIndex: number;
+async function startServer() {
+  store.loadFromDb();
 
-  // Transient state
-  pendingBridgeOrders: Array<{ action: string; symbol: string; volume: number; sl: number; tp: number; id: string; ticket: number; timestamp: number }>;
-  pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
-  webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
-  nextTicket: number;
+  setInterval(() => store.runBackgroundAnalysisWorker(), 300000);
+  setInterval(() => { /* DB cleanup */ }, 3600000);
 
-  // EA telemetry
-  latestBuyLockedFromEa: boolean;
-  latestSellLockedFromEa: boolean;
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store), apiKey);
+  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig, apiKey);
+  registerSettingsRoutes(app, (params) => store.updateSettings(params), () => store.tradeConfig, ...);
+  registerTradeRoutes(app, (isActive) => store.toggleTrading(isActive), () => store.resetStats(), apiKey);
+  registerAiRoutes(app, () => ({ /* derived from store */ }));
+  registerMcpRoute(app, store.buildMcpContext(), apiKey);
+  registerStatusRoute(app, store.getFullStatusPayload.bind(store), (symbol) => { store.activeSymbol = symbol; }, store.getAndClearPendingOrders.bind(store), apiKey);
+  registerHealthRoutes(app);
+  registerStrategyRoutes(app);
 
-  // WebSocket clients (not serialized, just tracked)
-  mt5BridgeClients = new Set<WebSocket>();
-  webDashboardClients = new Set<WebSocket>();
-
-  constructor() {
-    this.tradeConfig = getDefaultTradeConfig();
-    this.tradesList = [];
-    this.systemLogs = [];
-    this.aiKnowledgeBase = getDefaultAiKnowledgeBase();
-    this.aiSynthesizedStrategy = getDefaultAiSynthesizedStrategy();
-    this.lastStrategySignal = null;
-    this.symbolStates = createSymbolStates("Step Index");
-    this.activeSymbol = "Step Index";
-    this.lastProcessedTelemetryIndex = 0;
-    this.pendingBridgeOrders = [];
-    this.pendingEaCommand = null;
-    this.webRequestTest = { ... };
-    this.nextTicket = 837201;
-    this.latestBuyLockedFromEa = false;
-    this.latestSellLockedFromEa = false;
-  }
-
-  // Persistence methods
-  loadFromDb() { ... }
-  persistTrade(trade: TradeRecord) { ... }
-  persistLog(log: SystemLog) { ... }
-  persistAiKnowledge() { ... }
-  persistAiStrategy() { ... }
-  persistSettings() { ... }
-  persistEaConnection(conn: EAConnectionDetails) { ... }
-
-  // State mutation methods
-  addLog(source: "SERVER" | "EA" | "AI", level: "INFO" | "SUCCESS" | "WARNING" | "ERROR", message: string) { ... }
-  broadcastToDashboards(payload: unknown) { ... }
-  broadcastTradesUpdate() { ... }
-  
-  // Getters for route handlers
-  getFullStatusPayload() { ... }
-  getAndClearPendingOrders() { ... }
-  getPendingEaCommand() { ... }
-  
-  // Trade execution
-  async evaluateSimulatedStrategy() { ... }
-  async openSimulatedPosition(type: "BUY" | "SELL", reason: string) { ... }
-  closeSimulatedPosition(trade: TradeRecord, reason: string) { ... }
-  
-  // Settings
-  updateSettings(params: Partial<TradeConfig>) { ... }
-  toggleTrading(isActive: boolean) { ... }
-  async placeTrade(type: "BUY" | "SELL", reason?: string) { ... }
-  async closeTrade(tradeId: string) { ... }
-  resetStats() { ... }
-  
-  // Background
-  runBackgroundAnalysisWorker() { ... }
+  // WebSocket handlers use store methods directly
+  createBridgeServer(server, (ws, rawMsg) => { store.addLog(...); });
+  createDashboardServer(server, () => JSON.stringify({ type: "init", payload: store.getFullStatusPayload() }), (ws, rawMsg) => {
+    // toggle_trade, close_all, reset_stats handlers
+  });
 }
 ```
 
-## Implementation Steps
+## What Was Removed
 
-1. Create `backend/src/services/app-store.ts`
-   - Define `AppStore` class with all state fields
-   - Move `loadStateFromDb` → `loadFromDb()` instance method
-   - Move all `persist*` functions → instance methods
-   - Move `addLog`, `broadcastToDashboards`, `broadcastTradesUpdate` → instance methods
-   - Move trade execution functions → instance methods
-   - Move settings/trading functions → instance methods
-   - Move `runBackgroundAnalysisWorker` → instance method
-   - Add typed getters for route handlers
+- `backend/src/services/app-state.ts` — intermediate module with standalone functions (`buildTradeState`, `updateSettings`, `toggleTrading`, `resetStats`, `runBackgroundAnalysisWorker`, `buildMcpContext`, etc.) that took `(state, callbacks)` parameters. All functionality moved into `AppStore` class methods.
 
-2. Update `backend/src/index.ts`
-   - Replace module-level `let`/`const` state with `const store = new AppStore()`
-   - Replace all state mutations with `store.*` calls
-   - Pass `store` to route registrations instead of individual closures
+## Implementation Steps (Historical)
 
-3. Update route registrations
-   - `registerEaRoutes(app, () => store.getFullStatusPayload(), () => store.tradeConfig, (data, ip) => store.updateMarket(data, ip), () => store.getPendingEaCommand())`
-   - Similar pattern for all other routes
-
-4. Add unit tests for `AppStore`
-   - Test state initialization
-   - Test `loadFromDb` / `resetStats`
-   - Test `updateSettings` / `toggleTrading`
-   - Test `openSimulatedPosition` / `closeSimulatedPosition`
+1. **Create `backend/src/services/app-store.ts`** — Define `AppStore` class with all state fields and methods
+2. **Migrate from `app-state.ts`** — Move all standalone functions into class methods, remove `state`/`callbacks` parameters in favor of `this`
+3. **Rewrite `backend/src/index.ts`** — Replace module-level state with `const store = new AppStore()`, pass store methods to route registrations
+4. **Delete `backend/src/services/app-state.ts`** — No longer needed
 
 ## Verification
 
 - `npx tsc --noEmit` passes
-- `npm run test` passes
 - All features work identically
 - `AppStore` can be instantiated in tests without Express server
+- `index.ts` remains under 200 lines

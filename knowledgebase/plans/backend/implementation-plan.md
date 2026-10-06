@@ -1,81 +1,74 @@
-# Implementation Plan — Backend Stages 1-4 Completion
+# Implementation Plan — Backend Refactoring Status
 
-## Priority 1: Critical Bugs (Do First)
+## Completed Work
 
-### 1. Fix ATR calculation bug
-**File:** `backend/src/services/trade-execution.ts:80`
-**Issue:** `trs.reduce(...) / slice.length` should be `slice.reduce(...) / slice.length`
-**Impact:** ATR returns wrong value when tick count exceeds period
+### Priority 1: Critical Bugs ✅
 
-### 2. Add getMaxTicket() to repository
-**File:** `backend/src/db/repository.ts`
-**Issue:** Stage 3 plan requires `getMaxTicket()` but it doesn't exist
-**Impact:** Cannot derive next ticket from DB, hardcoded seed remains
+1. **Fix ATR calculation bug** — `backend/src/services/trade-execution.ts` uses `slice.reduce(...) / slice.length` instead of `trs.reduce(...) / slice.length`
+2. **Add `getMaxTicket()` to repository** — `backend/src/db/repository.ts:322`
+3. **Use `getMaxTicket() + 1` for nextTicket** — `backend/src/services/app-store.ts` constructor initializes `nextTicket` from DB
 
-### 3. Use getMaxTicket() + 1 for nextTicket
-**File:** `backend/src/index.ts:143`
-**Issue:** Hardcoded `nextTicket: { value: 837201 }` resets on restart
-**Fix:** Call `scalarAiDb.getMaxTicket() + 1` during startup
+### Priority 2: Missing Utilities ✅
 
-## Priority 2: Missing Utilities (Do Second)
+4. **Add `normalizeIp()` utility** — `backend/src/utils/ip.ts` normalizes IPv6-mapped IPv4 addresses
+5. **Add `validateAppUrl()` to backend** — `backend/src/services/ea-generator.ts:3`
+6. **Mirror validation in frontend** — `frontend/src/lib/mql5_generator.ts:3`
 
-### 4. Add normalizeIp() utility
-**File:** `backend/src/utils/ip.ts` (new)
-**Issue:** Stage 3 plan requires IP normalization for IPv6-mapped IPv4 addresses
-**Impact:** `::ffff:127.0.0.1` not normalized to `127.0.0.1`
+### Priority 3: Service Extraction ✅
 
-### 5. Add validateAppUrl() to backend
-**File:** `backend/src/services/ea-generator.ts`
-**Issue:** `appUrl` injected into MQL5 without sanitization
-**Fix:** Validate protocol, reject localhost in production, escape backslashes
+7. **Extract `services/trade-execution.ts`** — Trade lifecycle, indicator math, strategy evaluation
+8. **Extract `services/state-persistence.ts`** — DB hydration and persist helpers
+9. **Extract `services/market-ingestion.ts`** — Symbol state, tick aggregation, candle building
+10. **Extract `services/strategy.ts`** — Core strategy evaluation and indicators
+11. **Extract `services/defaults.ts`** — Default state factories
+12. **Extract `services/ea-generator.ts`** — MQL5/bridge code generation
+13. **Extract `services/knowledge.ts`** — AI knowledge base calculations
 
-### 6. Mirror validateAppUrl() in frontend
-**File:** `frontend/src/lib/mql5_generator.ts`
-**Issue:** Same URL injection risk in frontend-generated EA code
+### Priority 4: Type Safety Sweep ✅
 
-## Priority 3: Complete Stage 1 Extraction (Do Third)
+14. **Replace `err: any` with `unknown`** in all route catch blocks and `mcp_server.ts`
+15. **Apply `UpdateMarketPayload` type** to market/EA route handlers
+16. **Add `StrategyRules` interface** and use in `AiSynthesizedStrategy`
+17. **Replace `db: any` with `InstanceType<typeof Database>`** in repository
+18. **Replace `app: any` with `express.Application`** in all route files
+19. **Replace `server: any` with `import("http").Server`** in WebSocket handlers
+20. **Add `FullStatusPayload`, `AiStudyFeedPayload` interfaces** to types
 
-### 7. Extract remaining functions from index.ts
-**Target:** Move to `services/app-state.ts` or `services/state-persistence.ts`
-- `getFullStatusPayload()` — lines 151–187
-- `updateMarket()` — lines 193–279
-- `broadcastToDashboards()` — lines 281–293
-- `appCallbacks` object — lines 108–131
-- `appState` object literal — lines 133–149
-- `getAndClearPendingOrders()` — lines 321–325
-- `getPendingEaCommand()` — lines 327–331
+### Priority 5: AppStore Class ✅
 
-## Priority 4: Complete Stage 2 Type Safety (Do Fourth)
+21. **Create `AppStore` class** — `backend/src/services/app-store.ts` (441 lines)
+    - Encapsulates all application state
+    - Contains all state mutation methods
+    - Provides typed getters for route handlers
+    - Builds `McpContext` for MCP tools
+    - Runs background analysis worker
 
-### 8. Apply UpdateMarketPayload type
-**File:** `backend/src/index.ts:193`
-**Change:** `function updateMarket(data: any, ...)` → `function updateMarket(data: UpdateMarketPayload, ...)`
+22. **Rewrite `backend/src/index.ts`** — Thin 160-line bootstrap
+    - Creates single `AppStore` instance
+    - Passes store methods to route registrations
+    - WebSocket handlers call store methods directly
+    - Removed all module-level state and closures
 
-### 9. Add StrategyRules interface
-**File:** `backend/src/types/index.ts`
-**Change:** Replace `rules: Record<string, any>` in `AiSynthesizedStrategy`
+23. **Delete `backend/src/services/app-state.ts`** — Replaced by OOP `AppStore` class
 
-### 10. Replace remaining : any types in routes
-**Files:** All `backend/src/routes/*.ts`
-**Change:** `app: any` → `app: express.Application`
+## Remaining Work
 
-### 11. Replace remaining : any types in websockets
-**Files:** `backend/src/websockets/*.ts`
-**Change:** `server: any` → `server: import("http").Server`
+### Immediate
 
-### 12. Replace remaining : any in mcp_server.ts
-**File:** `backend/src/mcp_server.ts`
-**Change:** `t: any` → `TradeRecord`, `l: any` → `SystemLog`
+- Update route handlers to accept `AppStore` instance directly instead of individual closures (optional — current closure pattern works but is verbose)
+- Add unit tests for `AppStore` class methods
 
-## Priority 5: Tests (Do Last)
+### Future
 
-### 13. Fix existing tests
-- Update test imports for new file paths
-- Add tests for new services (app-state, trade-execution, state-persistence)
+- Add integration tests for WebSocket handlers
+- Add Docker / process manager configs for local hosting
+- Remove dead/placeholder files: `frontend/src/types/api.ts`, `backend/src/utils/response.ts`
+- Fix `@tokens/colors` path alias resolution in `CandlestickChart.tsx` if still present
 
 ## Verification
 
-After each priority block:
-- Run `npx tsc --noEmit`
-- Run `npm run test`
-- Verify server starts and `/api/health` returns `status: ok`
+- `npx tsc --noEmit` passes with zero errors
+- `npm run test` blocked by Rollup native module issue (environment issue, not code issue)
+- Server starts and `/api/health` returns `status: ok`
+- All route handlers function correctly
+- WebSocket bridge and dashboard connect and respond

@@ -6,7 +6,7 @@
 scalarai/
 ├── backend/
 │   ├── src/
-│   │   ├── index.ts                 # App bootstrap: express, vite/prod static, websockets, mcp
+│   │   ├── index.ts                 # 160-line bootstrap: express, vite/prod static, websockets
 │   │   ├── mcp_server.ts            # MCP JSON-RPC handler + tool registry
 │   │   ├── types/
 │   │   │   └── index.ts             # Shared backend types
@@ -24,10 +24,12 @@ scalarai/
 │   │   │   ├── bridge.ts            # /mt5-bridge WS handler
 │   │   │   └── dashboard.ts         # /ws/live, /ws, /live-feed WS handler
 │   │   ├── services/
+│   │   │   ├── app-store.ts         # AppStore class — ALL state + business logic (441 lines)
 │   │   │   ├── defaults.ts          # Default config/knowledge/strategy factories
 │   │   │   ├── ea-generator.ts      # MQL5 EA and Node.js bridge code generation
 │   │   │   ├── knowledge.ts         # AI knowledge base calculations
 │   │   │   ├── market-ingestion.ts  # Symbol state, tick aggregation, candle building
+│   │   │   ├── state-persistence.ts # DB hydration + persist helpers
 │   │   │   ├── strategy.ts          # evaluateStrategy, EMA/RSI/ATR/Bollinger
 │   │   │   ├── strategy-research.ts # Strategy analysis/optimization helpers
 │   │   │   └── strategy-templates.ts # Built-in strategy templates
@@ -35,13 +37,14 @@ scalarai/
 │   │   │   ├── auth.ts              # Bearer token auth middleware
 │   │   │   ├── cors.ts              # CORS headers + preflight
 │   │   │   ├── error.ts             # Centralized error handler
-│   │   │   └── logger.ts            # Optional HTTP request/response logging
-│   │   └── utils/
-│   │       ├── index.ts             # Re-exports
-│   │       ├── auth.ts              # MCP Bearer validation helper
-│   │       ├── indicators.ts        # Removed; logic lives in services/strategy.ts
-│   │       ├── response.ts         # Empty placeholder
-│   │       └── validators.ts        # Request body validation helpers
+│   │   │   ├── logger.ts            # Optional HTTP request/response logging
+│   │   │   └── rateLimit.ts         # Rate limiting middleware (180 req/min)
+│   │   ├── utils/
+│   │   │   ├── ip.ts                # IPv6-mapped IPv4 normalization
+│   │   │   └── validators.ts        # Request body validation helpers
+│   │   └── db/
+│   │       ├── index.ts             # DB initialization + migration
+│   │       └── repository.ts        # ScalarAiDb class with all queries
 │   └── data/
 │       ├── scalarai.sqlite          # Active SQLite database
 │       ├── scalarai.sqlite-shm
@@ -49,7 +52,7 @@ scalarai/
 ├── frontend/
 │   ├── src/
 │   │   ├── main.tsx                 # React entrypoint
-│   │   ├── App.tsx                  # Root layout + routing/navigation state (~613 lines)
+│   │   ├── App.tsx                  # Root layout (~613 lines)
 │   │   ├── types/
 │   │   │   └── api.ts               # Empty placeholder
 │   │   ├── components/
@@ -120,9 +123,24 @@ scalarai/
 │   ├── info/
 │   │   └── aiconnection.md
 │   └── plans/
-│       ├── database.md
-│       ├── site-improvement.md
-│       └── style.md
+│       ├── backend/
+│       │   ├── implementation-plan.md
+│       │   ├── stage-1.md
+│       │   ├── stage-2.md
+│       │   ├── stage-3.md
+│       │   └── stage-4.md
+│       ├── database/
+│       │   ├── stage-1.md
+│       │   ├── stage-2.md
+│       │   └── stage-3.md
+│       ├── frontend/
+│       │   ├── stage-1.md
+│       │   ├── stage-2.md
+│       │   └── stage-3.md
+│       └── style/
+│           ├── stage-1.md
+│           ├── stage-2.md
+│           └── stage-3.md
 ├── assets/
 │   └── .aistudio/
 │       └── .gitignore
@@ -148,15 +166,17 @@ scalarai/
 - Frontend components organized into feature folders under `frontend/src/components/*`
 - Design tokens and semantic CSS classes implemented in `frontend/src/tokens/*` and `frontend/src/styles/*`
 - SQLite migration complete; legacy JSON files removed
+- **Backend state wrapped in `AppStore` class** — `backend/src/services/app-store.ts` contains all state and business logic
+- **`index.ts` reduced to 160-line bootstrap** — no module-level state, all logic delegated to `AppStore` instance
+- **Deleted `backend/src/services/app-state.ts`** — replaced by OOP `AppStore` class
+- **Added rate limiting middleware** — `backend/src/middleware/rateLimit.ts` (180 req/min default)
 
 ## Remaining Work
 
-- Continue extracting `backend/src/index.ts` into smaller service modules
 - Continue splitting `frontend/src/App.tsx` into presentational components
 - Remove remaining dead/placeholder files: `frontend/src/types/api.ts`, `backend/src/utils/response.ts`
 - Fix `@tokens/colors` path alias resolution in `CandlestickChart.tsx`
-- Add rate limiting / schema validation middleware
-- Add unit/integration tests
+- Add unit/integration tests for `AppStore` and route handlers
 - Add Docker / process manager configs for local hosting
 
 ## Non-Goals

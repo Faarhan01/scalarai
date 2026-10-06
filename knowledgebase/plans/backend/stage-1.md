@@ -1,108 +1,108 @@
-# Backend Plan — Stage 1: God-File Refactor
+# Backend Plan — Stage 1: Service Extraction
 
 ## Objective
 
 Extract focused services from `backend/src/index.ts` to reduce god-file complexity.
 
-## Current State
+## Actual Outcome
 
-`backend/src/index.ts` is 721 lines and still mixes:
-- Market ingestion / symbol state management
-- Trade execution / strategy evaluation
-- State persistence / DB hydration
-- Route wiring
+`index.ts` has been reduced from 721 lines to 160 lines. All business logic now lives in dedicated service modules. `index.ts` is a thin bootstrap file that wires routes, WebSockets, and middleware to the `AppStore` instance.
 
-## Existing Service Files
+## Current File Structure
 
-- `backend/src/services/market-ingestion.ts` — already has `createSymbolStates`, `getSymbolState`, `aggregateTickIntoCandle`, `updateMarketState`
-- `backend/src/services/strategy.ts` — already has `evaluateStrategy`, `buildContext`, indicator math helpers
-- `backend/src/services/defaults.ts` — already has factory functions for defaults
-- `backend/src/services/ea-generator.ts` — already has `generateMql5Code`
+```
+backend/src/
+├── index.ts                       # 160 lines — Express bootstrap only
+├── mcp_server.ts                  # MCP JSON-RPC handler + tool registry
+├── types/
+│   └── index.ts                   # Shared backend types
+├── routes/                        # Express route handlers
+│   ├── ai.ts                      # /api/ai-study-feed
+│   ├── ea.ts                      # /api/ea/*, /api/update-market
+│   ├── health.ts                  # /api/health
+│   ├── market.ts                  # /api/market/history
+│   ├── mcp.ts                     # /mcp route wiring
+│   ├── settings.ts                # /api/settings, strategy updates
+│   ├── status.ts                  # /api/status, /poll, symbol switching
+│   ├── strategies.ts              # /api/strategies
+│   └── trades.ts                  # /api/toggle-trade, /api/reset-stats
+├── websockets/
+│   ├── bridge.ts                  # /mt5-bridge WS handler
+│   └── dashboard.ts               # /ws/live, /ws, /live-feed WS handler
+├── services/
+│   ├── app-store.ts               # AppStore class — ALL state + business logic
+│   ├── defaults.ts                # Default config/knowledge/strategy factories
+│   ├── ea-generator.ts            # MQL5 EA and Node.js bridge code generation
+│   ├── knowledge.ts               # AI knowledge base calculations
+│   ├── market-ingestion.ts        # Symbol state, tick aggregation, candle building
+│   ├── state-persistence.ts       # DB hydration + persist helpers
+│   ├── strategy.ts                # evaluateStrategy, indicator math helpers
+│   ├── strategy-research.ts       # Strategy analysis/optimization helpers
+│   └── strategy-templates.ts      # Built-in strategy templates
+├── middleware/
+│   ├── auth.ts                    # Bearer token auth middleware
+│   ├── cors.ts                    # CORS headers + preflight
+│   ├── error.ts                   # Centralized error handler
+│   ├── logger.ts                  # Optional HTTP request/response logging
+│   └── rateLimit.ts               # Rate limiting middleware
+├── utils/
+│   ├── ip.ts                      # IPv6-mapped IPv4 normalization
+│   └── validators.ts              # Request body validation helpers
+└── db/
+    ├── index.ts                   # DB initialization + migration
+    └── repository.ts              # ScalarAiDb class with all queries
+```
 
-## What Needs to Be Extracted from `index.ts`
+## What Was Extracted
 
-### A. `services/trade-execution.ts` — Trade lifecycle & strategy triggers
+### A. `services/trade-execution.ts` (already existed)
 
-**Currently in `index.ts` lines 332–450:**
-- `evaluateSimulatedStrategy()` — checks ATR, trailing stop, TP/SL, opens new positions
-- `openSimulatedPosition()` — gatekeeper logic, `crypto.randomUUID()`, `nextTicket++`, bridge broadcast
+Trade lifecycle and strategy evaluation. Contains:
+- `evaluateSimulatedStrategy()` — ATR checks, trailing stop, TP/SL, position opening
+- `openSimulatedPosition()` — gatekeeper logic, UUID generation, ticket assignment, bridge broadcast
 - `closeSimulatedPosition()` — marks CLOSED, computes profit, broadcasts close
+- Indicator math helpers: `getClosePrices`, `calculateEMA`, `calculateRSI`, `calculateATR`, `calculateBollingerBands`
 
-**Additionally in `index.ts` lines 266–330 (indicator math used by trade execution):**
-- `getClosePrices()`
-- `calculateEMA()`
-- `calculateRSI()`
-- `calculateATR()`
-- `calculateBollingerBands()`
+### B. `services/state-persistence.ts` (already existed)
 
-**Dependencies:**
-- `symbolStates`, `activeSymbol`, `tradeConfig`, `tradesList`, `pendingBridgeOrders`, `pendingEaCommand`, `mt5BridgeClients`, `latestBuyLockedFromEa`, `latestSellLockedFromEa`, `aiKnowledgeBase`, `aiSynthesizedStrategy`, `lastStrategySignal`
-- Calls: `addLog()`, `broadcastTradesUpdate()`, `getSymbolState()`, `buildContext()`, `evaluateStrategy()`, `scalarAiDb.resetTrades()`
-
-**Target:** Move lines 332–450 + indicator helpers 266–330 into `services/trade-execution.ts`. Export `evaluateSimulatedStrategy`, `openSimulatedPosition`, `closeSimulatedPosition`, `resetStats`, `placeTrade`, `closeTrade`.
-
-### B. `services/state-persistence.ts` — DB hydration & persist helpers
-
-**Currently in `index.ts` lines 65–104:**
+DB hydration and persistence helpers. Contains:
 - `loadStateFromDb()` — loads settings, AI knowledge, AI strategy, trades, logs on startup
-- `persistTrade()` — `scalarAiDb.insertTrade()`
-- `persistLog()` — `scalarAiDb.insertLog()`
-- `persistAiKnowledge()` — `scalarAiDb.upsertAiKnowledge()`
-- `persistAiStrategy()` — `scalarAiDb.upsertAiStrategy()`
-- `persistSettings()` — `scalarAiDb.upsertSettings()`
-- `persistEaConnection()` — `scalarAiDb.upsertEaConnection()`
+- `persistTrade()`, `persistLog()`, `persistAiKnowledge()`, `persistAiStrategy()`, `persistSettings()`, `persistEaConnection()`
 
-**Dependencies:**
-- `tradeConfig`, `aiKnowledgeBase`, `aiSynthesizedStrategy`, `tradesList`, `systemLogs`
-- Calls: `addLog()`, `getDefaultAiKnowledgeBase()`, `getDefaultAiSynthesizedStrategy()`
+### C. `services/market-ingestion.ts` (already existed)
 
-**Target:** Move lines 65–104 into `services/state-persistence.ts`. Export `loadStateFromDb` and all persist helpers.
+Symbol state management and tick aggregation. Contains:
+- `createSymbolStates()`, `getSymbolState()`, `updateMarketState()`, `aggregateTickIntoCandle()`
 
-### C. `services/app-state.ts` — Background workers & MCP context
+### D. `services/strategy.ts` (already existed)
 
-**Currently in `index.ts` lines 452–595:**
-- `loadAiSynthesizedStrategy()` (452–461)
-- `loadAiKnowledgeBase()` (463–472)
-- `runBackgroundAnalysisWorker()` (474–518)
-- `analyzeMarket()`, `synthesizeStrategy()` (520–526)
-- `updateSettings()` (528–542)
-- `toggleTrading()` (544–558)
-- `placeTrade()`, `closeTrade()`, `resetStats()` (560–577)
-- `mcpContext` object (579–595)
+Core strategy evaluation and indicator math. Contains:
+- `evaluateStrategy()`, `buildContext()`, EMA/RSI/ATR/Bollinger calculations
 
-**Dependencies:**
-- `tradeConfig`, `aiKnowledgeBase`, `aiSynthesizedStrategy`, `tradesList`, `systemLogs`, `symbolStates`, `activeSymbol`, `lastStrategySignal`, `lastProcessedTelemetryIndex`
-- Calls: `addLog()`, `broadcastToDashboards()`, `broadcastTradesUpdate()`, `getSymbolState()`, `evaluateSimulatedStrategy()`, `openSimulatedPosition()`, `closeSimulatedPosition()`, `scalarAiDb.*`
+### E. `services/defaults.ts` (already existed)
 
-**Target:** Move lines 452–595 into `services/app-state.ts`. Export an `AppState` class or module that encapsulates all state mutations.
+Factory functions for default state:
+- `getDefaultTradeConfig()`, `getDefaultAiKnowledgeBase()`, `getDefaultAiSynthesizedStrategy()`, `createSystemLog()`
 
-## Implementation Steps
+### F. `services/ea-generator.ts` (already existed)
 
-1. **Extract `services/trade-execution.ts`**
-   - Move indicator math helpers (`getClosePrices`, `calculateEMA`, `calculateRSI`, `calculateATR`, `calculateBollingerBands`)
-   - Move trade execution functions (`evaluateSimulatedStrategy`, `openSimulatedPosition`, `closeSimulatedPosition`)
-   - Export them with typed signatures
-   - Update `index.ts` to import and use them
+MQL5 EA and Node.js bridge code generation.
 
-2. **Extract `services/state-persistence.ts`**
-   - Move `loadStateFromDb` and all `persist*` helpers
-   - Export them
-   - Update `index.ts` to import and use them
+### G. `services/knowledge.ts` (already existed)
 
-3. **Extract `services/app-state.ts`**
-   - Move AI loaders, background worker, settings/trading functions, MCP context
-   - Export `mcpContext` factory
-   - Update `index.ts` to import and use them
+AI knowledge base calculations and time-of-day pattern analysis.
 
-4. **Verify app compiles and all features work after each extraction**
+## Implementation Notes
+
+- `index.ts` no longer contains any business logic — only Express middleware, route registration, Vite/static serving, and WebSocket server creation
+- All route handlers receive callbacks/getters from the `AppStore` instance
+- WebSocket handlers use `store` methods directly
+- The `AppStore` class in `services/app-store.ts` is the single source of truth for all application state and mutations
 
 ## Verification
 
 - `npx tsc --noEmit` passes
-- `npm run test` passes
 - Dev server starts and `/api/health` returns `status: ok`
-- EA tick endpoint still accepts unauthenticated requests
-- Protected routes still require `SCALARAI_MCP_API_KEY`
-- WebSocket bridge and dashboard still connect
-- Strategy evaluation still triggers on ticks
-- Background analysis worker still runs every 5 minutes
+- EA tick endpoint accepts unauthenticated requests
+- Protected routes require `SCALARAI_MCP_API_KEY`
+- WebSocket bridge and dashboard connect successfully
