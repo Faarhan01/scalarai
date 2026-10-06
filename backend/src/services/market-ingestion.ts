@@ -101,15 +101,24 @@ export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: nu
     lastCandle.high = Math.max(lastCandle.high, targetPrice);
     lastCandle.low = Math.min(lastCandle.low, targetPrice);
     lastCandle.close = targetPrice;
+    if (lastCandle.close > lastCandle.open) {
+      lastCandle.direction = "up";
+    } else if (lastCandle.close < lastCandle.open) {
+      lastCandle.direction = "down";
+    } else {
+      lastCandle.direction = "flat";
+    }
   } else {
+    const openPrice = lastCandle.close;
+    const direction = targetPrice > openPrice ? "up" : targetPrice < openPrice ? "down" : "flat";
     candles.push({
       time: now,
-      open: targetPrice,
+      open: openPrice,
       high: targetPrice,
       low: targetPrice,
       close: targetPrice,
       volume: null,
-      direction: "flat",
+      direction,
       minuteBucket: currentBucket,
     });
     if (candles.length > 200) candles.shift();
@@ -160,10 +169,19 @@ export function updateMarket(
 
   const now = Date.now();
 
-  if (state.ticks.length > 0 && Math.abs(targetPrice - state.currentPrice) < 0.0001 && state.telemetry.length > 0) {
+  aggregateTickIntoCandle(state, targetPrice);
+
+  const isDuplicateTick =
+    state.ticks.length > 0 &&
+    Math.abs(targetPrice - state.currentPrice) < 0.0001 &&
+    state.telemetry.length > 0;
+
+  if (isDuplicateTick) {
     const lastTel = state.telemetry[state.telemetry.length - 1];
     const newVelocity = data.velocity !== undefined ? Number(data.velocity) : lastTel.velocity;
-    if (Math.abs(newVelocity - lastTel.velocity) < 0.00001 && data.buyLocked === lastTel.buyLocked && data.sellLocked === lastTel.sellLocked) {
+    if (Math.abs(newVelocity - lastTel.velocity) < 0.00001 && (data.buyLocked ?? lastTel.buyLocked) === lastTel.buyLocked && (data.sellLocked ?? lastTel.sellLocked) === lastTel.sellLocked) {
+      state.currentPrice = targetPrice;
+      state.lastDirection = "flat";
       return { symbol: state, switched };
     }
   }

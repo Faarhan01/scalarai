@@ -35,19 +35,23 @@ export function useChartData(
           }));
 
     const displayCandles = candleData.slice(-maxVisibleCandles);
-    let minPrice = 1245.0;
-    let maxPrice = 1255.0;
-    if (displayCandles.length > 0) {
-      minPrice = displayCandles[0].low;
-      maxPrice = displayCandles[0].high;
-      for (let i = 1; i < displayCandles.length; i++) {
-        if (displayCandles[i].low < minPrice) minPrice = displayCandles[i].low;
-        if (displayCandles[i].high > maxPrice) maxPrice = displayCandles[i].high;
-      }
-      minPrice -= 0.2;
-      maxPrice += 0.2;
+    let minPrice = displayCandles.length > 0 ? displayCandles[0].low : 0;
+    let maxPrice = displayCandles.length > 0 ? displayCandles[0].high : 0;
+    for (let i = 1; i < displayCandles.length; i++) {
+      if (displayCandles[i].low < minPrice) minPrice = displayCandles[i].low;
+      if (displayCandles[i].high > maxPrice) maxPrice = displayCandles[i].high;
     }
-    const priceRange = maxPrice - minPrice || 1.0;
+    let priceRange = maxPrice - minPrice || 1.0;
+    const minRange = 1.5;
+    if (priceRange < minRange) {
+      const center = (maxPrice + minPrice) / 2;
+      minPrice = center - minRange / 2;
+      maxPrice = center + minRange / 2;
+      priceRange = minRange;
+    }
+    const paddingPrice = priceRange * 0.05;
+    minPrice -= paddingPrice;
+    maxPrice += paddingPrice;
 
     return { candleData, displayCandles, minPrice, maxPrice, priceRange };
   }, [candles, history, maxVisibleCandles]);

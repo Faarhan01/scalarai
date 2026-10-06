@@ -1,5 +1,5 @@
 import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder } from "../types";
-import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState, aggregateTickIntoCandle } from "./market-ingestion";
+import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState } from "./market-ingestion";
 import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
 import { evaluateSimulatedStrategy, openSimulatedPosition, closeSimulatedPosition, AppCallbacks, TradeState } from "./trade-execution";
@@ -159,16 +159,6 @@ export class AppStore {
     }
     const targetPrice = rawPrice;
 
-    const now = Date.now();
-
-    if (state.ticks.length > 0 && Math.abs(targetPrice - state.currentPrice) < 0.0001 && state.telemetry.length > 0) {
-      const lastTel = state.telemetry[state.telemetry.length - 1];
-      const newVelocity = data.velocity !== undefined ? Number(data.velocity) : lastTel.velocity;
-      if (Math.abs(newVelocity - lastTel.velocity) < 0.00001 && data.buyLocked === lastTel.buyLocked && data.sellLocked === lastTel.sellLocked) {
-        return;
-      }
-    }
-
     const numVelocity = data.velocity !== undefined ? Number(data.velocity) : 0;
     if (!isFinite(numVelocity)) return;
 
@@ -187,8 +177,6 @@ export class AppStore {
     if (obs % 25 === 0) {
       persistAiKnowledge(this.aiKnowledgeBase);
     }
-
-    aggregateTickIntoCandle(state, targetPrice);
 
     if (!state.connection.isEaConnected) {
       this.addLog("EA", "SUCCESS", `${symbol} MT5 Expert Advisor linked! Real-time velocity baseline metric: ${numVelocity.toFixed(4)} pt/s.`);

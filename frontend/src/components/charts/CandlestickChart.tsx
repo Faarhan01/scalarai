@@ -1,6 +1,5 @@
 import React from "react";
 import type { CandleData, ChartData } from "../../hooks/useChartData";
-import { colors } from "@tokens/colors";
 
 export interface CandlestickChartProps {
   chartData: ChartData;
@@ -28,99 +27,134 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const width = 800;
   const height = 500;
   const padding = 20;
-  const candleWidth = 8;
+  const leftAxisWidth = 50;
+  const bottomAxisHeight = 24;
+  const candleWidth = 10;
   const gap = 2;
   const step = candleWidth + gap;
-  const maxCandles = Math.floor((width - 2 * padding) / step);
+  const chartWidth = width - leftAxisWidth - padding;
+  const chartHeight = height - padding - bottomAxisHeight;
+  const maxCandles = Math.floor(chartWidth / step);
   const visibleCandles = displayCandles.slice(-maxCandles);
+
+  const bullishColor = "#10b981";
+  const bearishColor = "#f43f5e";
+  const gridColor = "rgba(148, 163, 184, 0.12)";
+  const axisTextColor = "#94a3b8";
+
+  const priceTicks = [];
+  const tickCount = 5;
+  for (let i = 0; i <= tickCount; i++) {
+    const p = minPrice + (priceRange * i) / tickCount;
+    const y = padding + (1 - (p - minPrice) / priceRange) * chartHeight;
+    priceTicks.push({ p, y, label: p.toFixed(1) });
+  }
 
   return (
     <div className="w-full h-full">
-      <svg viewBox="0 0 800 500" className="w-full h-full overflow-visible">
-        {/* Live Candlestick Bars */}
-        {(() => {
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+        {/* Grid lines */}
+        {priceTicks.map((t, i) => (
+          <line
+            key={`grid-${i}`}
+            x1={leftAxisWidth}
+            y1={t.y}
+            x2={chartWidth + leftAxisWidth}
+            y2={t.y}
+            stroke={gridColor}
+            strokeWidth="1"
+          />
+        ))}
+
+        {/* Price axis labels */}
+        {priceTicks.map((t, i) => (
+          <text
+            key={`price-${i}`}
+            x={chartWidth + leftAxisWidth + 6}
+            y={t.y + 3}
+            fill={axisTextColor}
+            fontSize="9"
+            fontFamily="JetBrains Mono, monospace"
+          >
+            {t.label}
+          </text>
+        ))}
+
+        {/* Current price line */}
+        {currentPrice > 0 && (
+          <line
+            x1={leftAxisWidth}
+            y1={padding + (1 - (currentPrice - minPrice) / priceRange) * chartHeight}
+            x2={chartWidth + leftAxisWidth}
+            y2={padding + (1 - (currentPrice - minPrice) / priceRange) * chartHeight}
+            stroke="#6366f1"
+            strokeWidth="1"
+            strokeDasharray="4 3"
+            opacity="0.8"
+          />
+        )}
+
+        {/* Candles */}
+        {visibleCandles.map((candle, idx) => {
+          const openPrice = candle.open;
+          const highPrice = candle.high;
+          const lowPrice = candle.low;
+          const closePrice = candle.close;
+
+          const x = leftAxisWidth + idx * step + candleWidth / 2;
+
+          const y_high = padding + (1 - (highPrice - minPrice) / priceRange) * chartHeight;
+          const y_low = padding + (1 - (lowPrice - minPrice) / priceRange) * chartHeight;
+          const y_open = padding + (1 - (openPrice - minPrice) / priceRange) * chartHeight;
+          const y_close = padding + (1 - (closePrice - minPrice) / priceRange) * chartHeight;
+
+          const bodyY = Math.min(y_open, y_close);
+          const bodyHeight = Math.max(1.5, Math.abs(y_open - y_close));
+
+          const isBullish = closePrice >= openPrice;
+          const isLast = idx === visibleCandles.length - 1;
+          const fillColor = isBullish ? bullishColor : bearishColor;
+
           return (
-            <>
-              {visibleCandles.map((candle, idx) => {
-                const openPrice = candle.open;
-                const highPrice = candle.high;
-                const lowPrice = candle.low;
-                const closePrice = candle.close;
+            <g key={`${candle.time}-${idx}`}>
+              <line
+                x1={x}
+                y1={y_high}
+                x2={x}
+                y2={y_low}
+                stroke={fillColor}
+                strokeWidth="1.2"
+              />
+              <rect
+                x={x - candleWidth / 2}
+                y={bodyY}
+                width={candleWidth}
+                height={bodyHeight}
+                fill={fillColor}
+                stroke={fillColor}
+                strokeWidth="1"
+                opacity={isLast ? 0.95 : 1}
+              />
+            </g>
+          );
+        })}
 
-                const x = width - padding - (visibleCandles.length - 1 - idx) * step - candleWidth / 2;
+        {/* Last price tracker */}
+        {(() => {
+          const lastIndex = visibleCandles.length - 1;
+          if (lastIndex < 0) return null;
+          const lastCandle = visibleCandles[lastIndex];
+          const lastClose = lastCandle.close;
+          const lastOpen = lastCandle.open;
+          const x = leftAxisWidth + lastIndex * step + candleWidth / 2;
+          const y = padding + (1 - (lastClose - minPrice) / priceRange) * chartHeight;
+          const glowColor = lastClose >= lastOpen ? bullishColor : bearishColor;
 
-                const y_high = padding + (1 - (highPrice - minPrice) / priceRange) * (height - 2 * padding);
-                const y_low = padding + (1 - (lowPrice - minPrice) / priceRange) * (height - 2 * padding);
-                const y_open = padding + (1 - (openPrice - minPrice) / priceRange) * (height - 2 * padding);
-                const y_close = padding + (1 - (closePrice - minPrice) / priceRange) * (height - 2 * padding);
-
-                const bodyY = Math.min(y_open, y_close);
-                const bodyHeight = Math.max(1.5, Math.abs(y_open - y_close));
-
-                const isBullish = closePrice >= openPrice;
-                const isLastCandle = idx === visibleCandles.length - 1;
-
-                const bullishColor = colors.emerald[500];
-                const bearishColor = colors.rose[500];
-                const strokeColor = isBullish ? bullishColor : bearishColor;
-
-                return (
-                  <g key={candle.time + "-" + idx}>
-                    {/* Wick */}
-                    <line
-                      x1={x}
-                      y1={y_high}
-                      x2={x}
-                      y2={y_low}
-                      stroke={strokeColor}
-                      strokeWidth="1"
-                    />
-                    {/* Body */}
-                    {isLastCandle ? (
-                      <rect
-                        x={x - candleWidth / 2}
-                        y={bodyY}
-                        width={candleWidth}
-                        height={bodyHeight}
-                        fill="none"
-                        stroke={strokeColor}
-                        strokeWidth="1.5"
-                      />
-                    ) : (
-                      <rect
-                        x={x - candleWidth / 2}
-                        y={bodyY}
-                        width={candleWidth}
-                        height={bodyHeight}
-                        fill={isBullish ? bullishColor : bearishColor}
-                        stroke={strokeColor}
-                        strokeWidth="1"
-                      />
-                    )}
-                  </g>
-                );
-              })}
-
-              {/* Last candle tracker - pulsing dot at the latest close price */}
-              {(() => {
-                const lastIndex = visibleCandles.length - 1;
-                if (lastIndex < 0) return null;
-                const lastCandle = visibleCandles[lastIndex];
-                const lastClose = lastCandle.close;
-                const lastOpen = lastCandle.open;
-
-                const x = width - padding - candleWidth / 2;
-                const y = padding + (1 - (lastClose - minPrice) / priceRange) * (height - 2 * padding);
-                const isBullish = lastClose >= lastOpen;
-                const glowColor = isBullish ? colors.emerald[500] : colors.rose[500];
-                return (
-                  <g>
-                    <circle cx={x} cy={y} r="8" fill={glowColor} className="opacity-30 animate-pulse" />
-                    <circle cx={x} cy={y} r="4" fill={glowColor} />
-                  </g>
-                );
-              })()}
-            </>
+          return (
+            <g>
+              <circle cx={x} cy={y} r="7" fill={glowColor} opacity="0.18" className="animate-pulse" />
+              <circle cx={x} cy={y} r="3.5" fill={glowColor} />
+            </g>
           );
         })()}
       </svg>
