@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import { corsMiddleware } from "./middleware/cors";
 import { loggerMiddleware } from "./middleware/logger";
 import { errorMiddleware } from "./middleware/error";
+import { normalizeIp } from "./utils/ip";
 import { registerEaRoutes } from "./routes/ea";
 import { registerMarketRoutes } from "./routes/market";
 import { registerSettingsRoutes } from "./routes/settings";
@@ -140,7 +141,7 @@ const appState: AppState = {
   symbolStates,
   activeSymbol: "Step Index",
   lastProcessedTelemetryIndex: 0,
-  nextTicket: { value: 837201 },
+  nextTicket: { value: scalarAiDb.getMaxTicket() + 1 },
   latestBuyLockedFromEa: false,
   latestSellLockedFromEa: false,
   pendingBridgeOrders: [],
@@ -243,7 +244,8 @@ function updateMarket(data: any, clientIp?: string) {
   const activeState = getSymbolState(appState.symbolStates, appState.activeSymbol);
   activeState.connection.isEaConnected = true;
   if (!activeState.connection.clientIp) {
-    activeState.connection.clientIp = clientIp || "127.0.0.1";
+    const normalized = normalizeIp(clientIp);
+    activeState.connection.clientIp = normalized || "127.0.0.1";
   }
   activeState.connection.lastPing = new Date().toISOString();
   activeState.connection.broker = data.broker || "MetaTrader 5 Link";

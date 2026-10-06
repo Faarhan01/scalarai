@@ -77,7 +77,7 @@ export function calculateATR(state: SymbolStates, activeSymbol: string, period: 
   }
   const slice = trs.slice(-period);
   if (slice.length === 0) return 0.5;
-  return trs.reduce((a, b) => a + b, 0) / slice.length;
+  return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 
 export function calculateBollingerBands(prices: number[], period: number = 15, numDevs: number = 2): { upper: number; middle: number; lower: number } {

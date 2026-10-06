@@ -319,6 +319,11 @@ export class ScalarAiDb {
     this.db.prepare(`DELETE FROM strategies WHERE id = ?`).run(id);
   }
 
+  getMaxTicket(): number {
+    const row = (this.db.prepare(`SELECT MAX(ticket) as maxTicket FROM trades`).get() as { maxTicket: number | null }) || { maxTicket: null };
+    return row.maxTicket ?? 837201;
+  }
+
   rawQuery(sql: string, params: unknown[] = []): unknown[] {
     const normalized = sql.trim().replace(/\s+/g, " ").toUpperCase();
     if (!normalized.startsWith("SELECT")) return [];

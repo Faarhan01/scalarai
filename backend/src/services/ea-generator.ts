@@ -1,11 +1,33 @@
 import { TradeConfig } from "../types";
 
-/**
- * Generates the complete MQL5 Expert Advisor file content with custom server endpoint injection.
- */
+function validateAppUrl(appUrl: string | undefined): string {
+  const raw = (appUrl || "").trim().replace(/\/$/, "");
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return "";
+    }
+    if (
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname.startsWith("192.168.") ||
+      parsed.hostname.startsWith("10.") ||
+      parsed.hostname.startsWith("172.")
+    ) {
+      if (process.env.NODE_ENV === "production") {
+        return "";
+      }
+    }
+    return raw;
+  } catch {
+    return "";
+  }
+}
+
 export function generateMql5Code(appUrl?: string, config?: Partial<TradeConfig>): string {
-  // Strip trailing slash if present, default to http://127.0.0.1:3000
-  const clientUrl = (appUrl && appUrl.trim() !== "") ? appUrl.trim().replace(/\/$/, "") : "http://127.0.0.1:3000";
+  const clientUrl = validateAppUrl(appUrl) || "http://127.0.0.1:3000";
+  const escapedUrl = clientUrl.replace(/\\/g, "\\\\");
   const lotSize = config?.lotSize ?? 0.1;
   const maxTrades = config?.maxTrades ?? 3;
   const takeProfitPoints = config?.takeProfitPoints ?? 300;
@@ -16,16 +38,16 @@ export function generateMql5Code(appUrl?: string, config?: Partial<TradeConfig>)
   const isActive = config?.isActive ?? false;
 
   return `//+------------------------------------------------------------------+
-//|                                     StepIndex_AI_Scalper_EA.mq5   |
-//|                         Copyright 2026, Step Index MT5 Copilot Ltd. |
-//|                                             https://ai.studio/build |
-//+------------------------------------------------------------------+
-#property copyright "Step Index MT5 Copilot"
-#property link      "${clientUrl}"
-#property version   "1.50"
-#property description "Step Index Ultimate Scalper & Swing EA with Web Live Sync"
-#property description "Reads and streams real market charts directly to the dashboard."
-#property description "IMPORTANT: Add '${clientUrl}' to MT5 allowed WebRequest URLs!"
+ //|                                     StepIndex_AI_Scalper_EA.mq5   |
+ //|                         Copyright 2026, Step Index MT5 Copilot Ltd. |
+ //|                                             https://ai.studio/build |
+ //+------------------------------------------------------------------+
+ #property copyright "Step Index MT5 Copilot"
+ #property link      "${escapedUrl}"
+ #property version   "1.50"
+ #property description "Step Index Ultimate Scalper & Swing EA with Web Live Sync"
+ #property description "Reads and streams real market charts directly to the dashboard."
+ #property description "IMPORTANT: Add '${escapedUrl}' to MT5 allowed WebRequest URLs!"
 
 //--- include trade library
 #include <Trade\\Trade.mqh>
@@ -52,7 +74,7 @@ input ENUM_TRADING_MODE InpTradingMode = MODE_SCALPING; // Trading Mode Selector
 input double   InpMinAtrFilter    = 0.05;               // Minimum ATR Volatility Filter (Pt)
 
 input group "=== Web App API Integration ==="
-input string   InpWebServerUrl    = "${clientUrl}";         // Web App Base URL (Telemetry & Command Sync)
+input string   InpWebServerUrl    = "${escapedUrl}";         // Web App Base URL (Telemetry & Command Sync)
 input string   InpDashboardUrl    = "${clientUrl}/api/update-market"; // Dashboard Live Price Feed URL
 input int      InpSyncIntervalSec = 3;                      // Heartbeat interval in seconds
 input bool     InpSendTicksToWeb  = true;                   // Broadcast live candle data to web graph
