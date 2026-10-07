@@ -1,5 +1,7 @@
 import { StrategyMode, TradeConfig, Tick, AiKnowledgeBase, AiSynthesizedStrategy, StrategyCondition } from "../types";
 import { scalarAiDb } from "../db";
+import { getDefaultTradeConfig } from "./defaults";
+import { BacktestCandle, BacktestEngine, BacktestResult as CandleBacktestResult } from "./strategy-backtest";
 
 export type { StrategyMode, TradeConfig, Tick, AiKnowledgeBase, AiSynthesizedStrategy, StrategyCondition } from "../types";
 
@@ -275,8 +277,20 @@ export interface BacktestPosition {
   entryIndex: number;
 }
 
-export function evaluateStrategyBacktest(mode: StrategyMode | string, limit = 500): BacktestResult {
-  const ticks = scalarAiDb.getTicks(limit);
+export function evaluateStrategyBacktest(mode: StrategyMode | string, limit = 500, candles?: Array<{ close: number; high: number; low: number; time: number; velocity?: number }>): BacktestResult {
+  let ticks: any[];
+  if (candles) {
+    ticks = candles.map((c, i) => ({
+      time: c.time,
+      price: c.close,
+      close: c.close,
+      high: c.high,
+      low: c.low,
+      velocity: i > 0 && c.velocity !== undefined ? c.velocity : Math.abs(c.close - (candles[i - 1]?.close ?? c.close)),
+    }));
+  } else {
+    ticks = scalarAiDb.getTicks(limit);
+  }
   if (ticks.length < 5) {
     return { mode: String(mode), ticksAnalyzed: ticks.length, signals: 0, simulatedTrades: 0, wins: 0, losses: 0, winRate: 0, totalProfit: 0, avgProfit: 0, maxDrawdown: 0 };
   }
@@ -360,4 +374,17 @@ export function evaluateStrategyBacktest(mode: StrategyMode | string, limit = 50
     avgProfit: simulatedTrades > 0 ? Number((totalProfit / simulatedTrades).toFixed(2)) : 0,
     maxDrawdown: Number(maxDrawdown.toFixed(2)),
   };
+}
+
+export function evaluateStrategyBacktestWithCandles(
+  mode: StrategyMode | string,
+  candles: BacktestCandle[],
+  config?: Partial<TradeConfig>
+): CandleBacktestResult {
+  const engine = new BacktestEngine();
+  const fullConfig: TradeConfig = {
+    ...getDefaultTradeConfig(),
+    ...config,
+  };
+  return engine.runBacktest(mode as StrategyMode, candles, fullConfig);
 }

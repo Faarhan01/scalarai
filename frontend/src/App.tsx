@@ -153,6 +153,13 @@ export default function App() {
     []
   );
 
+  const mergeCandles = (existing: any[], incoming: any[]): any[] => {
+    const map = new Map<number, any>();
+    for (const c of existing) map.set(c.time, c);
+    for (const c of incoming) map.set(c.time, c);
+    return Array.from(map.values()).sort((a, b) => a.time - b.time);
+  };
+
   const { errors, showError, clearError } = useErrorHandler();
 
   const settings = useSettings(config);
@@ -206,7 +213,9 @@ export default function App() {
       if (data.logs) setLogs(data.logs);
       if (data.trades) setTradesList(data.trades);
       if (data.history) setHistory(data.history);
-      if (data.candles) setCandles(data.candles);
+      if (data.candles) {
+        setCandles((prev) => mergeCandles(prev, data.candles).slice(-2000));
+      }
       if (data.currentPrice !== undefined) setCurrentPrice(data.currentPrice);
       if (data.activeSymbol) setActiveSymbol(data.activeSymbol);
       if (data.symbolStates) setSymbolStates(data.symbolStates);
@@ -232,7 +241,7 @@ export default function App() {
         }
       }
       if (msg.candles) {
-        scheduleChartUpdate({ candles: msg.candles });
+        setCandles((prev) => mergeCandles(prev, msg.candles).slice(-2000));
       }
       if (msg.stats) setStats(msg.stats);
       if (msg.connection) setConnection(msg.connection);
@@ -283,6 +292,35 @@ export default function App() {
     fetchStatus();
     fetchStrategies();
   }, [fetchStatus, fetchStrategies]);
+
+  // Load historical candles via REST when activeSymbol changes
+  useEffect(() => {
+    if (!activeSymbol) return;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    fetch(`/api/market/candles?symbol=${encodeURIComponent(activeSymbol)}&limit=1000`, {
+      signal: controller.signal,
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.candles && Array.isArray(data.candles)) {
+          setCandles((prev) => mergeCandles(prev, data.candles).slice(-2000));
+        }
+      })
+      .catch(() => {
+        // Graceful degradation: keep existing candles from WebSocket
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+      });
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [activeSymbol]);
 
   // Poll AI study feed periodically
   const aiStudy = useAiStudyFeed(sendWsMessage);

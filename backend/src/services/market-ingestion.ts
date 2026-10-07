@@ -1,4 +1,5 @@
 import { Tick, EAConnectionDetails, CandleBar, MarketTelemetry, SymbolStateEntry, SymbolStates } from "../types";
+import { getMinuteBucket, nowEpochMs, nowIso8601 } from "../utils/time";
 
 export type { SymbolStates, SymbolStateEntry } from "../types";
 
@@ -57,13 +58,13 @@ export function getSymbolState(symbolStates: SymbolStates, symbol?: string): Sym
 }
 
 export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: number): void {
-  const now = Date.now();
-  const currentBucket = Math.floor(now / 60000);
+  const now = nowEpochMs();
+  const currentBucket = getMinuteBucket(now);
   const candles = state.candles || [];
 
   if (candles.length === 0) {
     state.candles = [{
-      time: now,
+      time: currentBucket * 60000,
       open: targetPrice,
       high: targetPrice,
       low: targetPrice,
@@ -91,7 +92,7 @@ export function aggregateTickIntoCandle(state: SymbolStateEntry, targetPrice: nu
     const openPrice = lastCandle.close;
     const direction = targetPrice > openPrice ? "up" : targetPrice < openPrice ? "down" : "flat";
     candles.push({
-      time: now,
+      time: currentBucket * 60000,
       open: openPrice,
       high: targetPrice,
       low: targetPrice,
@@ -146,7 +147,7 @@ export function updateMarket(
   }
   const targetPrice = rawPrice;
 
-  const now = Date.now();
+  const now = nowEpochMs();
 
   aggregateTickIntoCandle(state, targetPrice);
 
@@ -183,7 +184,7 @@ export function updateMarket(
 
   const tickRecord: Tick = {
     symbol,
-    time: Date.now(),
+    time: now,
     price: state.currentPrice,
     direction,
     open: data.open !== undefined ? Number(data.open) : state.currentPrice,
@@ -201,7 +202,7 @@ export function updateMarket(
   if (state.ticks.length > 150) state.ticks.shift();
 
   state.connection.isEaConnected = true;
-  state.connection.lastPing = new Date().toISOString();
+  state.connection.lastPing = nowIso8601();
   state.connection.broker = data.broker || "MetaTrader 5 Link";
   state.connection.accountNumber = state.connection.accountNumber || data.account || "Simulated MT5 Acc";
   state.connection.balance = data.balance !== undefined ? Number(data.balance) : (state.connection.balance || 1000.0);

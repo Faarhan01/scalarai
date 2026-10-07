@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, Application } from "express";
 import { scalarAiDb } from "../db";
-import { TradeConfig, UpdateMarketPayload } from "../types";
+import { TradeConfig, UpdateMarketPayload, MarketCandleRow, ObservationRow } from "../types";
 import { requireApiKey } from "../middleware/auth";
 
 export function registerMarketRoutes(
@@ -55,16 +55,16 @@ export function registerMarketRoutes(
       let ticks;
       if (from && to) {
         ticks = scalarAiDb.rawQuery(
-          "SELECT * FROM market_ticks WHERE time >= ? AND time <= ? AND (SELECT symbol FROM ea_connections WHERE id = 1) = ? ORDER BY time ASC LIMIT ?",
-          [from, to, symbol, limit]
+          "SELECT * FROM market_ticks WHERE symbol = ? AND time >= ? AND time <= ? ORDER BY time ASC LIMIT ?",
+          [symbol, from, to, limit]
         );
       } else if (from) {
         ticks = scalarAiDb.rawQuery(
-          "SELECT * FROM market_ticks WHERE time >= ? ORDER BY time ASC LIMIT ?",
-          [from, limit]
+          "SELECT * FROM market_ticks WHERE symbol = ? AND time >= ? ORDER BY time ASC LIMIT ?",
+          [symbol, from, limit]
         );
       } else {
-        ticks = scalarAiDb.getTicks(limit);
+        ticks = scalarAiDb.getTicks(limit, symbol);
       }
 
       res.json({
@@ -76,6 +76,72 @@ export function registerMarketRoutes(
       });
     } catch (err: unknown) {
       console.error("Market history error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/market/candles", (req: Request, res: Response) => {
+    try {
+      const symbol = (req.query.symbol as string) || "Step Index";
+      const from = req.query.from ? new Date(req.query.from as string).getTime() : undefined;
+      const to = req.query.to ? new Date(req.query.to as string).getTime() : undefined;
+      const limit = Math.min(Number(req.query.limit) || 1000, 10000);
+
+      const rows = scalarAiDb.getCandles(symbol, from, to, limit);
+      const candles = rows.map((row: MarketCandleRow) => ({
+        time: row.time,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+        direction: row.direction,
+      }));
+
+      res.json({ symbol, candles, count: candles.length, from: from || null, to: to || null });
+    } catch (err: unknown) {
+      console.error("Market candles error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/market/observations", (req: Request, res: Response) => {
+    try {
+      const symbol = req.query.symbol as string | undefined;
+      const from = req.query.from ? new Date(req.query.from as string).getTime() : undefined;
+      const to = req.query.to ? new Date(req.query.to as string).getTime() : undefined;
+      const direction = req.query.direction as string | undefined;
+      const minVelocity = req.query.minVelocity ? Number(req.query.minVelocity) : undefined;
+      const limit = Math.min(Number(req.query.limit) || 500, 5000);
+
+      let rows = scalarAiDb.getObservations(symbol, from, to, limit);
+
+      if (direction) {
+        rows = rows.filter((row) => row.direction === direction);
+      }
+      if (minVelocity !== undefined && Number.isFinite(minVelocity)) {
+        rows = rows.filter((row) => row.velocity >= minVelocity);
+      }
+
+      const observations = rows.map((row: ObservationRow) => {
+        let tags: any[] = [];
+        try { tags = JSON.parse(row.tags || "[]"); } catch { tags = []; }
+        let metadata: Record<string, any> = {};
+        try { metadata = JSON.parse(row.metadata || "{}"); } catch { metadata = {}; }
+        return {
+          id: row.id,
+          timestamp: row.timestamp,
+          direction: row.direction,
+          velocity: row.velocity,
+          price: row.price,
+          tags,
+          metadata,
+        };
+      });
+
+      res.json({ symbol: symbol || null, observations, count: observations.length });
+    } catch (err: unknown) {
+      console.error("Market observations error:", err);
       res.status(500).json({ error: "Internal server error" });
     }
   });

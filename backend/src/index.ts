@@ -119,12 +119,19 @@ async function startServer() {
     console.log(`Step Index Scalper full-stack server running on http://localhost:${PORT}`);
   });
 
+  const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
+
   createBridgeServer(
     server,
     (ws: WebSocket, rawMsg: string) => {
       try {
         const message = JSON.parse(rawMsg.toString());
         if (message.client) store.addLog("SERVER", "SUCCESS", `Bridge client registered: ${message.client} | Status: ${message.status}`);
+        if (message.type === "request_history") {
+          const symbol = message.payload?.symbol || "Step Index";
+          const candles = scalarAiDb.getCandles(symbol, undefined, undefined, 1000);
+          ws.send(JSON.stringify({ type: "history_response", payload: { symbol, candles, count: candles.length } }));
+        }
       } catch {
         // Ignore malformed bridge messages
       }
@@ -134,7 +141,8 @@ async function startServer() {
     },
     (ws: WebSocket) => {
       store.removeBridgeClient(ws);
-    }
+    },
+    allowedOrigin
   );
 
   createDashboardServer(
@@ -155,6 +163,13 @@ async function startServer() {
           store.broadcastTradesUpdate();
         } else if (msg.type === "reset_stats") {
           store.resetStats();
+        } else if (msg.type === "request_history") {
+          const symbol = msg.payload?.symbol || "Step Index";
+          const from = msg.payload?.from ? Number(msg.payload.from) : undefined;
+          const to = msg.payload?.to ? Number(msg.payload.to) : undefined;
+          const limit = Math.min(Number(msg.payload?.limit) || 1000, 10000);
+          const candles = scalarAiDb.getCandles(symbol, from, to, limit);
+          ws.send(JSON.stringify({ type: "history_response", payload: { symbol, candles, count: candles.length, from: from || null, to: to || null } }));
         }
       } catch {
         // Ignore malformed dashboard messages
@@ -165,7 +180,8 @@ async function startServer() {
     },
     (ws: WebSocket) => {
       store.removeDashboardClient(ws);
-    }
+    },
+    allowedOrigin
   );
 
   process.on("uncaughtException", (err) => {

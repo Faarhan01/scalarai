@@ -2,8 +2,10 @@ import { Request, Response } from "express";
 import { McpContext, StrategyMode, TradeRecord, SystemLog } from "./types";
 import { scalarAiDb } from "./db";
 import { evaluateStrategyBacktest } from "./services/strategy";
+import { BacktestEngine } from "./services/strategy-backtest";
 import { updateKnowledgeBaseFromTelemetry, formatKnowledgeBase } from "./services/knowledge";
 import { analyzeMarket, analyzeStrategyPerformance, suggestStrategyOptimizations, recommendStrategyForConditions } from "./services/strategy-research";
+import { parseTimestamp, parseLimit } from "./utils/time";
 
 export interface McpTool {
   name: string;
@@ -337,6 +339,64 @@ const TOOLS: McpTool[] = [
         format: { type: "string", enum: ["json", "csv"], description: "Export format (default json)" },
       },
       required: ["type"],
+    },
+  },
+  {
+    name: "get_market_candles",
+    description: "Get OHLC candles with time range from SQLite market_candles table.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol name (default: Step Index)" },
+        from: { type: "string", description: "Start timestamp (ISO 8601 or epoch ms)" },
+        to: { type: "string", description: "End timestamp (ISO 8601 or epoch ms)" },
+        limit: { type: "number", description: "Max candles (default 1000, max 10000)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_market_observations",
+    description: "Get AI observations with filters.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string" },
+        from: { type: "string" },
+        to: { type: "string" },
+        direction: { type: "string", enum: ["up", "down", "flat"] },
+        minVelocity: { type: "number" },
+        limit: { type: "number" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "generate_observation_insights",
+    description: "Generate insights from observations for a symbol/time range.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol name (default: Step Index)" },
+        from: { type: "string", description: "Start timestamp (optional)" },
+        to: { type: "string", description: "End timestamp (optional)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "backtest_strategy_with_history",
+    description: "Backtest a strategy against historical candle data.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        strategyId: { type: "string", description: "Strategy ID to backtest" },
+        symbol: { type: "string", description: "Symbol to backtest on (default: Step Index)" },
+        from: { type: "string", description: "Start timestamp (ISO 8601)" },
+        to: { type: "string", description: "End timestamp (ISO 8601)" },
+        initialBalance: { type: "number", description: "Initial balance (default 10000)" },
+      },
+      required: ["strategyId", "from", "to"],
     },
   },
 ];
@@ -697,6 +757,104 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             } else {
               result = { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
             }
+            break;
+          }
+          case "get_market_candles": {
+            const symbol = args.symbol || "Step Index";
+            const from = parseTimestamp(args.from);
+            const to = parseTimestamp(args.to);
+            const limit = parseLimit(args.limit, 1000, 10000);
+            const candles = scalarAiDb.getCandles(symbol, from, to, limit);
+            result = { content: [{ type: "text", text: JSON.stringify({ symbol, candles, count: candles.length, from: args.from, to: args.to }, null, 2) }] };
+            break;
+          }
+          case "get_market_observations": {
+            const symbol = args.symbol;
+            const from = parseTimestamp(args.from);
+            const to = parseTimestamp(args.to);
+            const limit = parseLimit(args.limit, 500, 5000);
+            let observations = scalarAiDb.getObservations(symbol, from, to, limit);
+            if (args.direction) {
+              observations = observations.filter(o => o.direction === args.direction);
+            }
+            if (typeof args.minVelocity === "number") {
+              observations = observations.filter(o => o.velocity >= args.minVelocity);
+            }
+            const parsed = observations.map(o => {
+              let tags: any[] = [];
+              try { tags = JSON.parse(o.tags || "[]"); } catch { tags = []; }
+              let metadata: Record<string, any> = {};
+              try { metadata = JSON.parse(o.metadata || "{}"); } catch { metadata = {}; }
+              return {
+                id: o.id,
+                symbol: o.symbol,
+                timestamp: o.timestamp,
+                direction: o.direction,
+                velocity: o.velocity,
+                price: o.price,
+                tags,
+                metadata,
+                createdAt: o.created_at,
+              };
+            });
+            result = { content: [{ type: "text", text: JSON.stringify({ symbol: symbol || "all", observations: parsed, count: parsed.length }, null, 2) }] };
+            break;
+          }
+          case "generate_observation_insights": {
+            const symbol = args.symbol || "Step Index";
+            const from = parseTimestamp(args.from);
+            const to = parseTimestamp(args.to);
+            const insights = ctx.generateInsights(symbol, from, to);
+            result = { content: [{ type: "text", text: JSON.stringify(insights, null, 2) }] };
+            break;
+          }
+          case "backtest_strategy_with_history": {
+            const strategyId = args.strategyId;
+            const symbol = args.symbol || "Step Index";
+            const from = parseTimestamp(args.from);
+            const to = parseTimestamp(args.to);
+            const initialBalance = typeof args.initialBalance === "number" ? args.initialBalance : 10000;
+            if (!strategyId || !from || !to) {
+              return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: "Missing required params: strategyId, from, to" } });
+            }
+            const candles = scalarAiDb.getCandles(symbol, from, to, 10000);
+            if (candles.length === 0) {
+              return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: "No candles found for the specified time range" } });
+            }
+            const strategy = scalarAiDb.getStrategyById(strategyId);
+            if (!strategy) {
+              return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: `Strategy not found: ${strategyId}` } });
+            }
+            const engine = new BacktestEngine();
+            const backtestMode = strategy.mode as unknown as StrategyMode;
+            const engineResult = engine.runBacktest(backtestMode, candles.map(c => ({
+              time: c.time,
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close,
+              direction: c.direction,
+              volume: c.volume || undefined,
+            })), ctx.getConfig());
+
+            engine.saveResult(engineResult);
+            const backtestResult = {
+              strategyId,
+              symbol,
+              from: args.from,
+              to: args.to,
+              totalTrades: engineResult.totalTrades,
+              wins: engineResult.wins,
+              losses: engineResult.losses,
+              winRate: engineResult.winRate,
+              profitFactor: engineResult.profitFactor,
+              maxDrawdown: engineResult.maxDrawdown,
+              avgWin: engineResult.avgWin,
+              avgLoss: engineResult.avgLoss,
+              finalBalance: engineResult.finalBalance,
+              trades: engineResult.trades,
+            };
+            result = { content: [{ type: "text", text: JSON.stringify(backtestResult, null, 2) }] };
             break;
           }
           default: {

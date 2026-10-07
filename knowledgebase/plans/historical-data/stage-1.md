@@ -1,6 +1,38 @@
 # Historical Data Plan — Stage 1: Time Utility & Candle Timestamps
 
-## Status: ⚠️ PARTIALLY IMPLEMENTED — Integration incomplete
+## Status: ✅ COMPLETED
+
+## What Was Fixed
+
+### 1. `backend/src/services/market-ingestion.ts`
+
+**Changes:**
+- Imported `getMinuteBucket`, `nowEpochMs`, `nowIso8601` from `../utils/time`
+- Replaced `Date.now()` with `nowEpochMs()` in `aggregateTickIntoCandle()` and `updateMarket()`
+- Replaced inline `Math.floor(now / 60000)` with `getMinuteBucket(now)`
+- **Fixed critical bug:** Candle `time` now uses `currentBucket * 60000` (minute-aligned) instead of `Date.now()` (exact tick time)
+- Replaced `new Date().toISOString()` with `nowIso8601()` for `connection.lastPing`
+- Changed `tickRecord.time` from `Date.now()` to `now`
+
+**Impact:** Frontend chart now displays candles at correct x-positions. Lightweight-charts expects minute-aligned timestamps.
+
+### 2. `frontend/src/components/charts/CandlestickChart/CandlestickChart.tsx`
+
+**No changes made.** The existing inline time formatting (`HH:MM` 24-hour format) is correct and more appropriate than `formatTime()` which uses locale-dependent `toLocaleTimeString()`. The plan's suggestion to use `formatTime()` would actually break the chart's time axis consistency.
+
+## Verification
+
+- [x] `npx tsc --noEmit` passes
+- [x] Candle `time` field is minute-aligned (`currentBucket * 60000`)
+- [x] `getMinuteBucket()` used instead of inline math
+- [x] `nowEpochMs()` used instead of `Date.now()`
+- [x] Server starts without errors
+- [x] EA continues pushing ticks
+
+## Critical Bug Fixed
+
+**Before:** Candle `time` was set to `Date.now()` (exact tick arrival time), causing incorrect chart x-positions.
+**After:** Candle `time` is set to `currentBucket * 60000` (start of minute), ensuring correct chart alignment.
 
 ## Objective
 

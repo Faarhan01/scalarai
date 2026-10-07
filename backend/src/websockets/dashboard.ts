@@ -6,7 +6,8 @@ export function createDashboardServer(
   sendInit: () => string,
   onMessage: (ws: WebSocket, rawMsg: string) => void,
   onConnect?: (ws: WebSocket) => void,
-  onClose?: (ws: WebSocket) => void
+  onClose?: (ws: WebSocket) => void,
+  allowedOrigin?: string
 ) {
   const wssDashboard = new WebSocketServer({ noServer: true });
 
@@ -14,6 +15,11 @@ export function createDashboardServer(
     try {
       const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
       if (urlObj.pathname === "/ws/live" || urlObj.pathname === "/ws" || urlObj.pathname === "/live-feed") {
+        const origin = request.headers.origin;
+        if (allowedOrigin && origin && origin !== allowedOrigin) {
+          socket.destroy();
+          return;
+        }
         wssDashboard.handleUpgrade(request, socket, head, (ws: WebSocket) => {
           wssDashboard.emit("connection", ws, request);
         });

@@ -50,3 +50,14 @@ export function nowEpochMs(): number {
 export function nowIso8601(): string {
   return toIso8601(new Date());
 }
+
+export function parseTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function parseLimit(value: number | unknown, fallback: number, max: number): number {
+  const n = typeof value === "number" ? value : fallback;
+  return Math.min(n, max);
+}

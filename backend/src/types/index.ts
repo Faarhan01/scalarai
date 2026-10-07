@@ -253,6 +253,41 @@ export interface AiStudyFeedPayload {
   averageVelocity: number;
 }
 
+export interface Observation {
+  id: string;
+  symbol: string;
+  timestamp: number;
+  direction: "up" | "down" | "flat";
+  velocity: number;
+  price: number;
+  candleId?: number;
+  tags: string[];
+  metadata: Record<string, any>;
+  createdAt: string;
+}
+
+export interface ObservationFilters {
+  symbol?: string;
+  from?: number;
+  to?: number;
+  direction?: "up" | "down" | "flat";
+  minVelocity?: number;
+  maxVelocity?: number;
+  tags?: string[];
+  limit?: number;
+}
+
+export interface ObservationInsights {
+  symbol: string;
+  totalObservations: number;
+  avgVelocity: number;
+  peakVelocity: number;
+  directionDistribution: { up: number; down: number; flat: number };
+  topActiveHours: { hour: number; count: number }[];
+  velocityClusters: { min: number; max: number; count: number }[];
+  suggestedStrategies: string[];
+}
+
 export interface McpContext {
   getStatus: () => FullStatusPayload;
   getAiStudyFeed: () => Promise<AiStudyFeedPayload>;
@@ -272,6 +307,9 @@ export interface McpContext {
   getTradingState: () => TradingState;
   getBridgeState: () => BridgeState;
   getCalibrationState: () => CalibrationState;
+  getObservations: (filters?: ObservationFilters) => Observation[];
+  generateInsights: (symbol: string, from?: number, to?: number) => ObservationInsights;
+  backtestStrategyWithHistory: (strategyId: string, symbol: string, from: number, to: number, initialBalance?: number) => any;
 }
 
 export interface AppStoreReadOnly {

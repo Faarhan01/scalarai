@@ -116,15 +116,17 @@ int OnInit()
    glStochHandle   = iStochastic(_Symbol, _Period, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
    glAtrHandle     = iATR(_Symbol, _Period, 14);
 
-   if(glEmaFastHandle == INVALID_HANDLE || glEmaSlowHandle == INVALID_HANDLE ||
-      glAdxHandle == INVALID_HANDLE || glBbHandle == INVALID_HANDLE ||
-      glStochHandle == INVALID_HANDLE || glAtrHandle == INVALID_HANDLE)
-     {
-      Print("CRITICAL: Failed to create mathematical indicator handles!");
-      return(INIT_FAILED);
-     }
-   
-   // Create indicator comments on chart
+    if(glEmaFastHandle == INVALID_HANDLE || glEmaSlowHandle == INVALID_HANDLE ||
+       glAdxHandle == INVALID_HANDLE || glBbHandle == INVALID_HANDLE ||
+       glStochHandle == INVALID_HANDLE || glAtrHandle == INVALID_HANDLE)
+      {
+       Print("CRITICAL: Failed to create mathematical indicator handles!");
+       return(INIT_FAILED);
+      }
+    
+    PushHistoricalCandles(1000);
+    
+    // Create indicator comments on chart
    Comment("==============================================\\n" +
            "  STEP INDEX QUANTUM EA ONLINE\\n" +
            "  Status: INITIALIZED & INDICATORS LOADED\\n" +
@@ -514,6 +516,64 @@ void BroadcastMarketUpdate()
          Print("Ensure URL is allowed in Options: ", InpDashboardUrl);
       }
      }
+  }
+
+//+------------------------------------------------------------------+
+//| Push historical candle data to backend on connection             |
+//+------------------------------------------------------------------+
+void PushHistoricalCandles(int count)
+  {
+   if(count > 1000) count = 1000;
+   if(count <= 0) return;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   int copied = CopyRates(_Symbol, _Period, 0, count, rates);
+   if(copied <= 0)
+     {
+      Print("[HISTORY] CopyRates failed. Copied: ", copied, ". Broker history may be unavailable.");
+      return;
+     }
+
+   string url = InpWebServerUrl + "/api/update-market";
+   string headers = "Content-Type: application/json\r\n";
+   int timeout = 5000;
+
+   for(int i = copied - 1; i >= 0; i--)
+     {
+      string direction = rates[i].close > rates[i].open ? "up" :
+                         rates[i].close < rates[i].open ? "down" : "flat";
+
+      string payload = StringFormat(
+         "{\\"symbol\\":\\"%s\\",\\"time\\":%lld,\\"open\\":%.4f,\\"high\\":%.4f,\\"low\\":%.4f,\\"close\\":%.4f,\\"volume\\":%lld,\\"direction\\":\\"%s\\"}",
+         _Symbol,
+         (long)rates[i].time,
+         rates[i].open,
+         rates[i].high,
+         rates[i].low,
+         rates[i].close,
+         (long)rates[i].tick_volume,
+         direction
+      );
+
+      char post[], result[];
+      string resultHeaders;
+      StringToCharArray(payload, post);
+      ArrayResize(post, ArraySize(post) - 1);
+
+      ResetLastError();
+      int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
+      if(res == -1)
+        {
+         int err = _LastError;
+         if(err != 4014 && err != 5200 && err != 5203)
+           {
+            Print("[HISTORY] WebRequest push failed for bar ", i, ". Error: ", err);
+           }
+        }
+     }
+
+   Print("[HISTORY] Pushed ", copied, " historical candles to backend.");
   }
 
 //+------------------------------------------------------------------+

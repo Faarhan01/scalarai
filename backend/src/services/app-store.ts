@@ -1,13 +1,15 @@
-import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder, AppStoreReadOnly, TradingState, BridgeState, CalibrationState } from "../types";
+import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder, AppStoreReadOnly, TradingState, BridgeState, CalibrationState, Observation, ObservationFilters, ObservationInsights, SymbolStateEntry, StrategyMode } from "../types";
 import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState } from "./market-ingestion";
 import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
 import { evaluateSimulatedStrategy, openSimulatedPosition, closeSimulatedPosition, AppCallbacks, TradeState } from "./trade-execution";
 import { getDefaultTradeConfig, getDefaultAiKnowledgeBase, getDefaultAiSynthesizedStrategy, createSystemLog } from "./defaults";
+import { BacktestEngine, BacktestCandle } from "./strategy-backtest";
 import { createActor } from "xstate";
 import { WebSocket } from "ws";
 import { normalizeIp } from "../utils/ip";
 import { tradingMachine, bridgeMachine, calibrationMachine, TradingMachineService, BridgeMachineService, CalibrationMachineService } from "./trading-machine";
+import { ObservationsService } from "./observations";
 
 export class AppStore implements AppStoreReadOnly {
   private tradeConfig: TradeConfig;
@@ -30,6 +32,7 @@ export class AppStore implements AppStoreReadOnly {
   private tradingState: TradingMachineService;
   private bridgeState: BridgeMachineService;
   private calibrationState: CalibrationMachineService;
+  private observationsService: ObservationsService;
 
   constructor() {
     this.tradeConfig = getDefaultTradeConfig();
@@ -58,6 +61,7 @@ export class AppStore implements AppStoreReadOnly {
     this.tradingState = createActor(tradingMachine).start();
     this.bridgeState = createActor(bridgeMachine).start();
     this.calibrationState = createActor(calibrationMachine).start();
+    this.observationsService = new ObservationsService(scalarAiDb);
   }
 
   get config(): TradeConfig { return this.tradeConfig; }
@@ -298,6 +302,24 @@ export class AppStore implements AppStoreReadOnly {
       // quiet persistence
     }
 
+    // Store observation if velocity is significant
+    if (numVelocity > 0.05) {
+      this.observationsService.storeObservation({
+        symbol,
+        timestamp: Date.now(),
+        direction: state.lastDirection,
+        velocity: numVelocity,
+        price: targetPrice,
+        tags: this.generateObservationTags(state, numVelocity, state.lastDirection),
+        metadata: {
+          buyLocked: isBuyLocked,
+          sellLocked: isSellLocked,
+          spread: data.spread,
+          session: data.session,
+        }
+      });
+    }
+
     if (this.tradeConfig.isActive) {
       evaluateSimulatedStrategy(this.buildTradeState(), this).catch((err) => {
         console.error("Strategy evaluation error on tick:", err);
@@ -408,7 +430,47 @@ export class AppStore implements AppStoreReadOnly {
       getTradingState: () => this.getTradingState(),
       getBridgeState: () => this.getBridgeState(),
       getCalibrationState: () => this.getCalibrationState(),
+      getObservations: (filters?: ObservationFilters) => this.observationsService.getObservations(filters),
+      generateInsights: (symbol: string, from?: number, to?: number) => this.observationsService.generateInsights(symbol, { from, to }),
+      backtestStrategyWithHistory: (strategyId: string, symbol: string, from: number, to: number, initialBalance?: number) => {
+        const candles = scalarAiDb.getCandles(symbol, from, to, 10000);
+        if (candles.length === 0) return { error: "No candles found" };
+
+        const strategy = scalarAiDb.getStrategyById(strategyId);
+        if (!strategy) return { error: "Strategy not found" };
+
+        const engine = new BacktestEngine();
+        const backtestMode = strategy.mode as unknown as StrategyMode;
+        const result = engine.runBacktest(backtestMode, candles.map(c => ({
+          time: c.time,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          direction: c.direction,
+          volume: c.volume || undefined,
+        })), this.config);
+
+        engine.saveResult(result);
+        return result;
+      },
     };
+  }
+
+  private generateObservationTags(state: SymbolStateEntry, velocity: number, direction: string): string[] {
+    const tags: string[] = [];
+    if (velocity > 0.3) tags.push("high_velocity");
+    else if (velocity > 0.15) tags.push("medium_velocity");
+    else tags.push("low_velocity");
+
+    if (direction === "up") tags.push("bullish");
+    else if (direction === "down") tags.push("bearish");
+
+    const hour = new Date().getHours();
+    if (hour >= 9 && hour <= 12) tags.push("morning_session");
+    else if (hour >= 14 && hour <= 17) tags.push("afternoon_session");
+
+    return tags;
   }
 
   loadAiSynthesizedStrategy(): void {
