@@ -130,14 +130,18 @@ export const calibrationMachine = createMachine({
 });
 ```
 
+**Note:** The `active` state is NEW — current code only uses `"optimized"` and `"calibrating"` status strings. Adding `active` requires frontend changes to display the new state.
+
 **Current calibration logic:**
 - `app-store.ts:171`: `this.aiKnowledgeBase.totalObservations += 1`
 - `app-store.ts:177`: `if (obs % 25 === 0) persistAiKnowledge(this.aiKnowledgeBase);`
 - `app-store.ts:303`: `this.aiKnowledgeBase.totalObservations >= 20 ? "optimized" : "calibrating"`
+- `index.ts:87-88`: same check for AI study feed status
 
 **Integration:**
 - In `updateMarket()` at line 171, also send `CALIBRATE` event to calibration machine
 - In `index.ts:87-93`, use machine state instead of direct check
+- Frontend `App.tsx` must be updated to handle new `active` state if added
 
 ## Implementation Steps
 

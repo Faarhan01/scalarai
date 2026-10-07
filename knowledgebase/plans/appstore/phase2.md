@@ -134,11 +134,13 @@ No change needed — already accepts function signatures.
 export function registerStatusRoute(
   app: Application,
   getStatus: AppStoreReadOnly["getFullStatusPayload"],
-  switchSymbol: AppStoreReadOnly["switchSymbol"],  // new method from Phase 1
+  switchSymbol: (symbol: string) => void,  // mutation method, not part of AppStoreReadOnly
   getAndClearPendingOrders?: AppStoreReadOnly["getAndClearPendingOrders"],
   apiKey?: string
 )
 ```
+
+Note: `switchSymbol` is a mutation method and is NOT part of `AppStoreReadOnly`. It's passed directly from `index.ts` as `store.switchSymbol`.
 
 #### `routes/mcp.ts`
 

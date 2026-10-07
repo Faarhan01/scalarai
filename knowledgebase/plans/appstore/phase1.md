@@ -140,16 +140,19 @@ get webRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastT
 
 Note: `mt5BridgeClients` and `webDashboardClients` return `ReadonlySet<WebSocket>` to prevent external code from calling `.add()`/`.delete()` on the set reference. However, `ReadonlySet` still allows `.has()` and `.size`, which is what `index.ts` needs.
 
+**Known limitation:** Getters return objects by reference. A consumer could still mutate nested properties (e.g., `store.config.lotSize = 999`). Phase 1 prevents direct field reassignment (e.g., `store.tradesList = []`), not deep mutation. Deep protection would require returning clones or using Proxies (see Phase 4).
+
 ### 3. Add setter methods for fields that `index.ts` writes
 
 For `webRequestTest`, add a dedicated update method instead of exposing the whole object:
 
 ```ts
-updateWebRequestTest(update: { status?: "idle" | "pending" | "success" | "failed"; error?: string; details?: string; triggerTest?: boolean }): void {
+updateWebRequestTest(update: { status?: "idle" | "pending" | "success" | "failed"; error?: string; details?: string; triggerTest?: boolean; lastTested?: string }): void {
   if (update.status !== undefined) this.webRequestTest.status = update.status;
   if (update.error !== undefined) this.webRequestTest.error = update.error;
   if (update.details !== undefined) this.webRequestTest.details = update.details;
   if (update.triggerTest !== undefined) this.webRequestTest.triggerTest = update.triggerTest;
+  if (update.lastTested !== undefined) this.webRequestTest.lastTested = update.lastTested;
 }
 ```
 
@@ -161,7 +164,7 @@ store.broadcastToDashboards({ type: "webrequest_test", testState: store.webReque
 
 And lines 75-80 with:
 ```ts
-store.updateWebRequestTest({ status: report.status as "idle" | "pending" | "success" | "failed", error: report.error || "", details: report.details || "", triggerTest: false });
+store.updateWebRequestTest({ status: report.status as "idle" | "pending" | "success" | "failed", error: report.error || "", details: report.details || "", lastTested: new Date().toISOString(), triggerTest: false });
 store.broadcastToDashboards({ type: "webrequest_test", testState: store.webRequestTest });
 ```
 
