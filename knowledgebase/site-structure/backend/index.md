@@ -103,7 +103,7 @@ For detailed information on specific areas, see:
 
 - [Routes](routes.md) — all Express routes, endpoints, request/response shapes
 - [WebSockets](websockets.md) — WebSocket servers, protocols, message types
-- [Services](services.md) — service layer details, AppStore, strategy, trade execution, market ingestion
+- [Services](services.md) — service layer details, strategy, trade execution, market ingestion
 - [Middleware](middleware.md) — auth, CORS, error handling, logging, rate limiting
 - [Utils](utils.md) — utility functions (auth, IP, time, validators, response)
 - [Database](db.md) — SQLite layer, schema, migrations, queries, data retention
