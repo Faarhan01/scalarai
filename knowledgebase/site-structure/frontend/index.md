@@ -88,7 +88,8 @@ frontend/src/
 
 ### `App.tsx` — Root Component (~677 lines)
 
-- Exports `ErrorBoundary` class (class component with error catching)
+- Functional component (default export)
+- `ErrorBoundary` class is exported from `components/layout/AppShell.tsx`, not `App.tsx`
 - Orchestrates layout + hooks
 - Not fully decomposed yet; still imports most components directly
 - Manages tab navigation state locally

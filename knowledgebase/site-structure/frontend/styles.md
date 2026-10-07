@@ -12,7 +12,7 @@ Tailwind `@theme` directives, `:root` CSS variables for tokens, base reset, anim
 - `@theme` block defining custom colors, spacing, typography, shadows
 - `:root` CSS variables for tokens (font families, colors)
 - Base reset styles
-- Animations: `fade-in`, `slide-up`, `modalScaleIn`, `shimmer`
+- Animations: `fade-in` (from `fadeIn` keyframes in globals.css), `modalScaleIn` (from `modalScaleIn` keyframes in components.css), `shimmer` (skeleton loading)
 
 ### `components.css`
 

@@ -137,7 +137,7 @@ export interface TradingControls {
 - `closeAllPositions()`: tries `close_all` via WS, falls back to `POST /api/reset-stats`
 - `resetStats()`: tries `reset_stats` via WS, falls back to `POST /api/reset-stats`
 
-## `useChartData.ts` (54 lines)
+## `useChartData.ts` (58 lines)
 
 Transforms raw ticks/candles for chart libraries.
 
@@ -211,7 +211,7 @@ export function useNetworkStatus(): { ... }
 - Tracks `wsConnected`, `latency`, `pingLatency`
 - Exposes `updatePing(ms)` to update latency from WS pong
 
-## `useErrorHandler.ts` (26 lines)
+## `useErrorHandler.ts` (70 lines)
 
 Global error boundary helper.
 
@@ -222,12 +222,14 @@ export interface AppError {
   timestamp: number;
 }
 
-export function useErrorHandler(): { errors: AppError[]; showError: (message) => void; clearError: (id) => void }
+export function useErrorHandler(): { errors: AppError[]; showError: (message: string | Error | unknown) => void; clearError: (id: string) => void }
 ```
 
-- Stores up to 4 errors in state
-- `showError(message)` adds error with UUID, auto-removes after 5s
-- `clearError(id)` manually removes error
+- Stores up to 3 errors in state
+- `showError(message)` adds error with generated ID, deduplicates within 3 seconds, auto-removes after 5s
+- `clearError(id)` manually removes error and clears its timeout
+- Uses `crypto.randomUUID()` when available, falls back to timestamp-based ID
+- Cleans up all timeouts on unmount
 
 ## `useSymbolState.ts` (20 lines)
 
