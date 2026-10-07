@@ -25,7 +25,7 @@ export function registerEaRoutes(
       const currentConfig = getConfig();
       const mql5Code = generateMql5Code(appUrl, currentConfig);
 
-      res.setHeader("Content-Disposition", "attachment; filename=StepIndex_AI_Scalper_EA.mq5");
+      res.setHeader("Content-Disposition", "attachment; filename=ScalarAI_MultiAsset_EA.mq5");
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.send(mql5Code);
     } catch (err: unknown) {

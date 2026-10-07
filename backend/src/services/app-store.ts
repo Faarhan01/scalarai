@@ -115,6 +115,24 @@ export class AppStore implements AppStoreReadOnly {
   switchSymbol(symbol: string): void {
     this.activeSymbol = symbol;
     this.symbolStates.activeSymbol = symbol;
+    const state = getSymbolState(this.symbolStates, symbol);
+    if (state.candles.length === 0) {
+      try {
+        const rows = scalarAiDb.getCandles(symbol, undefined, undefined, 200);
+        if (rows.length > 0) {
+          state.candles = rows.map((r) => ({
+            time: r.time,
+            open: r.open,
+            high: r.high,
+            low: r.low,
+            close: r.close,
+            volume: r.volume,
+            direction: (r.direction || (r.close >= r.open ? "up" : "down")) as "up" | "down",
+          }));
+          state.currentPrice = rows[rows.length - 1].close;
+        }
+      } catch {}
+    }
     this.addLog("SERVER", "INFO", `Active market symbol switched to: ${symbol}`);
     this.broadcastToDashboards({ type: "init", payload: this.getFullStatusPayload() });
   }
@@ -424,8 +442,15 @@ export class AppStore implements AppStoreReadOnly {
       synthesizeStrategy: () => Promise.resolve(this.aiSynthesizedStrategy),
       updateSettings: async (params: Partial<TradeConfig>) => Promise.resolve(this.updateSettings(params)),
       toggleTrading: async (isActive: boolean) => Promise.resolve(this.toggleTrading(isActive)),
-      placeTrade: async (type: "BUY" | "SELL", reason?: string) => this.placeTrade(type, reason || "MCP initiated trade"),
+      placeTrade: async (
+        type: "BUY" | "SELL",
+        reason?: string,
+        options?: { symbol?: string; lotSize?: number; sl?: number; tp?: number }
+      ) => this.placeTrade(type, reason || "MCP initiated trade", options),
       closeTrade: async (tradeId: string) => this.closeTrade(tradeId),
+      closeAllTrades: async (symbol?: string) => this.closeAllTrades(symbol),
+      switchSymbol: (symbol: string) => this.switchSymbol(symbol),
+      getSymbols: () => this.getSymbolsList(),
       resetStats: async () => Promise.resolve(this.resetStats()),
       getTradingState: () => this.getTradingState(),
       getBridgeState: () => this.getBridgeState(),
@@ -576,10 +601,17 @@ export class AppStore implements AppStoreReadOnly {
     return this.tradeConfig;
   }
 
-  async placeTrade(type: "BUY" | "SELL", reason: string): Promise<{ success: boolean; message: string }> {
+  async placeTrade(
+    type: "BUY" | "SELL",
+    reason: string,
+    options?: { symbol?: string; lotSize?: number; sl?: number; tp?: number }
+  ): Promise<{ success: boolean; message: string; ticket?: number }> {
     const tradeState = this.buildTradeState();
-    await openSimulatedPosition(tradeState, type, reason, this);
-    return { success: true, message: `Trade signal sent: ${type}` };
+    const ticket = await openSimulatedPosition(tradeState, type, reason, this, options);
+    if (ticket !== undefined) {
+      return { success: true, message: `Trade #${ticket} placed: ${type} on ${options?.symbol || this.activeSymbol}`, ticket };
+    }
+    return { success: false, message: `Trade execution blocked by risk controls or opposite positions.` };
   }
 
   async closeTrade(tradeId: string): Promise<{ success: boolean; message: string }> {
@@ -588,6 +620,91 @@ export class AppStore implements AppStoreReadOnly {
     const tradeState = this.buildTradeState();
     closeSimulatedPosition(tradeState, trade, "Closed via MCP request.", this);
     return { success: true, message: `Trade ${tradeId} closed` };
+  }
+
+  async closeAllTrades(symbol?: string): Promise<{ success: boolean; closedCount: number; message: string }> {
+    const targetSymbol = symbol?.trim();
+    const openTrades = this.tradesList.filter((t: TradeRecord) => t.status === "OPEN" && (!targetSymbol || t.symbol === targetSymbol));
+    const tradeState = this.buildTradeState();
+    openTrades.forEach((t: TradeRecord) => closeSimulatedPosition(tradeState, t, "Liquidated via command.", this));
+    return { success: true, closedCount: openTrades.length, message: `Liquidated ${openTrades.length} open position(s).` };
+  }
+
+  getSymbolsList(): Array<{ symbol: string; isConnected: boolean; currentPrice: number; tickCount: number; digits?: number | null; tickSize?: number | null }> {
+    const known = new Set<string>();
+    Array.from(this.symbolStates.map.keys()).forEach((s) => known.add(s));
+    scalarAiDb.getKnownSymbols().forEach((s) => known.add(s));
+
+    return Array.from(known).map((symbol) => {
+      const state = this.symbolStates.map.get(symbol);
+      return {
+        symbol,
+        isConnected: !!state?.connection.isEaConnected,
+        currentPrice: state?.currentPrice || 0,
+        tickCount: state?.ticks.length || 0,
+        digits: state?.connection.symbolDigits ?? null,
+        tickSize: state?.connection.symbolTickSize ?? null,
+      };
+    });
+  }
+
+  ingestBulkCandles(
+    symbolName: string,
+    candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume?: number; direction?: string }>,
+    metadata?: { digits?: number; tickSize?: number }
+  ): void {
+    const symbol = (symbolName && symbolName.trim()) || this.activeSymbol || "Step Index";
+    if (!this.activeSymbol || this.activeSymbol === "") {
+      this.activeSymbol = symbol;
+    }
+    const state = getSymbolState(this.symbolStates, symbol);
+    state.connection.isEaConnected = true;
+    state.connection.symbol = symbol;
+    state.connection.lastPing = new Date().toISOString();
+    if (metadata?.digits !== undefined) state.connection.symbolDigits = metadata.digits;
+    if (metadata?.tickSize !== undefined) state.connection.symbolTickSize = metadata.tickSize;
+
+    if (candles && candles.length > 0) {
+      const latest = candles[candles.length - 1];
+      state.currentPrice = latest.close;
+      state.candles = candles.slice(-500).map((c) => ({
+        time: c.time > 1000000000000 ? c.time : c.time * 1000,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume || 0,
+        direction: (c.close >= c.open ? "up" : "down") as "up" | "down",
+      }));
+      state.ticks = candles.slice(-100).map((c) => ({
+        time: c.time > 1000000000000 ? c.time : c.time * 1000,
+        price: c.close,
+        direction: (c.close >= c.open ? "up" : "down") as "up" | "down",
+      }));
+
+      const candleRows = candles.map((c) => {
+        const timeMs = c.time > 1000000000000 ? c.time : c.time * 1000;
+        return {
+          symbol,
+          time: timeMs,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume ?? 0,
+          direction: (c.direction || (c.close >= c.open ? "up" : "down")) as "up" | "down" | "flat",
+          minute_bucket: Math.floor(timeMs / 60000) * 60000,
+        };
+      });
+      scalarAiDb.insertCandlesBatch(candleRows);
+      this.addLog("EA", "SUCCESS", `Loaded ${candles.length} historical bars for ${symbol} from MT5.`);
+    }
+
+    try {
+      scalarAiDb.upsertEaConnection(state.connection);
+    } catch {}
+
+    this.broadcastToDashboards({ type: "init", payload: this.getFullStatusPayload() });
   }
 
   resetStats(): void {

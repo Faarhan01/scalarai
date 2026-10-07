@@ -6,6 +6,7 @@ import { BacktestEngine } from "./services/strategy-backtest";
 import { updateKnowledgeBaseFromTelemetry, formatKnowledgeBase } from "./services/knowledge";
 import { analyzeMarket, analyzeStrategyPerformance, suggestStrategyOptimizations, recommendStrategyForConditions } from "./services/strategy-research";
 import { parseTimestamp, parseLimit } from "./utils/time";
+import { STRATEGY_TEMPLATES, createStrategyFromTemplate } from "./services/strategy-templates";
 
 export interface McpTool {
   name: string;
@@ -29,7 +30,7 @@ export interface McpToolCallParams {
   arguments: Record<string, any>;
 }
 
-const TOOLS: McpTool[] = [
+export const TOOLS: McpTool[] = [
   {
     name: "get_system_status",
     description: "Get full ScalarAI system status: config, connection, trades, logs, stats, AI strategy, and symbol states.",
@@ -191,12 +192,16 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "place_validated_trade",
-    description: "Place a BUY or SELL trade. Gatekeeper rules and strategy rules are applied automatically.",
+    description: "Place a BUY or SELL trade. Supports custom symbol, lot size, SL, and TP. Dispatches signal to MT5 EA and dashboard.",
     inputSchema: {
       type: "object",
       properties: {
-        type: { type: "string", enum: ["BUY", "SELL"] },
-        reason: { type: "string" },
+        type: { type: "string", enum: ["BUY", "SELL"], description: "Order direction: BUY or SELL" },
+        symbol: { type: "string", description: "Target symbol name (default: current active symbol)" },
+        lotSize: { type: "number", description: "Lot volume to trade (default: configured lot size)" },
+        sl: { type: "number", description: "Stop loss in points (optional)" },
+        tp: { type: "number", description: "Take profit in points (optional)" },
+        reason: { type: "string", description: "AI rationale for the trade execution" },
       },
       required: ["type"],
     },
@@ -205,6 +210,44 @@ const TOOLS: McpTool[] = [
     name: "close_trade",
     description: "Close an open trade by its ID.",
     inputSchema: { type: "object", properties: { tradeId: { type: "string" } }, required: ["tradeId"] },
+  },
+  {
+    name: "close_all_trades",
+    description: "Close all open positions immediately (globally or for a specific symbol).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Optional symbol to liquidate (if omitted, liquidates all symbols)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_symbols",
+    description: "Get all market symbols connected to the MT5 EA with prices, connection status, digits, and tick counts.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "switch_active_symbol",
+    description: "Switch the active market symbol on the platform dashboard.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol name to activate" },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
+    name: "get_ea_telemetry",
+    description: "Get real-time MetaTrader 5 Expert Advisor connection metrics: account login, company/broker, balance, equity, margin, spread, digits, ping.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Optional symbol to query EA connection for (default: active symbol)" },
+      },
+      required: [],
+    },
   },
   {
     name: "reset_stats",
@@ -419,9 +462,11 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
       return res.status(400).json({ jsonrpc: "2.0", error: { code: -32600, message: "Invalid Request" } });
     }
 
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith(`Bearer ${expectedApiKey}`)) {
-      return res.status(401).json({ jsonrpc: "2.0", id: body.id ?? null, error: { code: -32001, message: "Unauthorized: Invalid or missing Bearer token" } });
+    if (expectedApiKey && expectedApiKey.trim().length > 0) {
+      const authHeader = req.headers.authorization || "";
+      if (!authHeader.startsWith(`Bearer ${expectedApiKey}`)) {
+        return res.status(401).json({ jsonrpc: "2.0", id: body.id ?? null, error: { code: -32001, message: "Unauthorized: Invalid or missing Bearer token" } });
+      }
     }
 
     const id = body.id ?? null;
@@ -567,6 +612,7 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
           case "get_trade_history": {
             let trades = ctx.getTrades();
             if (args.status) trades = trades.filter((t: TradeRecord) => t.status === args.status);
+            if (args.symbol) trades = trades.filter((t: TradeRecord) => t.symbol?.toLowerCase() === args.symbol.toLowerCase());
             const limit = typeof args.limit === "number" ? args.limit : 100;
             result = { content: [{ type: "text", text: JSON.stringify(trades.slice(0, limit), null, 2) }] };
             break;
@@ -583,7 +629,18 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             if (!args.type || !["BUY", "SELL"].includes(args.type)) {
               return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: type must be BUY or SELL" } });
             }
-            const tradeResult = await ctx.placeTrade(args.type, typeof args.reason === "string" ? args.reason : "MCP initiated trade");
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const targetSymbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
+            const tradeResult = await ctx.placeTrade(
+              args.type,
+              typeof args.reason === "string" ? args.reason : "MCP AI automated trade execution",
+              {
+                symbol: targetSymbol,
+                lotSize: typeof args.lotSize === "number" ? args.lotSize : undefined,
+                sl: typeof args.sl === "number" ? args.sl : undefined,
+                tp: typeof args.tp === "number" ? args.tp : undefined,
+              }
+            );
             result = { content: [{ type: "text", text: JSON.stringify(tradeResult, null, 2) }] };
             break;
           }
@@ -595,6 +652,33 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             result = { content: [{ type: "text", text: JSON.stringify(closeResult, null, 2) }] };
             break;
           }
+          case "close_all_trades": {
+            const closeAllResult = await ctx.closeAllTrades(args.symbol);
+            result = { content: [{ type: "text", text: JSON.stringify(closeAllResult, null, 2) }] };
+            break;
+          }
+          case "get_symbols": {
+            const symbolsList = ctx.getSymbols();
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            result = { content: [{ type: "text", text: JSON.stringify({ activeSymbol, symbols: symbolsList, count: symbolsList.length }, null, 2) }] };
+            break;
+          }
+          case "switch_active_symbol": {
+            if (!args.symbol) {
+              return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: symbol is required" } });
+            }
+            ctx.switchSymbol(args.symbol);
+            result = { content: [{ type: "text", text: JSON.stringify({ success: true, activeSymbol: args.symbol }, null, 2) }] };
+            break;
+          }
+          case "get_ea_telemetry": {
+            const status = ctx.getStatus();
+            const targetSymbol = (args.symbol && args.symbol.trim()) || status.activeSymbol;
+            const symState = status.symbolStates.find((s: any) => s.symbol === targetSymbol);
+            const connection = symState?.connection || status.connection;
+            result = { content: [{ type: "text", text: JSON.stringify({ symbol: targetSymbol, connection, isBridgeConnected: status.isBridgeConnected }, null, 2) }] };
+            break;
+          }
           case "reset_stats": {
             await ctx.resetStats();
             result = { content: [{ type: "text", text: "Stats reset successfully." }] };
@@ -602,15 +686,24 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
           }
           case "get_market_telemetry": {
             const limit = typeof args.limit === "number" ? args.limit : 100;
-            const symbol = args.symbol || "Step Index";
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
             const state = scalarAiDb.getAiKnowledge();
-            result = { content: [{ type: "text", text: JSON.stringify({ symbol, telemetryCount: state?.totalObservations || 0, knowledge: state }, null, 2) }] };
+            const ticks = scalarAiDb.getTicks(limit, symbol);
+            result = { content: [{ type: "text", text: JSON.stringify({ symbol, telemetryCount: state?.totalObservations || 0, recentTicksCount: ticks.length, knowledge: state }, null, 2) }] };
             break;
           }
           case "get_recent_candles": {
             const limit = typeof args.limit === "number" ? args.limit : 50;
-            const candles = scalarAiDb.rawQuery("SELECT * FROM market_ticks ORDER BY time DESC LIMIT ?", [limit]);
-            result = { content: [{ type: "text", text: JSON.stringify({ candles: candles.reverse() }, null, 2) }] };
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
+            const candles = scalarAiDb.getCandles(symbol, undefined, undefined, limit);
+            if (candles.length > 0) {
+              result = { content: [{ type: "text", text: JSON.stringify({ symbol, candles, count: candles.length }, null, 2) }] };
+            } else {
+              const ticks = scalarAiDb.getTicks(limit, symbol);
+              result = { content: [{ type: "text", text: JSON.stringify({ symbol, ticks, count: ticks.length }, null, 2) }] };
+            }
             break;
           }
           case "analyze_strategy_performance": {
@@ -640,7 +733,8 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             break;
           }
           case "synthesize_ai_strategy": {
-            const symbol = args.symbol || "Step Index";
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
             const state2 = scalarAiDb.getAiKnowledge();
             if (!state2) {
               result = { content: [{ type: "text", text: "No knowledge base found. Initialize it first." }] };
@@ -666,7 +760,8 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             break;
           }
           case "analyze_market": {
-            const symbol = args.symbol || "Step Index";
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
             const knowledge = scalarAiDb.getAiKnowledge();
             if (!knowledge) {
               result = { content: [{ type: "text", text: "No knowledge base found. Initialize it first." }] };
@@ -700,7 +795,6 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             break;
           }
           case "list_strategy_templates": {
-            const { STRATEGY_TEMPLATES } = require("./services/strategy-templates");
             const templates = STRATEGY_TEMPLATES.map(t => ({
               id: t.id,
               name: t.name,
@@ -720,7 +814,6 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
               break;
             }
             try {
-              const { createStrategyFromTemplate } = require("./services/strategy-templates");
               const strategy = createStrategyFromTemplate(templateId, args.overrides);
               scalarAiDb.upsertAiStrategy(strategy);
               result = { content: [{ type: "text", text: JSON.stringify({ success: true, strategy }, null, 2) }] };
@@ -760,7 +853,8 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             break;
           }
           case "get_market_candles": {
-            const symbol = args.symbol || "Step Index";
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
             const from = parseTimestamp(args.from);
             const to = parseTimestamp(args.to);
             const limit = parseLimit(args.limit, 1000, 10000);
@@ -801,7 +895,8 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             break;
           }
           case "generate_observation_insights": {
-            const symbol = args.symbol || "Step Index";
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
             const from = parseTimestamp(args.from);
             const to = parseTimestamp(args.to);
             const insights = ctx.generateInsights(symbol, from, to);
@@ -810,7 +905,8 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
           }
           case "backtest_strategy_with_history": {
             const strategyId = args.strategyId;
-            const symbol = args.symbol || "Step Index";
+            const activeSymbol = ctx.getStatus().activeSymbol;
+            const symbol = (args.symbol && args.symbol.trim()) || activeSymbol || "Step Index";
             const from = parseTimestamp(args.from);
             const to = parseTimestamp(args.to);
             const initialBalance = typeof args.initialBalance === "number" ? args.initialBalance : 10000;

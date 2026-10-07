@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import fs from "fs";
+import path from "path";
 import {
   TradeConfig,
   TradeRecord,
@@ -459,8 +461,7 @@ export class ScalarAiDb {
     const logCount = (this.db.prepare(`SELECT COUNT(*) as count FROM system_logs`).get() as { count: number }).count;
     const tradeCount = (this.db.prepare(`SELECT COUNT(*) as count FROM trades`).get() as { count: number }).count;
     
-    const dbPath = process.cwd() + "/backend/data/scalarai.sqlite";
-    const fs = require("fs");
+    const dbPath = path.join(process.cwd(), "backend/data/scalarai.sqlite");
     const dbSizeBytes = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
     
     return { tickCount, logCount, tradeCount, dbSizeBytes };
@@ -483,20 +484,63 @@ export class ScalarAiDb {
     );
   }
 
+  insertCandlesBatch(candles: MarketCandleRow[]): void {
+    if (!candles || candles.length === 0) return;
+    const stmt = this.db.prepare(
+      `INSERT INTO market_candles (symbol, time, open, high, low, close, volume, direction, minute_bucket) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const insertMany = this.db.transaction((items: MarketCandleRow[]) => {
+      for (const item of items) {
+        stmt.run(
+          item.symbol,
+          item.time,
+          item.open,
+          item.high,
+          item.low,
+          item.close,
+          item.volume ?? null,
+          item.direction,
+          item.minute_bucket
+        );
+      }
+    });
+    insertMany(candles);
+  }
+
+  getKnownSymbols(): string[] {
+    try {
+      const rows = this.db.prepare(
+        `SELECT DISTINCT symbol FROM symbol_connections WHERE symbol IS NOT NULL AND symbol != ''
+         UNION SELECT DISTINCT symbol FROM market_candles WHERE symbol IS NOT NULL AND symbol != ''
+         UNION SELECT DISTINCT symbol FROM market_ticks WHERE symbol IS NOT NULL AND symbol != ''
+         UNION SELECT DISTINCT symbol FROM trades WHERE symbol IS NOT NULL AND symbol != ''`
+      ).all() as Array<{ symbol: string }>;
+      return rows.map((r) => r.symbol).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   getCandles(symbol: string, from?: number, to?: number, limit = 1000): MarketCandleRow[] {
-    let query = `SELECT * FROM market_candles WHERE symbol = ?`;
-    const params: unknown[] = [symbol];
+    const maxLimit = Math.min(limit, 10000);
+    if (from !== undefined && to !== undefined) {
+      return this.db.prepare(
+        `SELECT * FROM market_candles WHERE symbol = ? AND time >= ? AND time <= ? ORDER BY time ASC LIMIT ?`
+      ).all(symbol, from, to, maxLimit) as MarketCandleRow[];
+    }
     if (from !== undefined) {
-      query += ` AND time >= ?`;
-      params.push(from);
+      return this.db.prepare(
+        `SELECT * FROM market_candles WHERE symbol = ? AND time >= ? ORDER BY time ASC LIMIT ?`
+      ).all(symbol, from, maxLimit) as MarketCandleRow[];
     }
     if (to !== undefined) {
-      query += ` AND time <= ?`;
-      params.push(to);
+      return this.db.prepare(
+        `SELECT * FROM (SELECT * FROM market_candles WHERE symbol = ? AND time <= ? ORDER BY time DESC LIMIT ?) ORDER BY time ASC`
+      ).all(symbol, to, maxLimit) as MarketCandleRow[];
     }
-    query += ` ORDER BY time ASC LIMIT ?`;
-    params.push(Math.min(limit, 10000));
-    return this.db.prepare(query).all(...params) as MarketCandleRow[];
+    return this.db.prepare(
+      `SELECT * FROM (SELECT * FROM market_candles WHERE symbol = ? ORDER BY time DESC LIMIT ?) ORDER BY time ASC`
+    ).all(symbol, maxLimit) as MarketCandleRow[];
   }
 
   getLatestCandle(symbol: string): MarketCandleRow | undefined {

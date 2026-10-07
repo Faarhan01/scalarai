@@ -38,20 +38,31 @@ export function generateMql5Code(appUrl?: string, config?: Partial<TradeConfig>)
   const isActive = config?.isActive ?? false;
 
   return `//+------------------------------------------------------------------+
- //|                                     StepIndex_AI_Scalper_EA.mq5   |
- //|                         Copyright 2026, Step Index MT5 Copilot Ltd. |
- //|                                             https://ai.studio/build |
- //+------------------------------------------------------------------+
- #property copyright "Step Index MT5 Copilot"
- #property link      "${escapedUrl}"
- #property version   "1.50"
- #property description "Step Index Ultimate Scalper & Swing EA with Web Live Sync"
- #property description "Reads and streams real market charts directly to the dashboard."
- #property description "IMPORTANT: Add '${escapedUrl}' to MT5 allowed WebRequest URLs!"
+//|                                     ScalarAI_MultiAsset_EA.mq5    |
+//|                         Copyright 2026, Scalar AI Technologies    |
+//|                                             https://ai.studio/build|
+//+------------------------------------------------------------------+
+#property copyright "Scalar AI Technologies"
+#property link      "${escapedUrl}"
+#property version   "2.00"
+#property description "Scalar AI Multi-Asset Algorithmic Trading EA with Live Telemetry"
+#property description "Streams live ticks, OHLCV candles, and account status to web & MCP."
+#property description "IMPORTANT: Add '${escapedUrl}' to MT5 allowed WebRequest URLs!"
 
-//--- include trade library
+//--- Include standard trade library
 #include <Trade\\Trade.mqh>
 CTrade trade;
+
+//--- Forward function declarations (required by MQL5 compiler)
+void PushHistoricalCandles(int count);
+void ManageTrailingStop(double bid, double ask);
+void BroadcastMarketUpdate();
+void SyncWithWebApp();
+void ExecuteScalpingLogic(double bid, double ask);
+void UpdateChartDisplay(double bid, double ask);
+void CountPositions(int &buyCount, int &sellCount);
+void CloseAllPositions();
+void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask);
 
 //--- Expert Input Parameters
 input group "=== Risk Settings ==="
@@ -67,17 +78,17 @@ input double   InpTrailingStepPts = 50;                     // Trailing Step (Pt
 
 input group "=== Trading Mode & Filters ==="
 enum ENUM_TRADING_MODE {
-   MODE_SCALPING = 0, // Scalping Mode (Tick/M1 micro structures)
-   MODE_SWING    = 1  // Swing Trading (Focus strictly on Confirmed Candle Closes)
+   MODE_SCALPING = 0, // Scalping Mode (Micro structures & live ticks)
+   MODE_SWING    = 1  // Swing Trading (Confirmed Bar Closes)
 };
 input ENUM_TRADING_MODE InpTradingMode = MODE_SCALPING; // Trading Mode Selector
 input double   InpMinAtrFilter    = 0.05;               // Minimum ATR Volatility Filter (Pt)
 
 input group "=== Web App API Integration ==="
-input string   InpWebServerUrl    = "${escapedUrl}";         // Web App Base URL (Telemetry & Command Sync)
-input string   InpDashboardUrl    = "${clientUrl}/api/update-market"; // Dashboard Live Price Feed URL
+input string   InpWebServerUrl    = "${escapedUrl}";         // Web App Base URL
+input string   InpDashboardUrl    = "${escapedUrl}/api/update-market"; // Dashboard Live Feed URL
 input int      InpSyncIntervalSec = 3;                      // Heartbeat interval in seconds
-input bool     InpSendTicksToWeb  = true;                   // Broadcast live candle data to web graph
+input bool     InpSendTicksToWeb  = true;                   // Broadcast live candle data to web
 
 //--- Indicator Handles
 int glEmaFastHandle = INVALID_HANDLE;
@@ -89,14 +100,14 @@ int glAtrHandle     = INVALID_HANDLE;
 
 //--- Global Variables
 datetime  glLastSyncTime  = 0;
-string    glEAVersion     = "1.50";
+string    glEAVersion     = "2.00";
 int       glMagicNumber   = 20260617;
 bool      glTradingActive = ${isActive ? "true" : "false"};
 string    glStrategyMode  = "${selectedStrategy}";
 
 //--- Connection Diagnostics
-int       glLastWebResCode = 0;            // HTTP response code (e.g. 200, 404, or -1)
-int       glLastWebErrCode = 0;            // Terminal system error code (e.g. 4014)
+int       glLastWebResCode = 0;
+int       glLastWebErrCode = 0;
 string    glLastDiagMsg    = "WAITING FOR FIRST TICK TO SYNC...";
 bool      glInternetOk     = false;
 
@@ -106,29 +117,30 @@ bool      glInternetOk     = false;
 int OnInit()
   {
    trade.SetExpertMagicNumber(glMagicNumber);
-   Print("Step Index Quantum EA Initiated. Web URL: ", InpWebServerUrl);
+   Print("Scalar AI EA Initialized on ", _Symbol, ". Web URL: ", InpWebServerUrl);
    
    // Create indicator handles
    glEmaFastHandle = iMA(_Symbol, _Period, 9, 0, MODE_EMA, PRICE_CLOSE);
    glEmaSlowHandle = iMA(_Symbol, _Period, 21, 0, MODE_EMA, PRICE_CLOSE);
    glAdxHandle     = iADX(_Symbol, _Period, 14);
-   glBbHandle      = iBands(_Symbol, _Period, 20, 0, 2, PRICE_CLOSE);
+   glBbHandle      = iBands(_Symbol, _Period, 20, 0, 2.0, PRICE_CLOSE);
    glStochHandle   = iStochastic(_Symbol, _Period, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
    glAtrHandle     = iATR(_Symbol, _Period, 14);
 
-    if(glEmaFastHandle == INVALID_HANDLE || glEmaSlowHandle == INVALID_HANDLE ||
-       glAdxHandle == INVALID_HANDLE || glBbHandle == INVALID_HANDLE ||
-       glStochHandle == INVALID_HANDLE || glAtrHandle == INVALID_HANDLE)
-      {
-       Print("CRITICAL: Failed to create mathematical indicator handles!");
-       return(INIT_FAILED);
-      }
-    
-    PushHistoricalCandles(1000);
-    
-    // Create indicator comments on chart
+   if(glEmaFastHandle == INVALID_HANDLE || glEmaSlowHandle == INVALID_HANDLE ||
+      glAdxHandle == INVALID_HANDLE || glBbHandle == INVALID_HANDLE ||
+      glStochHandle == INVALID_HANDLE || glAtrHandle == INVALID_HANDLE)
+     {
+      Print("CRITICAL: Failed to create mathematical indicator handles!");
+      return(INIT_FAILED);
+     }
+   
+   // Push recent historical candles to the web backend in a single fast batch
+   PushHistoricalCandles(150);
+   
    Comment("==============================================\\n" +
-           "  STEP INDEX QUANTUM EA ONLINE\\n" +
+           "  SCALAR AI MULTI-ASSET EA ONLINE\\n" +
+           "  Symbol: " + _Symbol + "\\n" +
            "  Status: INITIALIZED & INDICATORS LOADED\\n" +
            "  Trading Mode: " + (InpTradingMode == MODE_SCALPING ? "SCALPING" : "SWING TRADING") + "\\n" +
            "  Web Feed URL: " + InpDashboardUrl + "\\n" +
@@ -151,7 +163,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(glStochHandle);
    IndicatorRelease(glAtrHandle);
 
-   Comment("Step Index Quantum EA Stopped.");
+   Comment("Scalar AI EA Stopped on " + _Symbol + ".");
    Print("EA shutdown code: ", reason);
   }
 
@@ -162,6 +174,7 @@ void OnTick()
   {
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(currentBid <= 0 || currentAsk <= 0) return;
    
    // 1. Process local trailing stop logic
    if(InpUseTrailing)
@@ -169,7 +182,7 @@ void OnTick()
       ManageTrailingStop(currentBid, currentAsk);
      }
      
-   // 2. Broadcast live market updates to Dashboard (copies MT5 Step Index graph)
+   // 2. Broadcast live market updates to Dashboard & MCP
    if(InpSendTicksToWeb)
      {
       BroadcastMarketUpdate();
@@ -189,7 +202,7 @@ void OnTick()
       ExecuteScalpingLogic(currentBid, currentAsk);
      }
    
-   // Update screen metrics
+   // 5. Update chart telemetry metrics
    UpdateChartDisplay(currentBid, currentAsk);
   }
 
@@ -199,10 +212,17 @@ void OnTick()
 void ExecuteScalpingLogic(double bid, double ask)
   {
    static datetime lastBarTime = 0;
-   datetime currentBarTime = iTime(_Symbol, _Period, 0);
+   datetime currentBarTime = 0;
+   datetime timeArr[];
+   ArraySetAsSeries(timeArr, true);
+   if(CopyTime(_Symbol, _Period, 0, 1, timeArr) > 0)
+     {
+      currentBarTime = timeArr[0];
+     }
+
    if(InpTradingMode == MODE_SWING)
      {
-      if(currentBarTime == lastBarTime) return;
+      if(currentBarTime == lastBarTime && lastBarTime != 0) return;
      }
 
    if(PositionsTotal() >= InpMaxTrades) return;
@@ -233,10 +253,7 @@ void ExecuteScalpingLogic(double bid, double ask)
    ArraySetAsSeries(atrVal, true);
    if(CopyBuffer(glAtrHandle, 0, 0, 2, atrVal) < 2) return;
 
-   if(atrVal[0] < InpMinAtrFilter)
-     {
-      return;
-     }
+   if(atrVal[0] < InpMinAtrFilter) return;
 
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
@@ -291,18 +308,18 @@ void ExecuteScalpingLogic(double bid, double ask)
         }
       if(totalBuy == 0)
         {
-         double sl = (InpStopLossPts > 0) ? (bid - InpStopLossPts * _Point) : 0;
-         double tp = (InpTakeProfitPts > 0) ? (ask + InpTakeProfitPts * _Point) : 0;
+         double sl = (InpStopLossPts > 0) ? NormalizeDouble(bid - InpStopLossPts * _Point, _Digits) : 0;
+         double tp = (InpTakeProfitPts > 0) ? NormalizeDouble(ask + InpTakeProfitPts * _Point, _Digits) : 0;
          
          ResetLastError();
-         if(trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Quantum Step Index Buy"))
+         if(trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Scalar AI Buy"))
            {
-            Print("BUY execution success! Ask: ", ask, " SL: ", sl, " TP: ", tp);
+            Print("BUY execution success on ", _Symbol, "! Ask: ", ask, " SL: ", sl, " TP: ", tp);
             if(InpTradingMode == MODE_SWING) lastBarTime = currentBarTime;
            }
          else
            {
-            Print("BUY execution failed! Error: ", _LastError);
+            Print("BUY execution failed on ", _Symbol, "! Error: ", _LastError);
            }
         }
      }
@@ -315,18 +332,18 @@ void ExecuteScalpingLogic(double bid, double ask)
         }
       if(totalSell == 0)
         {
-         double sl = (InpStopLossPts > 0) ? (ask + InpStopLossPts * _Point) : 0;
-         double tp = (InpTakeProfitPts > 0) ? (bid - InpTakeProfitPts * _Point) : 0;
+         double sl = (InpStopLossPts > 0) ? NormalizeDouble(ask + InpStopLossPts * _Point, _Digits) : 0;
+         double tp = (InpTakeProfitPts > 0) ? NormalizeDouble(bid - InpTakeProfitPts * _Point, _Digits) : 0;
          
          ResetLastError();
-         if(trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Quantum Step Index Sell"))
+         if(trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Scalar AI Sell"))
            {
-            Print("SELL execution success! Bid: ", bid, " SL: ", sl, " TP: ", tp);
+            Print("SELL execution success on ", _Symbol, "! Bid: ", bid, " SL: ", sl, " TP: ", tp);
             if(InpTradingMode == MODE_SWING) lastBarTime = currentBarTime;
            }
          else
            {
-            Print("SELL execution failed! Error: ", _LastError);
+            Print("SELL execution failed on ", _Symbol, "! Error: ", _LastError);
            }
         }
      }
@@ -341,7 +358,7 @@ void ManageTrailingStop(double bid, double ask)
      {
       if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
         {
-         ulong ticket = PositionGetInteger(POSITION_TICKET);
+         ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
          double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
          double currentSL = PositionGetDouble(POSITION_SL);
          
@@ -394,28 +411,30 @@ void CountPositions(int &buyCount, int &sellCount)
 void SyncWithWebApp()
   {
    string url = InpWebServerUrl + "/api/ea/tick";
-   string cookie = NULL, headers;
+   string headers = "Content-Type: application/json\\r\\n";
    char post[], result[];
    string resultHeaders;
    int timeout = 5000;
    
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double profit = AccountInfoDouble(ACCOUNT_PROFIT);
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin = AccountInfoDouble(ACCOUNT_MARGIN);
    string company = AccountInfoString(ACCOUNT_COMPANY);
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
    
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0) bid = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
+   if(ask <= 0) ask = bid;
    
    string payload = StringFormat(
-      "{\\"account\\":\\"%lld\\",\\"broker\\":\\"%s\\",\\"balance\\":%.2f,\\"profit\\":%.2f,\\"bid\\":%.4f,\\"ask\\":%.4f,\\"strategy\\":\\"%s\\",\\"version\\":\\"%s\\"}",
-      login, company, balance, profit, bid, ask, glStrategyMode, glEAVersion
+      "{\\"account\\":\\"%I64d\\",\\"broker\\":\\"%s\\",\\"balance\\":%.2f,\\"profit\\":%.2f,\\"equity\\":%.2f,\\"margin\\":%.2f,\\"symbol\\":\\"%s\\",\\"bid\\":%.5f,\\"ask\\":%.5f,\\"price\\":%.5f,\\"digits\\":%d,\\"tickSize\\":%.6f,\\"strategy\\":\\"%s\\",\\"version\\":\\"%s\\"}",
+      login, company, balance, profit, equity, margin, _Symbol, bid, ask, bid, (int)_Digits, _Point, glStrategyMode, glEAVersion
    );
    
    StringToCharArray(payload, post);
    ArrayResize(post, ArraySize(post) - 1);
-   
-   headers = "Content-Type: application/json\\r\\n";
    
    ResetLastError();
    int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
@@ -429,7 +448,7 @@ void SyncWithWebApp()
       Print("Web Application connection error code: ", err);
       if(err == 4014)
         {
-         glLastDiagMsg = "ERROR 4014: WebRequest is blocked. Open MT5 -> Options -> Expert Advisors -> Allow WebRequest!";
+         glLastDiagMsg = "ERROR 4014: WebRequest is blocked. Open MT5 -> Tools -> Options -> Expert Advisors -> Allow WebRequest for: " + InpWebServerUrl;
          Print("IMPORTANT: Allow WebRequest in terminal Options -> Expert Advisors -> add URL: ", InpWebServerUrl);
         }
       else if(err == 5200)
@@ -438,7 +457,7 @@ void SyncWithWebApp()
         }
       else if(err == 5203)
         {
-         glLastDiagMsg = "ERROR 5203: Host unreachable. Verify server internet router!";
+         glLastDiagMsg = "ERROR 5203: Host unreachable. Verify server connection!";
         }
       else
         {
@@ -463,7 +482,7 @@ void SyncWithWebApp()
          }
         }
          
-       ProcessPendingRemoteCommand(jsonResponse, bid, ask);
+      ProcessPendingRemoteCommand(jsonResponse, bid, ask);
         
       if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"TREND_FOLLOWING\\"") >= 0) glStrategyMode = "TREND_FOLLOWING";
       else if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"MEAN_REVERSION\\"") >= 0) glStrategyMode = "MEAN_REVERSION";
@@ -472,12 +491,12 @@ void SyncWithWebApp()
    else
      {
       glInternetOk = false;
-      glLastDiagMsg = "HTTP CONFIG REJECTED. Status: " + IntegerToString(res);
+      glLastDiagMsg = "HTTP REJECTED. Status: " + IntegerToString(res);
      }
   }
 
 //+------------------------------------------------------------------+
-//| Broadcast live tick candle data to Dashboard Graph               |
+//| Broadcast live tick candle data to Dashboard Graph & MCP         |
 //+------------------------------------------------------------------+
 void BroadcastMarketUpdate()
   {
@@ -485,6 +504,10 @@ void BroadcastMarketUpdate()
    ArraySetAsSeries(rates, true);
    int copied = CopyRates(_Symbol, _Period, 0, 1, rates);
    if(copied <= 0) return;
+
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(currentBid <= 0 || currentAsk <= 0) return;
 
    double o = rates[0].open;
    double h = rates[0].high;
@@ -497,8 +520,8 @@ void BroadcastMarketUpdate()
    string update_url = InpDashboardUrl;
 
    string payload = StringFormat(
-      "{\\"symbol\\":\\"%s\\",\\"open\\":%.4f,\\"high\\":%.4f,\\"low\\":%.4f,\\"close\\":%.4f,\\"volume\\":%lld,\\"current_time\\":\\"%s\\"}",
-      _Symbol, o, h, l, c, v, formatted_time
+      "{\\"symbol\\":\\"%s\\",\\"open\\":%.5f,\\"high\\":%.5f,\\"low\\":%.5f,\\"close\\":%.5f,\\"price\\":%.5f,\\"bid\\":%.5f,\\"ask\\":%.5f,\\"digits\\":%d,\\"tickSize\\":%.6f,\\"volume\\":%I64d,\\"current_time\\":\\"%s\\"}",
+      _Symbol, o, h, l, c, c, currentBid, currentAsk, (int)_Digits, _Point, (long)v, formatted_time
    );
 
    char post[], result[];
@@ -519,11 +542,11 @@ void BroadcastMarketUpdate()
   }
 
 //+------------------------------------------------------------------+
-//| Push historical candle data to backend on connection             |
+//| Push historical candle data to backend in a single JSON batch    |
 //+------------------------------------------------------------------+
 void PushHistoricalCandles(int count)
   {
-   if(count > 1000) count = 1000;
+   if(count > 200) count = 200;
    if(count <= 0) return;
 
    MqlRates rates[];
@@ -531,22 +554,21 @@ void PushHistoricalCandles(int count)
    int copied = CopyRates(_Symbol, _Period, 0, count, rates);
    if(copied <= 0)
      {
-      Print("[HISTORY] CopyRates failed. Copied: ", copied, ". Broker history may be unavailable.");
+      Print("[HISTORY] CopyRates failed. Copied: ", copied, ". Broker history may be loading.");
       return;
      }
 
-   string url = InpWebServerUrl + "/api/update-market";
-   string headers = "Content-Type: application/json\r\n";
+   string url = InpWebServerUrl + "/api/market/bulk-candles";
+   string headers = "Content-Type: application/json\\r\\n";
    int timeout = 5000;
 
+   string jsonCandles = "[";
    for(int i = copied - 1; i >= 0; i--)
      {
-      string direction = rates[i].close > rates[i].open ? "up" :
-                         rates[i].close < rates[i].open ? "down" : "flat";
-
-      string payload = StringFormat(
-         "{\\"symbol\\":\\"%s\\",\\"time\\":%lld,\\"open\\":%.4f,\\"high\\":%.4f,\\"low\\":%.4f,\\"close\\":%.4f,\\"volume\\":%lld,\\"direction\\":\\"%s\\"}",
-         _Symbol,
+      string direction = (rates[i].close > rates[i].open) ? "up" :
+                         ((rates[i].close < rates[i].open) ? "down" : "flat");
+      string item = StringFormat(
+         "{\\"time\\":%I64d,\\"open\\":%.5f,\\"high\\":%.5f,\\"low\\":%.5f,\\"close\\":%.5f,\\"volume\\":%I64d,\\"direction\\":\\"%s\\"}",
          (long)rates[i].time,
          rates[i].open,
          rates[i].high,
@@ -555,25 +577,31 @@ void PushHistoricalCandles(int count)
          (long)rates[i].tick_volume,
          direction
       );
-
-      char post[], result[];
-      string resultHeaders;
-      StringToCharArray(payload, post);
-      ArrayResize(post, ArraySize(post) - 1);
-
-      ResetLastError();
-      int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
-      if(res == -1)
-        {
-         int err = _LastError;
-         if(err != 4014 && err != 5200 && err != 5203)
-           {
-            Print("[HISTORY] WebRequest push failed for bar ", i, ". Error: ", err);
-           }
-        }
+      jsonCandles = jsonCandles + item;
+      if(i > 0) jsonCandles = jsonCandles + ",";
      }
+   jsonCandles = jsonCandles + "]";
 
-   Print("[HISTORY] Pushed ", copied, " historical candles to backend.");
+   string payload = StringFormat(
+      "{\\"symbol\\":\\"%s\\",\\"digits\\":%d,\\"tickSize\\":%.6f,\\"candles\\":%s}",
+      _Symbol, (int)_Digits, _Point, jsonCandles
+   );
+
+   char post[], result[];
+   string resultHeaders;
+   StringToCharArray(payload, post);
+   ArrayResize(post, ArraySize(post) - 1);
+
+   ResetLastError();
+   int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
+   if(res == 200)
+     {
+      Print("[HISTORY] Successfully uploaded ", copied, " historical candles for ", _Symbol);
+     }
+   else
+     {
+      Print("[HISTORY] Push historical candles returned status ", res, ", error: ", _LastError);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -581,12 +609,12 @@ void PushHistoricalCandles(int count)
 //+------------------------------------------------------------------+
 void CloseAllPositions()
   {
-   Print("Remote Web Stop Command received. Closing open positions.");
+   Print("Remote Web Stop Command received. Closing open positions on ", _Symbol);
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
         {
-         trade.PositionClose(PositionGetInteger(POSITION_TICKET));
+         trade.PositionClose((ulong)PositionGetInteger(POSITION_TICKET));
         }
      }
   }
@@ -656,16 +684,16 @@ void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask)
                CountPositions(buyCount, sellCount);
                if(sellCount > 0)
                  {
-                  Print("[REMOTE ORDER REJECTED] Cannot BUY because an opposite active SELL position exists on client.");
+                  Print("[REMOTE ORDER REJECTED] Cannot BUY because an opposite active SELL position exists on ", _Symbol);
                  }
                else if(buyCount == 0)
                  {
-                  double slPrice = (pSL > 0) ? (bid - pSL * _Point) : 0;
-                  double tpPrice = (pTP > 0) ? (ask + pTP * _Point) : 0;
+                  double slPrice = (pSL > 0) ? NormalizeDouble(bid - pSL * _Point, _Digits) : 0;
+                  double tpPrice = (pTP > 0) ? NormalizeDouble(ask + pTP * _Point, _Digits) : 0;
                   ResetLastError();
-                  if(trade.Buy(pLot, _Symbol, ask, slPrice, tpPrice, "Quantum Remote Buy"))
+                  if(trade.Buy(pLot, _Symbol, ask, slPrice, tpPrice, "Scalar AI Remote Buy"))
                     {
-                     Print("[REMOTE ORDER SUCCESS] BUY asset order success! Lot: ", pLot, " SL: ", slPrice, " TP: ", tpPrice);
+                     Print("[REMOTE ORDER SUCCESS] BUY order executed on ", _Symbol, "! Lot: ", pLot, " SL: ", slPrice, " TP: ", tpPrice);
                     }
                   else
                     {
@@ -674,7 +702,7 @@ void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask)
                  }
                else
                  {
-                  Print("[REMOTE ORDER REJECTED] Active BUY position already exists on chart.");
+                  Print("[REMOTE ORDER REJECTED] Active BUY position already exists on ", _Symbol);
                  }
               }
             else if(cmd == "SELL")
@@ -683,16 +711,16 @@ void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask)
                CountPositions(buyCount, sellCount);
                if(buyCount > 0)
                  {
-                  Print("[REMOTE ORDER REJECTED] Cannot SELL because an opposite active BUY position exists on client.");
+                  Print("[REMOTE ORDER REJECTED] Cannot SELL because an opposite active BUY position exists on ", _Symbol);
                  }
                else if(sellCount == 0)
                  {
-                  double slPrice = (pSL > 0) ? (ask + pSL * _Point) : 0;
-                  double tpPrice = (pTP > 0) ? (bid - pTP * _Point) : 0;
+                  double slPrice = (pSL > 0) ? NormalizeDouble(ask + pSL * _Point, _Digits) : 0;
+                  double tpPrice = (pTP > 0) ? NormalizeDouble(bid - pTP * _Point, _Digits) : 0;
                   ResetLastError();
-                  if(trade.Sell(pLot, _Symbol, bid, slPrice, tpPrice, "Quantum Remote Sell"))
+                  if(trade.Sell(pLot, _Symbol, bid, slPrice, tpPrice, "Scalar AI Remote Sell"))
                     {
-                     Print("[REMOTE ORDER SUCCESS] SELL asset order success! Lot: ", pLot, " SL: ", slPrice, " TP: ", tpPrice);
+                     Print("[REMOTE ORDER SUCCESS] SELL order executed on ", _Symbol, "! Lot: ", pLot, " SL: ", slPrice, " TP: ", tpPrice);
                     }
                   else
                     {
@@ -701,12 +729,12 @@ void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask)
                  }
                else
                  {
-                  Print("[REMOTE ORDER REJECTED] Active SELL position already exists on chart.");
+                  Print("[REMOTE ORDER REJECTED] Active SELL position already exists on ", _Symbol);
                  }
               }
             else if(cmd == "CLOSE_ALL")
               {
-               Print("[REMOTE COMMAND] Received CLOSE_ALL signal. Liquidating active positions.");
+               Print("[REMOTE COMMAND] Received CLOSE_ALL signal for ", _Symbol, ". Liquidating open positions.");
                CloseAllPositions();
               }
            }
@@ -722,31 +750,30 @@ void UpdateChartDisplay(double bid, double ask)
    string connStatus = (glLastSyncTime > 0) ? "CONNECTED & IN SYNC" : "OFFLINE / DISCONNECTED";
    string tradeStatus = glTradingActive ? "ACTIVE & EXECUTING" : "STOPPED / MONITORING ONLY";
    
-   string termAlgoEnabled = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES (Terminal Button is ON)" : "NO (CLICK THE ALGO TRADING BUTTON ON MT5 TOOLBAR!)";
-   string eaTradeAllowed = MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES (EA Trade is ALLOWED)" : "NO (Allow Algorithmic Trading checkbox in EA Common properties is OFF!)";
+   string termAlgoEnabled = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES (Terminal Button is ON)" : "NO (CLICK ALGO TRADING BUTTON ON MT5 TOOLBAR!)";
+   string eaTradeAllowed = MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES (EA Trade is ALLOWED)" : "NO (Allow Algorithmic Trading checkbox in EA Properties is OFF!)";
    
    Comment("==============================================\\n" +
-           "    QUANTUM STEP INDEX SCALPING PLATFORM EA   \\n" +
+           "       SCALAR AI MULTI-ASSET TRADING PLATFORM \\n" +
            "==============================================\\n" +
-           "  [SYSTEM STATUS CLASSIFICATION]\\n" +
+           "  Active Symbol  : " + _Symbol + " (" + IntegerToString(_Digits) + " Digits)\\n" +
            "  Active Strategy: " + glStrategyMode + "\\n" +
            "  Trading Status : " + tradeStatus + "\\n" +
            "  Trading Mode   : " + (InpTradingMode == MODE_SCALPING ? "SCALPING" : "SWING TRADING") + "\\n" +
            "  Server API Link: " + connStatus + "\\n" +
            "  Last Sync Time : " + TimeToString(glLastSyncTime, TIME_DATE|TIME_SECONDS) + "\\n" +
            "==============================================\\n" +
-           "  [LIVE ACTION DIAGNOSTIC CHECKER]\\n" +
+           "  [LIVE DIAGNOSTIC STATUS]\\n" +
            "  1. Toolbar Algo Button Active : " + termAlgoEnabled + "\\n" +
-           "  2. Master EA Trade allowed    : " + eaTradeAllowed + "\\n" +
+           "  2. Master EA Trade Allowed    : " + eaTradeAllowed + "\\n" +
            "  3. Server Response HTTP Code  : " + IntegerToString(glLastWebResCode) + " (Expected: 200)\\n" +
            "  4. Internal MT5 Error Code    : " + IntegerToString(glLastWebErrCode) + " (Expected: 0)\\n" +
            "  5. DIAGNOSIS MESSAGE          : " + glLastDiagMsg + "\\n" +
            "==============================================\\n" +
-           "  [LOCAL MT5 METRICS]\\n" +
-           "  Bid Price      : " + DoubleToString(bid, 2) + " | Ask: " + DoubleToString(ask, 2) + "\\n" +
-           "  Account Login  : " + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\\n" +
-           "  Broker Firm    : " + AccountInfoString(ACCOUNT_COMPANY) + "\\n" +
-           "  Account Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\\n" +
+           "  [ACCOUNT METRICS]\\n" +
+           "  Bid: " + DoubleToString(bid, _Digits) + " | Ask: " + DoubleToString(ask, _Digits) + "\\n" +
+           "  Login: " + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + " | " + AccountInfoString(ACCOUNT_COMPANY) + "\\n" +
+           "  Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + " | Equity: $" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + "\\n" +
            "==============================================");
   }
 //+------------------------------------------------------------------+

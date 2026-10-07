@@ -64,3 +64,45 @@ describe("isReadOnlySql", () => {
     expect(isReadOnlySql("SELECT * FROM trades WHERE id = 1 AND x = 2")).toBe(true);
   });
 });
+
+describe("createMcpHandler integration", () => {
+  it("initializes and lists extended tools", async () => {
+    const { createMcpHandler } = await import("../backend/src/mcp_server");
+    const mockCtx: any = {
+      getStatus: () => ({ activeSymbol: "Boom 1000", symbolStates: [] }),
+      getSymbols: () => [{ symbol: "Boom 1000", isConnected: true, currentPrice: 500, tickCount: 10 }],
+      switchSymbol: () => {},
+      placeTrade: async () => ({ success: true, message: "Trade placed", ticket: 101 }),
+      closeAllTrades: async () => ({ success: true, closedCount: 2, message: "Closed 2 trades" }),
+    };
+
+    const handler = createMcpHandler(mockCtx, "");
+    let responseData: any;
+    const mockRes: any = {
+      json: (data: any) => { responseData = data; return mockRes; },
+      status: () => mockRes,
+    };
+
+    // Test tools/list
+    await handler({ body: { jsonrpc: "2.0", id: 1, method: "tools/list" }, headers: {} } as any, mockRes);
+    expect(responseData.result.tools).toBeDefined();
+    const toolNames = responseData.result.tools.map((t: any) => t.name);
+    expect(toolNames).toContain("place_validated_trade");
+    expect(toolNames).toContain("close_all_trades");
+    expect(toolNames).toContain("get_symbols");
+    expect(toolNames).toContain("switch_active_symbol");
+    expect(toolNames).toContain("get_ea_telemetry");
+
+    // Test tools/call: get_symbols
+    await handler({ body: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "get_symbols", arguments: {} } }, headers: {} } as any, mockRes);
+    expect(responseData.result.content[0].text).toContain("Boom 1000");
+
+    // Test tools/call: place_validated_trade
+    await handler({ body: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "place_validated_trade", arguments: { type: "BUY", symbol: "Boom 1000", lotSize: 0.2 } } }, headers: {} } as any, mockRes);
+    expect(responseData.result.content[0].text).toContain("Trade placed");
+
+    // Test tools/call: close_all_trades
+    await handler({ body: { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "close_all_trades", arguments: { symbol: "Boom 1000" } } }, headers: {} } as any, mockRes);
+    expect(responseData.result.content[0].text).toContain("Closed 2 trades");
+  });
+});

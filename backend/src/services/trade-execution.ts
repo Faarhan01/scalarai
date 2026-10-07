@@ -141,36 +141,53 @@ export async function evaluateSimulatedStrategy(state: TradeState, callbacks: Ap
   }
 }
 
-export async function openSimulatedPosition(state: TradeState, type: "BUY" | "SELL", reason: string, callbacks: AppCallbacks): Promise<void> {
-  const openTrades = state.tradesList.filter((t: TradeRecord) => t.status === "OPEN");
+export async function openSimulatedPosition(
+  state: TradeState,
+  type: "BUY" | "SELL",
+  reason: string,
+  callbacks: AppCallbacks,
+  customOptions?: { symbol?: string; lotSize?: number; sl?: number; tp?: number }
+): Promise<number | undefined> {
+  const targetSymbol = customOptions?.symbol?.trim() || state.activeSymbol || "Step Index";
+  const openTrades = state.tradesList.filter((t: TradeRecord) => t.status === "OPEN" && (!customOptions?.symbol || t.symbol === targetSymbol));
   const activeBuyExists = openTrades.some((t: TradeRecord) => t.type === "BUY") || state.latestBuyLockedFromEa;
   const activeSellExists = openTrades.some((t: TradeRecord) => t.type === "SELL") || state.latestSellLockedFromEa;
 
   if (type === "BUY" && activeSellExists) {
-    callbacks.addLog("SERVER", "ERROR", "Block BUY Execution: Gatekeeper locked because of active opposite SELL position(s).");
-    return;
+    callbacks.addLog("SERVER", "ERROR", `Block BUY Execution on ${targetSymbol}: Gatekeeper locked because of active opposite SELL position(s).`);
+    return undefined;
   }
   if (type === "SELL" && activeBuyExists) {
-    callbacks.addLog("SERVER", "ERROR", "Block SELL Execution: Gatekeeper locked because of active opposite BUY position(s).");
-    return;
+    callbacks.addLog("SERVER", "ERROR", `Block SELL Execution on ${targetSymbol}: Gatekeeper locked because of active opposite BUY position(s).`);
+    return undefined;
   }
   if (openTrades.length >= state.tradeConfig.maxTrades) {
-    callbacks.addLog("SERVER", "WARNING", "Block Trade Execution: Max trade boundary hit.");
-    return;
+    callbacks.addLog("SERVER", "WARNING", `Block Trade Execution on ${targetSymbol}: Max trade boundary (${state.tradeConfig.maxTrades}) hit.`);
+    return undefined;
   }
 
-  const slApplied = Math.round(Number(state.tradeConfig.stopLossPoints || 0) * (state.aiSynthesizedStrategy.rules.slPointsMultiplier || 1.0));
-  const tpApplied = Math.round(Number(state.tradeConfig.takeProfitPoints || 0) * (state.aiSynthesizedStrategy.rules.tpPointsMultiplier || 1.0));
+  const slApplied = customOptions?.sl !== undefined
+    ? customOptions.sl
+    : Math.round(Number(state.tradeConfig.stopLossPoints || 0) * (state.aiSynthesizedStrategy.rules.slPointsMultiplier || 1.0));
+  const tpApplied = customOptions?.tp !== undefined
+    ? customOptions.tp
+    : Math.round(Number(state.tradeConfig.takeProfitPoints || 0) * (state.aiSynthesizedStrategy.rules.tpPointsMultiplier || 1.0));
+
   const tId = crypto.randomUUID();
-  const currentPrice = getSymbolState(state.symbolStates, state.activeSymbol).currentPrice;
+  const symbolState = getSymbolState(state.symbolStates, targetSymbol);
+  const currentPrice = symbolState.currentPrice > 0 ? symbolState.currentPrice : 1000.0;
   const ticket = state.nextTicket.value;
+  const lot = customOptions?.lotSize !== undefined && customOptions.lotSize > 0
+    ? customOptions.lotSize
+    : (state.tradeConfig.lotSize || 0.1);
+
   const newTrade: TradeRecord = {
     id: tId,
     ticket,
-    symbol: state.activeSymbol || "Step Index",
+    symbol: targetSymbol,
     type,
     entryPrice: currentPrice,
-    lotSize: state.tradeConfig.lotSize,
+    lotSize: lot,
     profit: 0,
     status: "OPEN",
     openTime: new Date().toLocaleTimeString(),
@@ -184,10 +201,10 @@ export async function openSimulatedPosition(state: TradeState, type: "BUY" | "SE
   } catch {
     // quiet persistence
   }
-  callbacks.addLog("SERVER", "SUCCESS", `Open simulated MT5 position ticket #${newTrade.ticket} [${newTrade.symbol}] - ${type} at ${currentPrice} (Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts scaled by AI Strategy rules)`);
-  const orderPayload = { action: (type || "BUY").toUpperCase(), symbol: state.activeSymbol, volume: Number(state.tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
+  callbacks.addLog("SERVER", "SUCCESS", `Open position ticket #${newTrade.ticket} [${newTrade.symbol}] - ${type} at ${currentPrice} (Vol: ${lot}, Dynamic SL: ${slApplied} pts, TP: ${tpApplied} pts)`);
+  const orderPayload = { action: (type || "BUY").toUpperCase(), symbol: targetSymbol, volume: lot, sl: slApplied, tp: tpApplied };
   state.pendingBridgeOrders.push({ ...orderPayload, id: newTrade.id, ticket: newTrade.ticket, timestamp: Date.now() });
-  state.pendingEaCommand = { action: (type || "BUY").toUpperCase(), lot: Number(state.tradeConfig.lotSize || 0.1), sl: slApplied, tp: tpApplied };
+  state.pendingEaCommand = { action: (type || "BUY").toUpperCase(), lot, sl: slApplied, tp: tpApplied };
   state.mt5BridgeClients.forEach((client: WebSocket) => {
     if (client.readyState === 1) {
       try { client.send(JSON.stringify(orderPayload)); } catch (err) {
@@ -197,6 +214,7 @@ export async function openSimulatedPosition(state: TradeState, type: "BUY" | "SE
     }
   });
   callbacks.broadcastTradesUpdate();
+  return ticket;
 }
 
 export function closeSimulatedPosition(state: TradeState, trade: TradeRecord, reason: string, callbacks: AppCallbacks): void {

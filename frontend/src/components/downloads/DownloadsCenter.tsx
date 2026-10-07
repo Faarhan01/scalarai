@@ -49,7 +49,7 @@ export const DownloadsCenter: React.FC<DownloadsCenterProps> = ({
             className="btn btn-primary w-full py-3"
           >
             <Download className="w-4 h-4" />
-            <span>Download StepIndex_AI_Scalper_EA.mq5</span>
+            <span>Download ScalarAI_MultiAsset_EA.mq5</span>
           </a>
         </div>
 
@@ -239,7 +239,7 @@ export const DownloadsCenter: React.FC<DownloadsCenterProps> = ({
                   Enable Algorithmic Trading
                 </h4>
                 <p className="text-slate-300 text-xs mt-1 leading-relaxed">
-                  Enable algorithmic trading globally via the green button in the top panel of MT5. Finally, drag the expert advisor MQ5 file onto any <span className="text-emerald-400 font-semibold font-mono">{activeSymbol || "Step Index"}</span> chart. Check your MT5 Expert Logs to verify connection registration.
+                  Enable algorithmic trading globally via the green button in the top panel of MT5. Finally, drag the expert advisor MQ5 file onto any <span className="text-emerald-400 font-semibold font-mono">{activeSymbol || "MT5"}</span> chart. Check your MT5 Expert Logs to verify connection registration.
                 </p>
               </div>
             </div>

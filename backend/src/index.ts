@@ -58,7 +58,13 @@ async function startServer() {
   }, 3600000);
 
   registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
-  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.config);
+  registerMarketRoutes(
+    app,
+    store.updateMarket.bind(store),
+    () => store.config,
+    store.ingestBulkCandles.bind(store),
+    () => store.getActiveSymbol()
+  );
   registerSettingsRoutes(
     app,
     (params) => store.updateSettings(params),
@@ -119,7 +125,7 @@ async function startServer() {
     console.log(`Step Index Scalper full-stack server running on http://localhost:${PORT}`);
   });
 
-  const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
+  const allowedOrigin = process.env.FRONTEND_URL;
 
   createBridgeServer(
     server,

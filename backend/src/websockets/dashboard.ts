@@ -16,7 +16,7 @@ export function createDashboardServer(
       const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
       if (urlObj.pathname === "/ws/live" || urlObj.pathname === "/ws" || urlObj.pathname === "/live-feed") {
         const origin = request.headers.origin;
-        if (allowedOrigin && origin && origin !== allowedOrigin) {
+        if (allowedOrigin && origin && origin !== allowedOrigin && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
           socket.destroy();
           return;
         }

@@ -60,12 +60,12 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
             </p>
             <span className="text-[10px] text-slate-400">({stats.tradesCount} trades)</span>
           </div>
-          <p className="text-[9px] text-slate-400 leading-tight">Minimum required: 62% for Step Index cost offset.</p>
+          <p className="text-[9px] text-slate-400 leading-tight">Target win rate for statistical edge & profitability.</p>
         </div>
 
         {/* Active Positions counter */}
         <div className="metric-box">
-          <p className="metric-label">Active Step Trades</p>
+          <p className="metric-label">Active Positions</p>
           <div className="my-2">
             <p className="metric-val text-white">
               {stats.activePositionsCount} <span className="text-xs text-indigo-400 font-bold uppercase font-sans">Open</span>

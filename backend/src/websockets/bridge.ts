@@ -15,7 +15,7 @@ export function createBridgeServer(
       const urlObj = new URL(request.url || "", `http://${request.headers.host || "localhost"}`);
       if (urlObj.pathname === "/mt5-bridge") {
         const origin = request.headers.origin;
-        if (allowedOrigin && origin && origin !== allowedOrigin) {
+        if (allowedOrigin && origin && origin !== allowedOrigin && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
           socket.destroy();
           return;
         }

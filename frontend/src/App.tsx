@@ -89,7 +89,7 @@ export default function App() {
     Array<{ time: number; open: number; high: number; low: number; close: number }>
   >([]);
   const [currentPrice, setCurrentPrice] = useState<number>(1250.0);
-  const [activeSymbol, setActiveSymbol] = useState<string>("Step Index");
+  const [activeSymbol, setActiveSymbol] = useState<string>("");
   const [symbolStates, setSymbolStates] = useState<
     Array<{ symbol: string; connection: any; currentPrice: number; tickCount: number }>
   >([]);
@@ -174,9 +174,9 @@ export default function App() {
         setStrategiesList(data);
       }
     } catch (err) {
-      showError("Failed to fetch strategies");
+      console.warn("Initial strategies fetch pending backend:", err);
     }
-  }, [showError]);
+  }, []);
 
   // Fetch Initial Status
   const fetchStatus = useCallback(async () => {
@@ -192,17 +192,21 @@ export default function App() {
         if (data.history) setHistory(data.history);
         if (data.candles) setCandles(data.candles);
         if (data.currentPrice !== undefined) setCurrentPrice(data.currentPrice);
-        if (data.activeSymbol) setActiveSymbol(data.activeSymbol);
         if (data.symbolStates) setSymbolStates(data.symbolStates);
+        if (data.activeSymbol) {
+          setActiveSymbol(data.activeSymbol);
+        } else if (data.symbolStates && data.symbolStates.length > 0) {
+          setActiveSymbol(data.symbolStates[0].symbol);
+        }
         if (data.stats) setStats(data.stats);
         if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
         if (data.lastStrategySignal) setLastStrategySignal(data.lastStrategySignal);
         if (data.webRequestStatus) settings.setWebRequestStatus(data.webRequestStatus);
       }
     } catch (err) {
-      showError("Failed to fetch server status");
+      console.warn("Initial status fetch pending backend:", err);
     }
-  }, [showError, settings.setWebRequestStatus]);
+  }, [settings.setWebRequestStatus]);
 
   // Sync WebSocket
   const { sendWsMessage } = useWebSocket({
@@ -217,8 +221,12 @@ export default function App() {
         setCandles((prev) => mergeCandles(prev, data.candles).slice(-2000));
       }
       if (data.currentPrice !== undefined) setCurrentPrice(data.currentPrice);
-      if (data.activeSymbol) setActiveSymbol(data.activeSymbol);
       if (data.symbolStates) setSymbolStates(data.symbolStates);
+      if (data.activeSymbol) {
+        setActiveSymbol(data.activeSymbol);
+      } else if (data.symbolStates && data.symbolStates.length > 0) {
+        setActiveSymbol(data.symbolStates[0].symbol);
+      }
       if (data.stats) setStats(data.stats);
       if (data.aiSynthesizedStrategy) setAiSynthesizedStrategy(data.aiSynthesizedStrategy);
       if (data.lastStrategySignal) setLastStrategySignal(data.lastStrategySignal);
@@ -305,8 +313,8 @@ export default function App() {
     })
       .then((res) => res.json())
       .then((data) => {
-        if (data.candles && Array.isArray(data.candles)) {
-          setCandles((prev) => mergeCandles(prev, data.candles).slice(-2000));
+        if (data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
+          setCandles(data.candles);
         }
       })
       .catch(() => {

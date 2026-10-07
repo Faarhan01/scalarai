@@ -301,8 +301,15 @@ export interface McpContext {
   synthesizeStrategy: () => Promise<AiSynthesizedStrategy>;
   updateSettings: (params: Partial<TradeConfig>) => Promise<TradeConfig>;
   toggleTrading: (isActive: boolean) => Promise<TradeConfig>;
-  placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<{ success: boolean; message: string }>;
+  placeTrade: (
+    type: "BUY" | "SELL",
+    reason?: string,
+    options?: { symbol?: string; lotSize?: number; sl?: number; tp?: number }
+  ) => Promise<{ success: boolean; message: string; ticket?: number }>;
   closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
+  closeAllTrades: (symbol?: string) => Promise<{ success: boolean; closedCount: number; message: string }>;
+  switchSymbol: (symbol: string) => void;
+  getSymbols: () => Array<{ symbol: string; isConnected: boolean; currentPrice: number; tickCount: number; digits?: number | null; tickSize?: number | null }>;
   resetStats: () => Promise<void>;
   getTradingState: () => TradingState;
   getBridgeState: () => BridgeState;
@@ -447,7 +454,7 @@ export interface SymbolMetadataRow {
 }
 
 export interface MarketCandleRow {
-  id: number;
+  id?: number;
   symbol: string;
   time: number;
   open: number;
@@ -457,7 +464,7 @@ export interface MarketCandleRow {
   volume: number | null;
   direction: "up" | "down" | "flat";
   minute_bucket: number;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface ObservationRow {
