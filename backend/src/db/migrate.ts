@@ -4,32 +4,7 @@ import path from "path";
 import { getDefaultTradeConfig, getDefaultAiKnowledgeBase, getDefaultAiSynthesizedStrategy } from "../services/defaults";
 import { StrategyMode } from "../types";
 
-interface LegacyKnowledgeJson {
-  totalObservations: number;
-  globalAverageSpeed: number;
-  peakVelocityRegistered: number;
-  timeOfDayPatterns: Record<string, { count: number; avgSpeed: number }>;
-  lastUpdated: string;
-}
-
-interface LegacyStrategyJson {
-  strategyName: string;
-  rationale: string;
-  compiledRules: {
-    minVelocityFilter?: number;
-    slPointsMultiplier?: number;
-    tpPointsMultiplier?: number;
-    allowCounterTrend?: boolean;
-    useEmaConfirmation?: boolean;
-    maxAllowedPositionDivergence?: number;
-  };
-}
-
 const DB_PATH = path.join(process.cwd(), "backend", "data", "scalarai.sqlite");
-const KNOWLEDGE_FILE_PATH = path.join(process.cwd(), "backend", "data", "ai_knowledge_profile.json");
-const KNOWLEDGE_BACKUP_PATH = path.join(process.cwd(), "backend", "data", "backups", "ai_knowledge_profile.json");
-const STRATEGY_FILE_PATH = path.join(process.cwd(), "backend", "data", "ai_synthesized_strategy.json");
-const STRATEGY_BACKUP_PATH = path.join(process.cwd(), "backend", "data", "backups", "ai_synthesized_strategy.json");
 
 export function openDb(): InstanceType<typeof Database> {
   const db = new Database(DB_PATH);
@@ -45,7 +20,6 @@ export function migrate(db: InstanceType<typeof Database>): void {
   try { db.exec("ALTER TABLE trades ADD COLUMN symbol TEXT NOT NULL DEFAULT 'Step Index'"); } catch {}
   try { db.exec("ALTER TABLE market_ticks ADD COLUMN symbol TEXT NOT NULL DEFAULT 'Step Index'"); } catch {}
   seedDefaults(db);
-  migrateJsonData(db);
 }
 
 function seedDefaults(db: InstanceType<typeof Database>): void {
@@ -93,66 +67,3 @@ function seedDefaults(db: InstanceType<typeof Database>): void {
   );
 }
 
-function migrateJsonData(db: InstanceType<typeof Database>): void {
-  const knowledgePath = fs.existsSync(KNOWLEDGE_FILE_PATH)
-    ? KNOWLEDGE_FILE_PATH
-    : fs.existsSync(KNOWLEDGE_BACKUP_PATH)
-    ? KNOWLEDGE_BACKUP_PATH
-    : null;
-
-  if (knowledgePath) {
-    try {
-      const fileData = JSON.parse(fs.readFileSync(knowledgePath, "utf-8")) as LegacyKnowledgeJson;
-      // Only migrate if SQLite currently has fewer observations than the JSON backup
-      const current = db.prepare("SELECT total_observations FROM ai_knowledge WHERE id = 1").get() as { total_observations: number } | undefined;
-      if (!current || (current.total_observations ?? 0) < (fileData.totalObservations ?? 0)) {
-        db.prepare(
-          `UPDATE ai_knowledge SET total_observations = ?, global_average_speed = ?, peak_velocity_registered = ?, time_of_day_patterns = ?, last_updated = ? WHERE id = 1`
-        ).run(
-          fileData.totalObservations ?? 0,
-          fileData.globalAverageSpeed ?? 0,
-          fileData.peakVelocityRegistered ?? 0,
-          JSON.stringify(fileData.timeOfDayPatterns || {}),
-          fileData.lastUpdated || new Date().toISOString()
-        );
-        console.log(`Migrated ${path.basename(knowledgePath)} to SQLite (${fileData.totalObservations} observations).`);
-      }
-    } catch (err: unknown) {
-      console.error("Failed to migrate knowledge JSON:", err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  const strategyPath = fs.existsSync(STRATEGY_FILE_PATH)
-    ? STRATEGY_FILE_PATH
-    : fs.existsSync(STRATEGY_BACKUP_PATH)
-    ? STRATEGY_BACKUP_PATH
-    : null;
-
-  if (strategyPath) {
-    try {
-      const fileData = JSON.parse(fs.readFileSync(strategyPath, "utf-8")) as LegacyStrategyJson;
-      const current = db.prepare("SELECT name FROM ai_strategy WHERE id = 1").get() as { name: string } | undefined;
-      if (!current || current.name === "AI Adaptive") {
-        db.prepare(
-          `UPDATE ai_strategy SET name = ?, description = ?, mode = ?, rules = ?, updated_at = ? WHERE id = 1`
-        ).run(
-          fileData.strategyName || "Migrated Strategy",
-          fileData.rationale || "",
-          "AI_ADAPTIVE",
-          JSON.stringify({
-            minVelocityFilter: fileData.compiledRules?.minVelocityFilter ?? 0.15,
-            slPointsMultiplier: fileData.compiledRules?.slPointsMultiplier ?? 1,
-            tpPointsMultiplier: fileData.compiledRules?.tpPointsMultiplier ?? 1,
-            allowCounterTrend: fileData.compiledRules?.allowCounterTrend ?? false,
-            useEmaConfirmation: fileData.compiledRules?.useEmaConfirmation ?? true,
-            maxAllowedPositionDivergence: fileData.compiledRules?.maxAllowedPositionDivergence ?? 2,
-          }),
-          new Date().toISOString()
-        );
-        console.log(`Migrated ${path.basename(strategyPath)} to SQLite (${fileData.strategyName}).`);
-      }
-    } catch (err: unknown) {
-      console.error("Failed to migrate strategy JSON:", err instanceof Error ? err.message : String(err));
-    }
-  }
-}

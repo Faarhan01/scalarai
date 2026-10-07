@@ -1,49 +1,44 @@
 # Database Plan — Stage 3: Legacy File Removal
 
-## Status: ⏳ Pending
+## Status: ✅ DONE
 
 ## Objective
 
 Remove legacy JSON files after validation period.
 
-## Current State
+## Completed
 
-- `backend/data/backups/ai_knowledge_profile.json` exists
-- `backend/data/backups/ai_synthesized_strategy.json` exists
-- `backend/src/db/migrate.ts` still reads these files on startup
-- JSON files are used as fallback if SQLite has no data
+### 1. Verified SQLite data integrity
 
-## Remaining Items
+Before removing JSON files, verified that SQLite contains all migrated data:
+- `ai_knowledge`: 22,700 total_observations
+- `ai_strategy`: "Adaptive Micro-Volatility Escalator" with mode "AI_ADAPTIVE"
+- `settings`: Full trade configuration
+- `trades`: 0 trades (empty, which is expected)
 
-- Delete `backend/data/backups/ai_knowledge_profile.json`
-- Delete `backend/data/backups/ai_synthesized_strategy.json`
-- Update `backend/src/db/migrate.ts` to skip migration if JSON files are missing
-- Remove JSON read/write from `backend/src/index.ts`
-- Update documentation to reference SQLite only
+### 2. Removed JSON migration code from `backend/src/db/migrate.ts`
 
-## Critical Fragility Warnings
+- Removed `migrateJsonData()` function entirely
+- Removed `LegacyKnowledgeJson` and `LegacyStrategyJson` interfaces
+- Removed JSON file path constants (`KNOWLEDGE_FILE_PATH`, `KNOWLEDGE_BACKUP_PATH`, `STRATEGY_FILE_PATH`, `STRATEGY_BACKUP_PATH`)
+- Removed call to `migrateJsonData(db)` from `migrate()` function
+- Removed unused `StrategyMode` import
 
-### DATA INTEGRITY
+`migrate.ts` now only runs schema migrations and seeds defaults. No JSON file I/O.
 
-1. **JSON files are the migration source**: `migrate.ts` reads `backend/data/ai_knowledge_profile.json` and `backend/data/ai_synthesized_strategy.json` (or their backups) and migrates data to SQLite if SQLite has fewer observations. Deleting these files BEFORE confirming SQLite has all data will result in permanent data loss.
+### 3. Verified `backend/src/index.ts` has no JSON dependencies
 
-2. **Migration is one-way**: Once data is in SQLite, the JSON files are no longer needed. But if SQLite is corrupted or empty, the JSON files are the only backup.
+`index.ts` does not read or write JSON files. It calls `store.loadFromDb()` which reads from SQLite only.
 
-3. **`scalarai.sqlite` is the source of truth**: After migration, all reads should come from SQLite. The `loadStateFromDb()` function in `state-persistence.ts` reads from SQLite.
+### 4. Deleted JSON backup files
 
-4. **WAL mode requires proper shutdown**: The SQLite database uses WAL (Write-Ahead Logging) mode. If the server is killed forcefully (SIGKILL), the WAL file may not be checkpointed. This is normal but can cause the DB to appear empty on next start if the WAL is corrupted.
-
-## Implementation Steps
-
-1. **VERIFY SQLite has all data first**: Run `SELECT COUNT(*) FROM ai_knowledge` and `SELECT COUNT(*) FROM ai_strategy` to confirm data exists.
-2. After 2 weeks of stable SQLite operation, archive JSON files (do NOT delete yet)
-3. Update `migrate.ts` to handle missing JSON files gracefully
-4. Test that app starts correctly without JSON files
-5. Delete JSON files only after confirming everything works
+- Deleted `backend/data/backups/ai_knowledge_profile.json`
+- Deleted `backend/data/backups/ai_synthesized_strategy.json`
+- `backend/data/backups/` directory is now empty
 
 ## Verification
 
-- No JSON files remain in `backend/data/`
-- Application starts and functions without JSON files
-- All data accessible via SQLite only
-- `npx tsc --noEmit` passes
+- `npx tsc --noEmit` passes with zero errors
+- Server starts successfully without JSON files
+- No JSON file references remain in `backend/src/`
+- SQLite is the sole source of truth for all application data

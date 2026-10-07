@@ -37,7 +37,7 @@
 |-----------|--------|-------|
 | `database/stage-1.md` — Schema Implementation | ✅ Done | 10 tables, 5 indexes, WAL mode, foreign keys |
 | `database/stage-2.md` — Migration & Cleanup | ✅ Done | JSON-to-SQLite migration, hourly cleanup, DB hydration |
-| `database/stage-3.md` — Legacy File Removal | ⏳ Pending | JSON backup files still exist in `backend/data/backups/` |
+| `database/stage-3.md` — Legacy File Removal | ✅ Done | JSON backup files deleted; migrate.ts no longer reads JSON; SQLite is sole source of truth |
 
 ## Style
 

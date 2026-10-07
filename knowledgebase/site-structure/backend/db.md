@@ -28,11 +28,7 @@ Creates DB connection, runs migrations, exports singleton.
 ### `migrate.ts`
 
 - `openDb(): InstanceType<typeof Database>` — opens SQLite DB at `backend/data/scalarai.sqlite`
-- `migrate(db)` — executes `schema.sql`, runs ALTER TABLE migrations, seeds defaults, migrates legacy JSON data
-
-**Legacy JSON migration:**
-- Reads `backend/data/ai_knowledge_profile.json` (or backup) and migrates to `ai_knowledge` table if SQLite has fewer observations
-- Reads `backend/data/ai_synthesized_strategy.json` (or backup) and migrates to `ai_strategy` table if current name is "AI Adaptive"
+- `migrate(db)` — executes `schema.sql`, runs ALTER TABLE migrations, seeds defaults
 
 **Seed defaults:**
 - Inserts default settings, AI knowledge, AI strategy if tables are empty
@@ -121,11 +117,9 @@ See `schema.sql` for full table definitions. Key tables:
 - Logs: deleted after 30 days (background cleanup every 1 hour)
 - Trades, strategies, knowledge, settings: retained indefinitely
 
-## Legacy Data Migration
+## Data Integrity
 
-On first run, `migrate.ts` attempts to migrate from legacy JSON files:
-- `backend/data/ai_knowledge_profile.json` → `ai_knowledge` table
-- `backend/data/ai_synthesized_strategy.json` → `ai_strategy` table
-- Backups in `backend/data/backups/` are used as fallback
-
-Migration only occurs if SQLite has less data than the JSON file.
+- SQLite is the sole source of truth for all application data
+- Legacy JSON files (`ai_knowledge_profile.json`, `ai_synthesized_strategy.json`) have been removed
+- `migrate.ts` no longer reads JSON files; it only runs schema migrations and seeds defaults
+- WAL mode requires proper shutdown; forceful kills (SIGKILL) may cause WAL corruption

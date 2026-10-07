@@ -54,7 +54,7 @@ backend/src/
 │   └── validators.ts              # isValidStrategyMode, isValidTradingMode, isValidTradeType
 └── db/
     ├── index.ts                   # openDb(), migrate(), exports scalarAiDb singleton
-    ├── migrate.ts                 # Schema migration + seedDefaults + migrateJsonData
+    ├── migrate.ts                 # Schema migration + seedDefaults
     ├── repository.ts              # ScalarAiDb — all SQL queries
     └── schema.sql                 # CREATE TABLE statements
 ```
@@ -185,10 +185,6 @@ createDashboardServer(server, sendInit, onMessage, onConnect?, onClose?)
 
 ```
 backend/data/
-├── scalarai.sqlite          # SQLite database
-├── ai_knowledge_profile.json # Legacy knowledge backup (migrated on first run)
-├── ai_synthesized_strategy.json # Legacy strategy backup (migrated on first run)
-└── backups/
-    ├── ai_knowledge_profile.json
-    └── ai_synthesized_strategy.json
+├── scalarai.sqlite          # SQLite database (WAL mode, foreign keys enabled)
+├── backups/                 # Empty directory (legacy JSON files removed)
 ```

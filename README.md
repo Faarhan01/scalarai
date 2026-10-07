@@ -40,8 +40,7 @@ Local trading dashboard and strategy engine for MetaTrader 5, with an MCP interf
 │   │   ├── mcp_server.ts        # MCP JSON-RPC 2.0 handler
 │   │   └── index.ts             # Express app + server bootstrap
 │   └── data/
-│       ├── scalarai.sqlite      # Active SQLite database
-│       └── backups/             # Legacy JSON backups
+│       └── scalarai.sqlite         # Active SQLite database (WAL mode, foreign keys)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/          # React components
@@ -155,7 +154,7 @@ This repo is edited from multiple machines and synced via GitHub. To avoid merge
 
 - `backend/data/scalarai.sqlite-shm` and `backend/data/scalarai.sqlite-wal` are ignored via `.gitignore`
 - The main database file `backend/data/scalarai.sqlite` is still tracked
-- If you need machine-local DB behavior, keep `scalarai.sqlite` uncommitted and rely on `backend/data/backups/` for portable data
+- If you need machine-local DB behavior, keep `scalarai.sqlite` uncommitted; SQLite is the sole source of truth
 
 ## Development
 
