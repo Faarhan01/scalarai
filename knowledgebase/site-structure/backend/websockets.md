@@ -6,7 +6,7 @@
 
 ### Bridge Server — `/mt5-bridge`
 
-Created by `createBridgeServer(server, onMessage, onConnect?, onClose?)`.
+Created by `createBridgeServer(server, onMessage, onConnect?, onClose?, allowedOrigin?)`.
 
 **Purpose:** MT5 EA connects here to receive pending orders/commands from the backend.
 
@@ -32,9 +32,12 @@ Created by `createBridgeServer(server, onMessage, onConnect?, onClose?)`.
 }
 ```
 
+**Supported client messages:**
+- `request_history` — requests candle history for a symbol
+
 ### Dashboard Server — `/ws/live`, `/ws`, `/live-feed`
 
-Created by `createDashboardServer(server, sendInit, onMessage, onConnect?, onClose?)`.
+Created by `createDashboardServer(server, sendInit, onMessage, onConnect?, onClose?, allowedOrigin?)`.
 
 **Purpose:** Frontend/dashboard connects here for real-time state synchronization.
 
@@ -66,6 +69,21 @@ Created by `createDashboardServer(server, sendInit, onMessage, onConnect?, onClo
 | `toggle_trade` | TradePanel | Toggles `tradeConfig.isActive` |
 | `close_all` | TradePanel | Closes all OPEN positions |
 | `reset_stats` | TradePanel | Clears trade history |
+| `request_history` | Charts | Requests candle history for a symbol |
+
+**`request_history` response:**
+```json
+{
+  "type": "history_response",
+  "payload": {
+    "symbol": "Step Index",
+    "candles": [...],
+    "count": 1000,
+    "from": null,
+    "to": null
+  }
+}
+```
 
 ## Reconnection
 

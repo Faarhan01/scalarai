@@ -72,8 +72,12 @@ HTTP request/response logging with duration in ms.
 ```ts
 export function rateLimit(options?: { windowMs?: number; max?: number }) {
   const windowMs = options?.windowMs || 60_000;
-  const max = options?.max || 1200;
+  const max = options?.max || 3600;
   return (req, res, next) => {
+    // Exempt streaming/EA polling endpoints
+    if (EXEMPT_PATHS.some((p) => req.path === p || req.path.startsWith("/api/market/"))) {
+      return next();
+    }
     const key = req.ip || req.socket.remoteAddress || "unknown";
     const now = Date.now();
     const entry = store.get(key);
@@ -88,7 +92,20 @@ export function rateLimit(options?: { windowMs?: number; max?: number }) {
 }
 ```
 
-In-memory sliding-window rate limiter. Default: 1200 requests per minute per IP.
+In-memory sliding-window rate limiter. Default: 3600 requests per minute per IP.
+
+**Exempt paths:**
+- `/api/update-market`
+- `/api/ea/tick`
+- `/api/market/bulk-candles`
+- `/api/market/candles`
+- `/api/market/history`
+- `/api/status`
+- `/api/poll`
+- `/poll`
+- `/get-pending-trades`
+- `/api/get-pending-trades`
+- `/api/health`
 
 **Limitations:**
 - In-memory store — does not persist across server restarts

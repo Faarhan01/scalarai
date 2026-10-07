@@ -8,9 +8,9 @@ Services contain all business logic. `AppStore` orchestrates them, and routes/We
 
 ## Service Modules
 
-### `app-store.ts` — AppStore Class (453 lines)
+### `app-store.ts` — AppStore Class (720 lines)
 
-Single source of truth for all application state and mutations.
+Single source of truth for all application state and mutations. Fields are `private`; access is via getters. Uses xstate for trading/bridge/calibration state machines and `ObservationsService` for market observations.
 
 **State fields:**
 - `tradeConfig: TradeConfig`
@@ -25,11 +25,22 @@ Single source of truth for all application state and mutations.
 - `nextTicket: { value: number }`
 - `latestBuyLockedFromEa: boolean`
 - `latestSellLockedFromEa: boolean`
-- `pendingBridgeOrders: any[]`
+- `pendingBridgeOrders: BridgeOrder[]`
 - `pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null`
 - `mt5BridgeClients: Set<WebSocket>`
 - `webDashboardClients: Set<WebSocket>`
 - `webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean }`
+- `tradingState`, `bridgeState`, `calibrationState` — xstate machines
+- `observationsService: ObservationsService`
+
+**Key getters:**
+- `config: TradeConfig`
+- `trades: readonly TradeRecord[]`
+- `logs: readonly SystemLog[]`
+- `getAiKnowledgeBase()`, `getAiSynthesizedStrategy()`, `getStrategySignal()`
+- `getSymbolStates()`, `getActiveSymbol()`, `getNextTicket()`
+- `getPendingBridgeOrders()`, `getMt5BridgeClients()`, `getWebDashboardClients()`
+- `getWebRequestTest()`
 
 **Key methods:**
 - `loadFromDb()` — hydrates from SQLite via `loadStateFromDb()`
@@ -40,6 +51,7 @@ Single source of truth for all application state and mutations.
 - `getAndClearPendingOrders(): BridgeOrder[]` — returns and clears pending bridge orders
 - `getPendingEaCommand()` — returns and clears pending EA command
 - `updateMarket(data, clientIp?)` — core tick processing: updates symbol state, AI knowledge, strategy eval, broadcasts
+- `ingestBulkCandles(symbol, candles, metadata?)` — bulk candle ingestion
 - `buildTradeState(): TradeState` — creates snapshot for trade execution
 - `buildMcpContext(): McpContext` — creates context for MCP tools
 - `runBackgroundAnalysisWorker()` — processes unprocessed telemetry, updates AI knowledge
@@ -48,6 +60,11 @@ Single source of truth for all application state and mutations.
 - `placeTrade(type, reason)` — opens simulated position
 - `closeTrade(tradeId)` — closes open trade
 - `resetStats()` — clears trade list, resets DB
+- `switchSymbol(symbol)` — switches active symbol, loads candles from DB
+- `updateWebRequestTest(update)` — partial update of WebRequest test state
+- `sendTradingEvent(event)`, `sendBridgeEvent(event)`, `sendCalibrationEvent(event)` — xstate transitions
+- `getTradingState()`, `getBridgeState()`, `getCalibrationState()` — xstate snapshots
+- `addBridgeClient(ws)`, `removeBridgeClient(ws)`, `addDashboardClient(ws)`, `removeDashboardClient(ws)`
 - `loadAiSynthesizedStrategy()` — loads AI strategy from DB or initializes default
 - `loadAiKnowledgeBase()` — loads knowledge base from DB or initializes default
 - `analyzeMarket()` — stub returning string for MCP type requirement
@@ -92,6 +109,17 @@ EA features:
 - `aggregateTickIntoCandle(state, targetPrice)` — creates/updates 1-minute OHLC candles from ticks
 - `updateMarket(symbolStates, data)` — processes incoming market data, deduplicates ticks, updates telemetry, returns `{ symbol, switched }`
 
+### `observations.ts` — Observations Service
+
+**Class:** `ObservationsService`
+
+- `storeObservation(obs)` — stores market observation with tags/metadata
+- `getObservations(filters?): Observation[]` — queries observations with filters
+- `getObservationsByCandle(candleId): Observation[]` — observations linked to a candle
+- `generateInsights(symbol, timeRange?): ObservationInsights` — direction distribution, top hours, velocity clusters, suggested strategies
+- `linkObservationToStrategy(observationId, strategyId)` — links observation to strategy via metadata
+- `getObservationsForStrategy(strategyId): Observation[]` — observations linked to a strategy
+
 ### `state-persistence.ts` — Database Persistence
 
 - `loadStateFromDb()` — loads config, knowledge, strategy, trades, logs from SQLite
@@ -116,13 +144,23 @@ EA features:
 - `evaluateMeanReversion(ctx, config)` — Bollinger Bands + RSI + momentum confirmation
 - `evaluateAiAdaptive(ctx, config)` — velocity + acceleration + EMA confirmation + speed divergence
 - `evaluateCustomStrategy(ctx, config)` — rule-based with conditions
-- `evaluateStrategyBacktest(mode, limit): BacktestResult` — full backtest engine
 
 **Indicator math:**
 - `calculateEMA(prices, period)`
 - `calculateRSI(prices, period)`
 - `calculateATR(ticks, period)` / `calculateATR(state, activeSymbol, period)`
 - `calculateBollingerBands(prices, period, numDevs)`
+
+### `strategy-backtest.ts` — Backtest Engine
+
+**Class:** `BacktestEngine`
+
+- `backtest(strategyId, symbol, from, to, initialBalance?): BacktestResult` — runs strategy against historical candles
+
+**Key interfaces:**
+- `BacktestCandle` — time, open, high, low, close, direction, volume
+- `BacktestTrade` — entryTime, exitTime, type, entryPrice, exitPrice, profit, reason
+- `BacktestResult` — strategyId, strategyMode, symbol, fromTime, toTime, initialBalance, finalBalance, totalTrades, wins, losses, winRate, totalProfit, maxDrawdown, trades
 
 ### `strategy-research.ts` — Market & Strategy Analysis
 
@@ -163,3 +201,17 @@ EA features:
 - `calculateRSI(prices, period)`
 - `calculateATR(state, activeSymbol, period)`
 - `calculateBollingerBands(prices, period, numDevs)`
+
+### `trading-machine.ts` — State Machines
+
+Uses `xstate` to model trading, bridge, and calibration state machines.
+
+**Machines:**
+- `tradingMachine` — `idle` ↔ `active` via START/STOP events
+- `bridgeMachine` — `disconnected` ↔ `connected` via CONNECT/DISCONNECT events
+- `calibrationMachine` — `calibrating` → `optimized` via CALIBRATE event (final state)
+
+**Types:**
+- `TradingState` — `"idle" | "active"`
+- `BridgeState` — `"disconnected" | "connected"`
+- `CalibrationState` — `"calibrating" | "optimized"`

@@ -8,7 +8,7 @@ All routes receive store methods/getters as callbacks from `backend/src/index.ts
 
 ```ts
 registerEaRoutes(app, getStatus, getConfig, onTick, getPendingEaCommand, apiKey);
-registerMarketRoutes(app, updateMarket, getConfig, apiKey);
+registerMarketRoutes(app, updateMarket, getConfig, ingestBulkCandles, getActiveSymbol, apiKey);
 registerStatusRoute(app, getStatus, switchSymbol, getPendingOrders, apiKey);
 registerSettingsRoutes(app, updateSettings, getSettings, getWebRequestTest, triggerTest, reportTest, apiKey);
 registerTradeRoutes(app, toggleTrade, resetStats, apiKey);
@@ -61,16 +61,21 @@ Response includes current config + `pendingAction`, `pendingLot`, `pendingSL`, `
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/update-market` | Optional | Alternate tick endpoint used by EA broadcast |
+| POST | `/api/update-market` | Optional | Single tick or bulk candles from EA/dashboard |
 | GET | `/api/market/history` | No | Tick history with optional `symbol`, `from`, `to`, `limit` query params (max 5000) |
 
-`POST /api/update-market` validates price/symbol, calls `updateMarket()`, returns current config snapshot.
+`POST /api/update-market` validates price/symbol, calls `updateMarket()` or `ingestBulkCandles()`, returns current config snapshot.
+
+Bulk candles format: `{ symbol, candles: [{ time, open, high, low, close, volume?, direction? }], digits?, tickSize? }`
 
 ### `mcp.ts`
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/mcp` | **Required** | MCP JSON-RPC 2.0 handler |
+| POST | `/api/mcp` | **Required** | MCP JSON-RPC 2.0 handler (alternate path) |
+| GET | `/mcp` | No | Server info: name, version, status, toolsCount, protocol, endpoint |
+| GET | `/api/mcp` | No | Server info (alternate path) |
 
 Always requires Bearer auth regardless of `SCALARAI_MCP_API_KEY`. See `mcp.md` for tool list.
 

@@ -124,3 +124,4 @@ Built from `store.buildMcpContext()` in `backend/src/index.ts`.
 - `McpTool` — name, description, inputSchema
 - `McpToolCallResult` — content array with text type
 - `McpToolCallParams` — name, arguments
+- `TOOLS` — array of all registered `McpTool` definitions

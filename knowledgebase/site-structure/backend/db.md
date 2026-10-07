@@ -53,6 +53,11 @@ Creates DB connection, runs migrations, exports singleton.
 - `getTicks(limit, symbol?): Tick[]` — SELECT with optional symbol filter
 - `getTicksSince(timestamp, symbol?): Tick[]` — SELECT WHERE time >= timestamp
 
+**Candles:**
+- `getCandles(symbol, from?, to?, limit?): MarketCandleRow[]` — SELECT from market_candles with filters
+- `insertCandle(candle)` — INSERT OR REPLACE into market_candles
+- `bulkInsertCandles(candles)` — batch INSERT OR REPLACE
+
 **AI Knowledge:**
 - `getAiKnowledge(): AiKnowledgeBase | null` — SELECT FROM ai_knowledge WHERE id = 1
 - `upsertAiKnowledge(knowledge)` — INSERT OR UPDATE on conflict
@@ -82,6 +87,10 @@ Creates DB connection, runs migrations, exports singleton.
 - `updateStrategy(id, updates)` — UPDATE by id
 - `deleteStrategy(id)` — DELETE by id
 
+**Observations:**
+- `insertObservation(row)` — INSERT INTO observations
+- `getObservations(symbol?, from?, to?, limit?): ObservationRow[]` — SELECT with filters
+
 **Utilities:**
 - `getMaxTicket(): number` — MAX(ticket) FROM trades, defaults to 837201
 - `rawQuery(sql, params): unknown[]` — read-only SELECT queries with safety checks
@@ -97,6 +106,7 @@ See `schema.sql` for full table definitions. Key tables:
 | `trades` | Trade records with OPEN/CLOSED status |
 | `system_logs` | System logs with source/level |
 | `market_ticks` | Tick data with OHLC, velocity, lock flags |
+| `market_candles` | OHLC candles with direction |
 | `ai_knowledge` | AI knowledge base (singleton id=1) |
 | `ai_strategy` | AI synthesized strategy (singleton id=1) |
 | `settings` | Trade config (singleton id=1) |
@@ -104,18 +114,26 @@ See `schema.sql` for full table definitions. Key tables:
 | `symbol_connections` | Per-symbol EA connection details |
 | `symbol_metadata` | Per-symbol metadata (digits, tick size, etc.) |
 | `strategies` | Custom strategies |
+| `observations` | Market observations with velocity, direction, tags |
+| `strategy_templates` | Built-in strategy templates |
+| `strategy_versions` | Strategy version history |
+| `strategy_symbol_performance` | Per-symbol strategy performance metrics |
 
 **Indexes:**
 - `idx_trades_status`, `idx_trades_open_time`, `idx_trades_symbol`
 - `idx_system_logs_timestamp`, `idx_system_logs_source`
 - `idx_market_ticks_time`, `idx_market_ticks_symbol`
+- `idx_market_candles_symbol_time`
 - `idx_strategies_mode`
+- `idx_observations_symbol_timestamp`
+- `idx_observations_candle_id`
 
 ## Data Retention
 
 - Ticks: deleted after 7 days (background cleanup every 1 hour)
 - Logs: deleted after 30 days (background cleanup every 1 hour)
-- Trades, strategies, knowledge, settings: retained indefinitely
+- Candles: retained indefinitely
+- Trades, strategies, knowledge, settings, observations: retained indefinitely
 
 ## Data Integrity
 

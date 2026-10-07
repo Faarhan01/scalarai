@@ -47,6 +47,8 @@ Date/time utility functions:
 - `timeAgo(epochMs): string` — human-readable relative time (`"5s ago"`, `"3m ago"`, `"2h ago"`, `"1d ago"`)
 - `nowEpochMs(): number` — `Date.now()`
 - `nowIso8601(): string` — current time as ISO string
+- `parseTimestamp(value): number | undefined` — parses ISO string to epoch ms, returns undefined on invalid
+- `parseLimit(value, fallback, max): number` — parses numeric limit with fallback and max cap
 
 ## `response.ts`
 

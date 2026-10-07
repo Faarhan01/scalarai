@@ -6,7 +6,7 @@
 
 ```
 frontend/src/
-├── App.tsx                        # Root component (~631 lines), exports ErrorBoundary class
+├── App.tsx                        # Root component (~677 lines), exports ErrorBoundary class
 ├── main.tsx                       # React entrypoint
 ├── types/
 │   ├── index.ts                   # Shared frontend types: StrategyMode, TradeConfig, TradeRecord, etc.
@@ -32,12 +32,12 @@ frontend/src/
 │   ├── downloads/
 │   │   └── DownloadsCenter.tsx    # EA/bridge/template downloads
 │   ├── layout/
+│   │   ├── AppShell.tsx           # Root layout wrapper (ErrorBoundary + children)
 │   │   ├── Header.tsx             # Top navigation bar
 │   │   ├── MobileDrawer.tsx       # Mobile side menu
 │   │   ├── StatusBar.tsx          # Connection status indicator
 │   │   ├── SymbolSwitcher.tsx     # Active symbol selector
-│   │   ├── TabBar.tsx             # Bottom tab navigation
-│   │   └── AppShell.tsx           # Root layout wrapper
+│   │   └── TabBar.tsx             # Bottom tab navigation
 │   ├── logs/
 │   │   └── LogsViewer.tsx         # System log viewer
 │   ├── settings/
@@ -59,7 +59,7 @@ frontend/src/
 │   ├── useAppStatus.ts            # Full status polling/websocket sync (28 lines)
 │   ├── useChartData.ts            # Chart data transformation (54 lines)
 │   ├── useDownloadBridge.ts       # Download bridge state (117 lines)
-│   ├── useElapsedTimer.ts         # Session elapsed counter
+│   ├── useElapsedTimer.ts         # Session elapsed counter (19 lines)
 │   ├── useErrorHandler.ts         # Global error boundary helper (26 lines)
 │   ├── useNetworkStatus.ts        # Online/offline detection (43 lines)
 │   ├── useSettings.ts             # Settings form state + applySettings() (226 lines)
@@ -86,8 +86,9 @@ frontend/src/
 
 ## Key Facts
 
-### `App.tsx` — Root Component (~631 lines)
+### `App.tsx` — Root Component (~677 lines)
 
+- Exports `ErrorBoundary` class (class component with error catching)
 - Orchestrates layout + hooks
 - Not fully decomposed yet; still imports most components directly
 - Manages tab navigation state locally
@@ -95,6 +96,11 @@ frontend/src/
 - Uses `requestAnimationFrame` for chart throttling to avoid excessive re-renders
 - Fetches initial status on mount, then syncs via WebSocket
 - Blocks automated trading until AI calibration threshold (20 observations) is met
+
+### `AppShell.tsx` — Error Boundary Wrapper (64 lines)
+
+- Wraps `App.tsx` content in `ErrorBoundary`
+- Catches React errors and displays fallback UI with refresh button
 
 ## Detailed Documentation
 

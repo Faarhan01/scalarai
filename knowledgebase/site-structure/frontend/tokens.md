@@ -12,7 +12,7 @@ Design tokens are centralized design constants exported as TypeScript objects. T
 
 ```ts
 export const colors = {
-  brand: { 50-500 } as const,
+  brand: { 50-900 } as const,
   slate: { 50-950 } as const,
   emerald: { 300-600 } as const,
   amber: { 400-500 } as const,
@@ -94,6 +94,8 @@ export const shadows = {
   glowSm: '0 0 8px rgb(99 102 241 / 0.2)',
   inner: 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)',
 } as const;
+
+export type ShadowToken = keyof typeof shadows;
 ```
 
 **Shadow presets:**

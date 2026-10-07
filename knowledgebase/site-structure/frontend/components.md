@@ -56,7 +56,7 @@ export { LogsViewer } from "./logs/LogsViewer";
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `AppShell` | `layout/AppShell.tsx` | Root layout wrapper |
+| `AppShell` | `layout/AppShell.tsx` | Root layout wrapper with ErrorBoundary |
 | `Header` | `layout/Header.tsx` | Top navigation bar with symbol switcher, status indicators, trading toggle |
 | `MobileDrawer` | `layout/MobileDrawer.tsx` | Responsive side menu for mobile |
 | `StatusBar` | `layout/StatusBar.tsx` | Footer with latency, elapsed time, active symbol |
@@ -78,7 +78,7 @@ export { LogsViewer } from "./logs/LogsViewer";
 | `TelemetryStream` | `charts/TelemetryStream.tsx` | Live telemetry chart |
 
 `CandlestickChart/` contains:
-- `CandlestickChart.tsx` — main component
+- `CandlestickChart.tsx` — main component (197 lines)
 - `types.ts` — TypeScript interfaces
 - `constants.ts` — chart constants
 - `index.ts` — barrel export

@@ -103,6 +103,23 @@ export interface CandleBar {
 }
 ```
 
+### `MarketCandleRow`
+
+```ts
+export interface MarketCandleRow {
+  id?: number;
+  symbol: string;
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+  direction?: "up" | "down" | "flat";
+  created_at?: string;
+}
+```
+
 ### `EAConnectionDetails`
 
 ```ts
@@ -124,6 +141,55 @@ export interface EAConnectionDetails {
   swapLong: number | null;
   swapShort: number | null;
   profitCalcMode: number | null;
+}
+```
+
+### `SymbolMetadata`
+
+```ts
+export interface SymbolMetadata {
+  symbol: string;
+  description: string | null;
+  digits: number | null;
+  tickSize: number | null;
+  broker: string | null;
+  accountNumber: string | null;
+  lastConnected: string | null;
+}
+```
+
+### `SymbolStateEntry`
+
+```ts
+export interface SymbolStateEntry {
+  ticks: Tick[];
+  candles: CandleBar[];
+  telemetry: MarketTelemetry[];
+  connection: EAConnectionDetails;
+  currentPrice: number;
+  lastDirection: "up" | "down" | "flat";
+  tickCount: number;
+}
+```
+
+### `SymbolStates`
+
+```ts
+export interface SymbolStates {
+  map: Map<string, SymbolStateEntry>;
+  activeSymbol: string;
+}
+```
+
+### `MarketTelemetry`
+
+```ts
+export interface MarketTelemetry {
+  timestamp: number;
+  price: number;
+  velocity: number;
+  buyLocked: boolean;
+  sellLocked: boolean;
 }
 ```
 
@@ -186,6 +252,104 @@ export interface StrategyCondition {
   action: "BUY" | "SELL" | "HOLD";
   priority: number;
 }
+```
+
+### `StrategyTemplate`
+
+```ts
+export interface StrategyTemplate {
+  id: string;
+  name: string;
+  description: string;
+  mode: StrategyMode;
+  category: string;
+  rules: StrategyRules;
+  defaultConfig?: Partial<TradeConfig>;
+}
+```
+
+## Observation Types
+
+### `Observation`
+
+```ts
+export interface Observation {
+  id: string;
+  symbol: string;
+  timestamp: number;
+  direction: "up" | "down" | "flat";
+  velocity: number;
+  price: number;
+  candleId?: number;
+  tags: string[];
+  metadata: Record<string, any>;
+  createdAt: string;
+}
+```
+
+### `ObservationFilters`
+
+```ts
+export interface ObservationFilters {
+  symbol?: string;
+  from?: number;
+  to?: number;
+  direction?: "up" | "down" | "flat";
+  minVelocity?: number;
+  maxVelocity?: number;
+  tags?: string[];
+  limit?: number;
+}
+```
+
+### `ObservationInsights`
+
+```ts
+export interface ObservationInsights {
+  symbol: string;
+  totalObservations: number;
+  avgVelocity: number;
+  peakVelocity: number;
+  directionDistribution: { up: number; down: number; flat: number };
+  topActiveHours: { hour: number; count: number }[];
+  velocityClusters: { min: number; max: number; count: number }[];
+  suggestedStrategies: string[];
+}
+```
+
+## State Machine Types
+
+### `AppStoreReadOnly`
+
+```ts
+export interface AppStoreReadOnly {
+  config: TradeConfig;
+  trades: readonly TradeRecord[];
+  logs: readonly SystemLog[];
+  getAiKnowledgeBase(): AiKnowledgeBase;
+  getAiSynthesizedStrategy(): AiSynthesizedStrategy;
+  getStrategySignal(): { type: string; reason: string; confidence?: number } | null;
+  getSymbolStates(): SymbolStates;
+  getActiveSymbol(): string;
+  getNextTicket(): { value: number };
+  getLatestBuyLockedFromEa(): boolean;
+  getLatestSellLockedFromEa(): boolean;
+  getPendingBridgeOrders(): readonly BridgeOrder[];
+  getMt5BridgeClients(): ReadonlySet<WebSocket>;
+  getWebDashboardClients(): ReadonlySet<WebSocket>;
+  getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
+  getTradingState(): TradingState;
+  getBridgeState(): BridgeState;
+  getCalibrationState(): CalibrationState;
+}
+```
+
+### State Machine Types
+
+```ts
+export type TradingState = "idle" | "active";
+export type BridgeState = "disconnected" | "connected";
+export type CalibrationState = "calibrating" | "optimized";
 ```
 
 ## Payload Types
@@ -279,6 +443,9 @@ export interface McpContext {
   placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<{ success: boolean; message: string }>;
   closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
   resetStats: () => Promise<void>;
+  getTradingState: () => TradingState;
+  getBridgeState: () => BridgeState;
+  getCalibrationState: () => CalibrationState;
 }
 ```
 
@@ -321,20 +488,6 @@ export interface TradeSessionStats {
 }
 ```
 
-### `SymbolMetadata`
-
-```ts
-export interface SymbolMetadata {
-  symbol: string;
-  description: string | null;
-  digits: number | null;
-  tickSize: number | null;
-  broker: string | null;
-  accountNumber: string | null;
-  lastConnected: string | null;
-}
-```
-
 ## DB Row Types
 
 - `SettingsRow` — id, is_active, selected_strategy, lot_size, take_profit_points, stop_loss_points, trailing_stop_points, use_trailing_stop, max_trades, trading_mode, is_ai_mode_enabled, mt5_path, app_endpoint, selected_assets
@@ -344,6 +497,11 @@ export interface SymbolMetadata {
 - `StrategyRow` — id, name, description, mode, rules, createdAt, updatedAt
 - `TradeRow` — id, ticket, symbol, type, entry_price, close_price, lot_size, profit, status, open_time, close_time, strategy, reason
 - `SymbolMetadataRow` — symbol, description, digits, tick_size, broker, account_number, last_connected
+- `ObservationRow` — id, symbol, timestamp, direction, velocity, price, candle_id, tags, metadata, created_at
+- `MarketCandleRow` — id, symbol, time, open, high, low, close, volume, direction, created_at
+- `StrategyTemplateRow` — id, name, description, mode, category, rules, default_config, created_at, updated_at
+- `StrategyVersionRow` — id, strategy_id, version, name, description, mode, rules, created_at
+- `StrategySymbolPerformanceRow` — id, strategy_id, symbol, total_trades, wins, losses, win_rate, total_profit, avg_profit, max_drawdown, updated_at
 
 ## Market Ingestion Types
 
