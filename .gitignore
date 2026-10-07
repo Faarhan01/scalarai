@@ -8,3 +8,4 @@ coverage/
 !.env.example
 backend/data/*.sqlite-shm
 backend/data/*.sqlite-wal
+backend/data/scalarai.sqlite
