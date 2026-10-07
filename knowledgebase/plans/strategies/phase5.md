@@ -1,51 +1,27 @@
 # Strategies Plan — Phase 5: Optimization & Versioning
 
-## Objective
+## Status: ❌ NOT DONE
 
-Implement strategy optimization, versioning, and an AI feedback loop for continuous improvement.
+## What Exists
 
-## Implementation
+- `strategy_versions` table exists in database
+- `strategy-research.ts` has `analyzeStrategyPerformance()`, `suggestStrategyOptimizations()`, `recommendStrategyForConditions()`
+- MCP tools `optimize_strategy`, `get_strategy_performance` exist
 
-### 1. Strategy Versioning
+## What's Missing
 
-- Every strategy change creates a new version
-- Versions track parent-child relationships
-- Rollback to previous version supported
-- Performance tracked per version per symbol
+- No `strategy-optimizer.ts` service
+- No strategy versioning UI or MCP tools
+- No automated optimization loop
+- No strategy performance dashboard
+- No rollback functionality
 
-### 2. Optimization Engine
+## Implementation Steps
 
-```typescript
-interface OptimizationSuggestion {
-  parameter: string;
-  currentValue: number;
-  suggestedValue: number;
-  reason: string;
-  expectedImprovement: string;
-  confidence: number;
-}
-```
-
-### 3. AI Optimization Loop
-
-1. Query `backtest_results` for underperforming strategies
-2. Identify parameter patterns in winning trades
-3. Generate optimization suggestions
-4. Run backtest with suggested parameters
-5. Deploy if improvement exceeds threshold
-
-### 4. Strategy Performance Dashboard
-
-- Track win rate, profit factor, max drawdown over time
-- Compare strategy versions
-- Show per-symbol performance breakdown
-
-### 5. MCP Tools for Optimization
-
-- `optimize_strategy` — get optimization suggestions
-- `compare_strategy_versions` — compare two strategy versions
-- `get_strategy_evolution` — get version history for a strategy
-- `rollback_strategy` — revert to previous version
+1. Create `backend/src/services/strategy-optimizer.ts`
+2. Add MCP tools for versioning (`compare_strategy_versions`, `get_strategy_evolution`, `rollback_strategy`)
+3. Add frontend strategy performance dashboard
+4. Implement optimization loop (advisory only)
 
 ## Critical Fragility Warnings
 

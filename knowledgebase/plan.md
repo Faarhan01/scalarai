@@ -40,8 +40,9 @@ The project exposes a local HTTP API on `http://localhost:3000` and an MCP endpo
 ### MCP Endpoint
 
 - `POST /mcp` — MCP JSON-RPC 2.0 endpoint
-  - Authenticated via `Authorization: Bearer <SCALARAI_MCP_API_KEY>`
+  - Always requires `Authorization: Bearer <SCALARAI_MCP_API_KEY>`
   - Exposes tools for status, strategies, trades, logs, DB queries, settings, trading controls
+  - Note: Unlike other routes, the MCP route requires auth even if `SCALARAI_MCP_API_KEY` is unset (it will reject requests with empty/missing key)
 
 ### WebSockets
 
@@ -126,7 +127,9 @@ With the REST API and/or MCP, Kilo can:
 
 - All API calls are localhost-only by default
 - The server binds to `0.0.0.0:3000`; if exposed externally, restrict access
-- State-changing routes require `SCALARAI_MCP_API_KEY` Bearer token
+- **MCP route (`POST /mcp`) always requires Bearer auth** — it rejects requests with empty/missing keys
+- **Other routes use optional auth** — if `SCALARAI_MCP_API_KEY` is set, protected routes require `Authorization: Bearer <key>`; if unset, all non-MCP routes are open
+- The EA generator and bridge do not use Bearer auth. They rely on the `/api/ea/tick` endpoint being accessible.
 - GitHub OAuth tokens are no longer stored in `.env.example`
 - The monitoring daemon writes to `%TEMP%`, which is user-writable only
 

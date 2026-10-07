@@ -21,11 +21,19 @@ Design and implement the SQLite 3 schema for all application data.
 - `trades` — Trade records with status, profit, strategy, reason
 - `system_logs` — Structured logs with level, source, timestamp
 - `market_ticks` — Tick history with price, direction, velocity, lock states
+- `market_candles` — OHLC candle storage (minute-aligned)
 - `ai_knowledge` — Singleton AI knowledge base
 - `ai_strategy` — Singleton AI synthesized strategy
 - `settings` — Singleton trade configuration
 - `ea_connections` — Singleton EA connection state
+- `symbol_connections` — Per-symbol EA connection state
 - `symbol_metadata` — Per-symbol metadata registry
+- `strategies` — Custom strategies
+- `observations` — Individual AI observation records
+- `strategy_templates` — Built-in strategy templates
+- `strategy_versions` — Strategy version history
+- `strategy_symbol_performance` — Per-symbol strategy performance tracking
+- `backtest_results` — Backtest result storage
 
 ## Verification
 

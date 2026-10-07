@@ -132,16 +132,20 @@ Connect to `ws://127.0.0.1:3000/ws/live` for real-time updates.
 
 Message types:
 - `init` — initial state payload
-- `trades_update` — trade list changed
+- `tick` — price/tick update
+- `trades` — trade list changed
 - `config` — config updated
 - `connection` — connection state changed
 - `webrequest_test` — WebRequest test status
 - `ping`/`pong` — latency measurement
+- `request_history` / `history_response` — historical candle data (dashboard only)
 
 ## Security Notes
 
 - All API calls are localhost-only by default
-- State-changing routes require `SCALARAI_MCP_API_KEY` Bearer token
+- **MCP route (`POST /mcp`) always requires Bearer auth** — it rejects requests with empty/missing keys
+- **Other routes use optional auth** — if `SCALARAI_MCP_API_KEY` is set, protected routes require `Authorization: Bearer <key>`; if unset, all non-MCP routes are open
+- The EA generator and bridge do not use Bearer auth. They rely on the `/api/ea/tick` endpoint being accessible.
 - GitHub OAuth tokens are no longer stored in `.env.example`
 - No secrets are logged
 

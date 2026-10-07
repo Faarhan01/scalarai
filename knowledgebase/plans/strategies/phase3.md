@@ -1,67 +1,29 @@
 # Strategies Plan — Phase 3: AI-Driven Strategy Creation
 
-## Objective
+## Status: ❌ NOT DONE
 
-Enable the AI to create new strategies from observations and historical data via MCP, without manual code changes.
+## What Exists
 
-## Current State
+- AI can synthesize strategy rules from knowledge base (`aiSynthesizedStrategy`)
+- Strategy templates exist in code (`strategy-templates.ts`) and database (`strategy_templates` table)
+- Observations are stored in `observations` table via `ObservationsService`
+- MCP tools `list_strategy_templates` and `create_strategy_from_template` exist
 
-- AI can synthesize strategy rules from knowledge base
-- Strategy creation requires manual code or template selection
-- Observations are stored in-memory only (telemetry array)
-- No link between observations and strategy rules
+## What's Missing
 
-## Implementation
+- No `strategy-generator.ts` service
+- No automated rule generation from observations
+- No `create_strategy_from_observations` MCP tool
+- No observation-to-rule mapping logic
+- No strategy validation before saving
 
-### 1. Observation-to-Rule Mapping
+## Implementation Steps
 
-Create mapping functions that convert observation patterns into strategy rules:
-
-```typescript
-interface StrategyRule {
-  type: "ema_cross" | "rsi_filter" | "velocity_gate" | "bollinger_bounce" | "atr_breakout";
-  params: Record<string, number | boolean>;
-  direction: "buy" | "sell" | "both";
-  confidence: number;
-  observationIds: string[];
-}
-```
-
-### 2. Rule Generation from Observations
-
-```typescript
-function generateRulesFromObservations(observations: Observation[]): StrategyRule[] {
-  // Group observations by pattern
-  // Extract common parameters (velocity thresholds, time windows, etc.)
-  // Generate rule candidates with confidence scores
-}
-```
-
-### 3. MCP Tool: `create_strategy_from_observations`
-
-```json
-{
-  "name": "High Velocity Breakout",
-  "symbol": "Step Index",
-  "observationIds": ["obs1", "obs2", "obs3"],
-  "minConfidence": 0.7,
-  "mode": "CUSTOM"
-}
-```
-
-### 4. Strategy Validation
-
-Before saving a generated strategy:
-- Run against recent historical data
-- Calculate win rate, profit factor
-- Only save if metrics exceed thresholds
-- Store validation results in `backtest_results`
-
-### 5. AI Strategy Evolution
-
-- Track strategy versions over time
-- Auto-generate new strategy versions when performance degrades
-- Link strategy versions to observation clusters
+1. Create `backend/src/services/strategy-generator.ts`
+2. Implement observation-to-rule mapping
+3. Add strategy validation before save
+4. Add `create_strategy_from_observations` MCP tool
+5. Update `McpContext` with new methods
 
 ## Critical Fragility Warnings
 

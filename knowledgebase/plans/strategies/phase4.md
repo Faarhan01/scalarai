@@ -1,107 +1,20 @@
 # Strategies Plan — Phase 4: Backtest Engine with Historical Data
 
-## Objective
+## Status: ⚠️ PARTIALLY IMPLEMENTED — Engine exists; persistence and UI incomplete
 
-Build a backtest engine that runs strategies against stored historical candles and stores results for AI analysis.
+## What Exists
 
-## Current State
+- `backend/src/services/strategy-backtest.ts` — `BacktestEngine` class (211 lines)
+- `BacktestCandle`, `BacktestTrade`, `BacktestResult` interfaces
+- `runBacktest(strategyMode, candles, config, initialBalance?)` method
+- MCP tools: `backtest_strategy`, `backtest_strategy_with_history`
 
-- `evaluateStrategyBacktest` uses recent live ticks (last 500)
-- No candle-based backtesting
-- No backtest result storage
-- Backtest runs in-process, could block server
+## What's Missing
 
-## Implementation
-
-### 1. Candle-Based Backtest Engine
-
-```typescript
-interface BacktestCandle {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  direction: "up" | "down" | "flat";
-  velocity?: number;
-}
-
-interface BacktestResult {
-  strategyId: string;
-  symbol: string;
-  fromTime: number;
-  toTime: number;
-  totalTrades: number;
-  wins: number;
-  losses: number;
-  winRate: number;
-  profitFactor: number;
-  maxDrawdown: number;
-  sharpeRatio: number;
-  trades: BacktestTrade[];
-}
-```
-
-### 2. Backtest Runner Service
-
-```typescript
-class BacktestEngine {
-  runBacktest(strategy: Strategy, candles: BacktestCandle[], config: TradeConfig): BacktestResult
-  calculateMetrics(trades: BacktestTrade[]): BacktestMetrics
-}
-```
-
-### 3. Historical Candle Loading
-
-Query `market_candles` table for backtest input:
-
-```typescript
-function getCandlesForBacktest(symbol: string, from: number, to: number): BacktestCandle[] {
-  return scalarAiDb.getCandles(symbol, from, to);
-}
-```
-
-If `market_candles` is empty, aggregate from `market_ticks`:
-
-```typescript
-function aggregateTicksToCandles(ticks: Tick[]): BacktestCandle[] {
-  // Group ticks by minute bucket
-  // Build OHLC candles
-}
-```
-
-### 4. Backtest Isolation
-
-- Run on copies of data, not live state
-- No mutations to `AppStore` during backtest
-- Use worker threads for long backtests to avoid blocking
-
-### 5. MCP Tool: `backtest_strategy_with_history`
-
-```json
-{
-  "strategyId": "uuid",
-  "symbol": "Step Index",
-  "from": "2026-10-01T00:00:00Z",
-  "to": "2026-10-06T00:00:00Z",
-  "initialBalance": 10000
-}
-```
-
-Returns:
-
-```json
-{
-  "strategyId": "uuid",
-  "symbol": "Step Index",
-  "totalTrades": 42,
-  "winRate": 0.62,
-  "profitFactor": 1.8,
-  "maxDrawdown": 0.15,
-  "sharpeRatio": 1.2,
-  "trades": [...]
-}
-```
+- Backtest results not persisted to `backtest_results` table
+- No `saveResult()` method in `BacktestEngine`
+- No frontend backtest UI
+- No strategy comparison UI
 
 ## Critical Fragility Warnings
 
@@ -111,7 +24,7 @@ Returns:
 
 ## Verification
 
-- Backtest runs against historical candles
-- Results stored in `backtest_results` table
-- MCP tool returns correct data
-- No live state mutation during backtest
+- [x] Backtest runs against historical candles
+- [ ] Results stored in `backtest_results` table
+- [x] MCP tool returns correct data
+- [ ] No live state mutation during backtest

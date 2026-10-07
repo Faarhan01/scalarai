@@ -10,11 +10,11 @@
 | `backend/implementation-plan.md` — Priority 2: Missing Utilities | ✅ Done | `normalizeIp()`, `validateAppUrl()` backend + frontend |
 | `backend/implementation-plan.md` — Priority 3: Service Extraction | ✅ Done | All services extracted: trade-execution, state-persistence, market-ingestion, strategy, defaults, ea-generator, knowledge |
 | `backend/implementation-plan.md` — Priority 4: Type Safety Sweep | ✅ Done | `err: any` → `unknown`, `UpdateMarketPayload`, `StrategyRules`, DB typing, route typing |
-| `backend/implementation-plan.md` — Priority 5: AppStore Class | ✅ Done | `app-store.ts` exists, `app-state.ts` deleted, `index.ts` thin bootstrap |
-| `backend/stage-1.md` — Service Extraction | ✅ Done | All services extracted; `index.ts` is 192 lines (not 160 as plan states) |
+| `backend/implementation-plan.md` — Priority 5: AppStore Class | ✅ Done | `app-store.ts` exists (720 lines), `app-state.ts` deleted, `index.ts` thin bootstrap (202 lines) |
+| `backend/stage-1.md` — Service Extraction | ✅ Done | All services extracted; `index.ts` is 202 lines |
 | `backend/stage-2.md` — Type Safety Sweep | ✅ Done | All `: any` replaced in critical paths |
 | `backend/stage-3.md` — Hardcoded Values Cleanup | ✅ Done | Ticket seed, IP normalization, URL validation all implemented |
-| `backend/stage-4.md` — AppStore Class | ✅ Done | `app-store.ts` is 453 lines (not 441 as plan states); `app-state.ts` deleted |
+| `backend/stage-4.md` — AppStore Class | ✅ Done | `app-store.ts` is 720 lines with private fields, getters, xstate machines; `app-state.ts` deleted |
 | Backend unit tests for AppStore | ❌ Not Done | No `app-store.test.ts` exists |
 | Backend integration tests for WebSockets | ❌ Not Done | No WebSocket integration tests |
 | Route handlers accept AppStore directly | ⚠️ Partial | Closure pattern still used; works but is verbose |
@@ -35,9 +35,41 @@
 
 | Plan File | Status | Notes |
 |-----------|--------|-------|
-| `database/stage-1.md` — Schema Implementation | ✅ Done | 10 tables, 5 indexes, WAL mode, foreign keys |
-| `database/stage-2.md` — Migration & Cleanup | ✅ Done | JSON-to-SQLite migration, hourly cleanup, DB hydration |
+| `database/stage-1.md` — Schema Implementation | ✅ Done | 16 tables, multiple indexes, WAL mode, foreign keys |
+| `database/stage-2.md` — Migration & Cleanup | ✅ Done | JSON-to-SQLite migration complete, hourly cleanup, DB hydration |
 | `database/stage-3.md` — Legacy File Removal | ✅ Done | JSON backup files deleted; migrate.ts no longer reads JSON; SQLite is sole source of truth |
+
+## Historical Data
+
+| Plan File | Status | Notes |
+|-----------|--------|-------|
+| `historical-data/stage-1.md` — Time Utility & Candle Timestamps | ✅ Done | `time.ts` exists, candles use minute-aligned `currentBucket * 60000`, `getMinuteBucket()` used |
+| `historical-data/stage-2.md` — Enhanced Database Schema | ✅ Done | All 6 new tables exist: `market_candles`, `observations`, `strategy_templates`, `strategy_versions`, `backtest_results`, `strategy_symbol_performance` |
+| `historical-data/stage-3.md` — EA Historical Data Support | ✅ Done | WebSocket `request_history`/`history_response` handlers exist in `index.ts` for both bridge and dashboard; EA generator has `PushHistoricalCandles` |
+| `historical-data/stage-4.md` — Backend History Routes & WebSocket | ✅ Done | `GET /api/market/candles`, `GET /api/market/observations`, `POST /api/market/bulk-candles` routes exist; WebSocket history handlers exist |
+| `historical-data/stage-5.md` — Observations Service & AI Insights | ✅ Done | `observations.ts` exists (182 lines), integrated into `AppStore`, MCP tools `get_market_observations` and `generate_observation_insights` exist |
+| `historical-data/stage-6.md` — Enhanced MCP Tools | ✅ Done | `get_market_candles`, `get_market_observations`, `backtest_strategy_with_history`, `list_strategy_templates`, `create_strategy_from_template` all exist in `mcp_server.ts` |
+| `historical-data/stage-7.md` — Strategy Creation & Backtesting | ⚠️ Partial | `strategy-backtest.ts` exists (211 lines) with `BacktestEngine`, but backtest results are not persisted to `backtest_results` table; no `strategy-generator.ts` or `strategy-optimizer.ts` |
+| `historical-data/stage-8.md` — Frontend Chart & Historical Data Display | ⚠️ Partial | WebSocket `request_history`/`history_response` handlers exist in `index.ts`; no frontend history panel UI yet |
+
+## Strategies
+
+| Plan File | Status | Notes |
+|-----------|--------|-------|
+| `strategies/phase1.md` — Database Schema | ✅ Done | All tables exist: `strategy_templates`, `strategy_versions`, `backtest_results`, `strategy_symbol_performance`, `market_candles`, `observations` |
+| `strategies/phase2.md` — Multi-Symbol Strategy Management | ⚠️ Partial | `strategy_symbol_performance` table exists; `settings.selected_assets` exists; no `strategy_symbols` mapping table yet |
+| `strategies/phase3.md` — AI-Driven Strategy Creation | ❌ Not Done | No `strategy-generator.ts`; observations exist but no automated rule generation |
+| `strategies/phase4.md` — Backtest Engine with Historical Data | ⚠️ Partial | `strategy-backtest.ts` exists with `BacktestEngine`; no candle-based backtest persistence yet |
+| `strategies/phase5.md` — Optimization & Versioning | ❌ Not Done | No `strategy-optimizer.ts`; versioning table exists but no UI or automation |
+
+## AppStore Standardization
+
+| Plan File | Status | Notes |
+|-----------|--------|-------|
+| `appstore/phase1.md` — Private Fields + Getters | ✅ Done | All fields private, getters exposed, `index.ts` uses getters/methods |
+| `appstore/phase2.md` — Split Interface | ✅ Done | `AppStoreReadOnly` interface exists in `types/index.ts` |
+| `appstore/phase3.md` — XState State Machine | ✅ Done | tradingMachine, bridgeMachine, calibrationMachine added as passive observers |
+| `appstore/phase4.md` — Freeze in Development | ❌ Not Done | No `Object.freeze(store)` in `index.ts` |
 
 ## Style
 
@@ -47,33 +79,23 @@
 | `style/stage-2.md` — Semantic Classes | ✅ Done | components.css with all semantic classes |
 | `style/stage-3.md` — Token Adoption | ✅ Done | UI primitives built and adopted |
 
-## Historical Data
-
-| Plan File | Status | Notes |
-|-----------|--------|-------|
-| `historical-data/stage-1.md` — Time Utility | ✅ Done | `time.ts` exists with all helpers |
-| `historical-data/stage-2.md` — Enhanced Schema | ❌ Not Done | No `market_candles`, `observations`, `backtest_results`, or `strategy_templates` tables |
-| `historical-data/stage-3.md` — EA History Support | ❌ Not Done | No history request handler in EA generator |
-| `historical-data/stage-4.md` — Backend History Routes | ❌ Not Done | No `/api/ea/request-history`, `/api/market/candles`, or `/api/market/observations` |
-| `historical-data/stage-5.md` — Observations Service | ❌ Not Done | No `backend/src/services/observations.ts` |
-| `historical-data/stage-6.md` — Enhanced MCP Tools | ❌ Not Done | No `request_mt5_history`, `get_market_candles`, `get_market_observations`, etc. |
-| `historical-data/stage-7.md` — Strategy Creation & Backtesting | ❌ Not Done | No `strategy-backtest.ts` or `strategy-optimizer.ts` |
-
 ## Other
 
 | Item | Status | Notes |
 |------|--------|-------|
-| `knowledgebase/restructure.md` | Unknown | Needs review |
-| `knowledgebase/info/aiconnection.md` | Unknown | Needs review |
-| `knowledgebase/info/chart.md` | Unknown | Needs review |
-| `plan.md` — Kilo Integration Plan | ✅ Done | All documented endpoints and WebSockets exist |
+| `knowledgebase/restructure.md` | ✅ Updated | Now reflects actual codebase at HEAD |
+| `knowledgebase/info/aiconnection.md` | ✅ Updated | Auth behavior and WebSocket message types corrected |
+| `plan.md` — Kilo Integration Plan | ✅ Accurate | All documented endpoints and WebSockets exist |
+| `knowledgebase/info/chart.md` | N/A | File does not exist |
 
-## Inaccurate Plan Claims
+## Inaccurate Plan Claims (Fixed)
 
-These plan documents contain claims that do not match the actual codebase:
+These plan documents previously contained claims that did not match the actual codebase. All have been corrected:
 
-1. **`backend/stage-1.md` and `backend/stage-4.md`**: Claim `index.ts` is 160 lines and `app-store.ts` is 441 lines. Actual: `index.ts` is 192 lines, `app-store.ts` is 453 lines.
-2. **`backend/implementation-plan.md`**: Claims `UpdateMarketPayload` is applied to market/EA route handlers. Actual: Only used in `ea.ts` and `market.ts`, not in `settings.ts`, `status.ts`, etc.
-3. **`frontend/stage-1.md`**: Claims `ErrorBoundary` was extracted to `AppShell`. Actual: `ErrorBoundary` IS in `AppShell.tsx` and IS working, but the remaining work items (WebSocket callbacks, state consolidation, RAF throttling) are NOT done.
-4. **`backend/implementation-plan.md`**: Lists `frontend/src/types/api.ts` and `backend/src/utils/response.ts` as "dead/placeholder files" to remove. Actual: Both files are NOT empty and are actively imported (`api.ts` in `services/api.ts`, `response.ts` is not imported in routes but contains `jsonSuccess`/`jsonError` utilities).
-5. **`style/stage-3.md`**: Claims all components adopted tokens. Actual: UI primitives exist and are adopted, but many components still use inline Tailwind utilities.
+1. **`restructure.md`**: Claimed `index.ts` is 160 lines and `app-store.ts` is 441 lines. Actual: `index.ts` is 202 lines, `app-store.ts` is 720 lines.
+2. **`restructure.md`**: Missing many services (`observations.ts`, `strategy-backtest.ts`, `trading-machine.ts`) and utils (`time.ts`, `response.ts`, `auth.ts`).
+3. **`restructure.md`**: Claimed rate limiting is 180 req/min. Actual: 3600 req/min with exempt paths.
+4. **`restructure.md`**: Claimed `frontend/src/types/api.ts` is empty. Actual: 49 lines with API response interfaces.
+5. **`restructure.md`**: Claimed `CandlestickChart.tsx` is a single file. Actual: directory with 4 files.
+6. **`status.md`**: Previously claimed historical data stages 2-8 were "Not Done". Actual: stages 2-6 are fully done, stages 7-8 are partial.
+7. **`plan.md` and `aiconnection.md`**: Previously claimed state-changing routes always require Bearer auth. Actual: MCP route always requires auth; other routes use optional auth (open when `SCALARAI_MCP_API_KEY` is unset).
