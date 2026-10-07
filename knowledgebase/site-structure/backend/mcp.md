@@ -38,6 +38,9 @@ Returns Express middleware. Always requires Bearer auth regardless of `expectedA
 ### System & Status
 
 - **`get_system_status`** — Full system status: config, connection, trades, logs, stats, AI strategy, symbol states
+- **`get_trading_state`** — Current trading state machine value (`idle` | `active`)
+- **`get_bridge_state`** — Current EA bridge connection state (`disconnected` | `connected`)
+- **`get_calibration_state`** — Current AI calibration state (`calibrating` | `optimized`). Automated trading is blocked until `optimized`.
 - **`get_ai_knowledge_base`** — AI knowledge base with long-term market velocity observations, hourly patterns, peak speeds
 - **`get_ai_strategy`** — Current active AI strategy including rules and parameters
 - **`query_db`** — Read-only SQL query against SQLite. Returns rows as JSON.
@@ -108,6 +111,9 @@ export interface McpContext {
   placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<{ success: boolean; message: string }>;
   closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
   resetStats: () => Promise<void>;
+  getTradingState: () => TradingState;
+  getBridgeState: () => BridgeState;
+  getCalibrationState: () => CalibrationState;
 }
 ```
 

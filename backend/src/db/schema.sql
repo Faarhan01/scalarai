@@ -139,6 +139,109 @@ CREATE TABLE IF NOT EXISTS strategies (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS market_candles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
+  time INTEGER NOT NULL,
+  open REAL NOT NULL,
+  high REAL NOT NULL,
+  low REAL NOT NULL,
+  close REAL NOT NULL,
+  volume REAL,
+  direction TEXT NOT NULL CHECK (direction IN ('up', 'down', 'flat')),
+  minute_bucket INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+  id TEXT PRIMARY KEY,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
+  timestamp INTEGER NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('up', 'down', 'flat')),
+  velocity REAL NOT NULL,
+  price REAL NOT NULL,
+  candle_id INTEGER,
+  tags TEXT NOT NULL DEFAULT '[]',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS strategy_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'CUSTOM',
+  category TEXT NOT NULL DEFAULT 'custom',
+  rules TEXT NOT NULL DEFAULT '{}',
+  default_config TEXT NOT NULL DEFAULT '{}',
+  tags TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS strategy_versions (
+  id TEXT PRIMARY KEY,
+  strategy_id TEXT NOT NULL,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'CUSTOM',
+  rules TEXT NOT NULL DEFAULT '{}',
+  config TEXT NOT NULL DEFAULT '{}',
+  parent_version_id TEXT,
+  created_by TEXT NOT NULL DEFAULT 'manual',
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (strategy_id) REFERENCES strategies(id),
+  FOREIGN KEY (parent_version_id) REFERENCES strategy_versions(id)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_results (
+  id TEXT PRIMARY KEY,
+  strategy_id TEXT NOT NULL,
+  strategy_version_id TEXT,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
+  from_time INTEGER NOT NULL,
+  to_time INTEGER NOT NULL,
+  initial_balance REAL NOT NULL DEFAULT 10000,
+  final_balance REAL NOT NULL DEFAULT 0,
+  total_trades INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  win_rate REAL NOT NULL DEFAULT 0,
+  profit_factor REAL NOT NULL DEFAULT 0,
+  max_drawdown REAL NOT NULL DEFAULT 0,
+  sharpe_ratio REAL NOT NULL DEFAULT 0,
+  avg_win REAL NOT NULL DEFAULT 0,
+  avg_loss REAL NOT NULL DEFAULT 0,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (strategy_id) REFERENCES strategies(id),
+  FOREIGN KEY (strategy_version_id) REFERENCES strategy_versions(id)
+);
+
+CREATE TABLE IF NOT EXISTS strategy_symbol_performance (
+  id TEXT PRIMARY KEY,
+  strategy_id TEXT NOT NULL,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
+  total_trades INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  win_rate REAL NOT NULL DEFAULT 0,
+  total_profit REAL NOT NULL DEFAULT 0,
+  avg_profit_per_trade REAL NOT NULL DEFAULT 0,
+  max_drawdown REAL NOT NULL DEFAULT 0,
+  last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (strategy_id) REFERENCES strategies(id),
+  UNIQUE(strategy_id, symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_candles_symbol_time ON market_candles(symbol, time);
+CREATE INDEX IF NOT EXISTS idx_observations_symbol_timestamp ON observations(symbol, timestamp);
+CREATE INDEX IF NOT EXISTS idx_backtest_results_strategy ON backtest_results(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_results_symbol ON backtest_results(symbol);
+CREATE INDEX IF NOT EXISTS idx_strategy_versions_strategy ON strategy_versions(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_strategy_symbol_performance ON strategy_symbol_performance(strategy_id, symbol);
+
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_open_time ON trades(open_time);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);

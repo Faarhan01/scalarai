@@ -43,13 +43,13 @@ These are the exact lines that read/write `AppStore` state directly:
 | 61 | `() => store.tradeConfig` | `tradeConfig` |
 | 65 | `() => store.tradeConfig` | `tradeConfig` |
 | 66 | `() => store.webRequestTest` | `webRequestTest` |
-| 87 | `store.aiKnowledgeBase.totalObservations` | `aiKnowledgeBase` |
-| 88 | `store.aiKnowledgeBase.totalObservations` | `aiKnowledgeBase` |
-| 89 | `store.aiKnowledgeBase.totalObservations` | `aiKnowledgeBase` |
-| 90 | `store.aiKnowledgeBase` | `aiKnowledgeBase` |
-| 91 | `store.aiSynthesizedStrategy` | `aiSynthesizedStrategy` |
-| 92 | `getSymbolState(store.symbolStates, store.activeSymbol)` | `symbolStates`, `activeSymbol` |
-| 93 | `store.aiKnowledgeBase.globalAverageSpeed` | `aiKnowledgeBase` |
+| 87 | `store.getAiKnowledgeBase().totalObservations` | `aiKnowledgeBase` |
+| 88 | `store.getAiKnowledgeBase().totalObservations` | `aiKnowledgeBase` |
+| 89 | `store.getAiKnowledgeBase().totalObservations` | `aiKnowledgeBase` |
+| 90 | `store.getAiKnowledgeBase()` | `aiKnowledgeBase` |
+| 91 | `store.getAiSynthesizedStrategy()` | `aiSynthesizedStrategy` |
+| 92 | `getSymbolState(store.getSymbolStates(), store.getActiveSymbol())` | `symbolStates`, `activeSymbol` |
+| 93 | `store.getAiKnowledgeBase().globalAverageSpeed` | `aiKnowledgeBase` |
 | 98 | `store.getFullStatusPayload.bind(store)` | method call |
 | 105 | `store.getAndClearPendingOrders.bind(store)` | method call |
 | 154 | `store.getFullStatusPayload()` | method call |
@@ -123,19 +123,18 @@ Add these getters to `AppStore`:
 get config(): TradeConfig { return this.tradeConfig; }
 get trades(): readonly TradeRecord[] { return this.tradesList; }
 get logs(): readonly SystemLog[] { return this.systemLogs; }
-get aiKnowledgeBase(): AiKnowledgeBase { return this.aiKnowledgeBase; }
-get aiSynthesizedStrategy(): AiSynthesizedStrategy { return this.aiSynthesizedStrategy; }
-get lastStrategySignal(): { type: string; reason: string; confidence?: number } | null { return this.lastStrategySignal; }
-get symbolStates(): SymbolStates { return this.symbolStates; }
-get activeSymbol(): string { return this.activeSymbol; }
-get nextTicket(): { value: number } { return this.nextTicket; }
-get latestBuyLockedFromEa(): boolean { return this.latestBuyLockedFromEa; }
-get latestSellLockedFromEa(): boolean { return this.latestSellLockedFromEa; }
-get pendingBridgeOrders(): readonly BridgeOrder[] { return this.pendingBridgeOrders; }
-get pendingEaCommand(): { action: string; lot: number; sl: number; tp: number } | null { return this.pendingEaCommand; }
-get mt5BridgeClients(): ReadonlySet<WebSocket> { return this.mt5BridgeClients; }
-get webDashboardClients(): ReadonlySet<WebSocket> { return this.webDashboardClients; }
-get webRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean } { return this.webRequestTest; }
+getAiKnowledgeBase(): AiKnowledgeBase { return this.aiKnowledgeBase; }
+getAiSynthesizedStrategy(): AiSynthesizedStrategy { return this.aiSynthesizedStrategy; }
+getStrategySignal(): { type: string; reason: string; confidence?: number } | null { return this.lastStrategySignal; }
+getSymbolStates(): SymbolStates { return this.symbolStates; }
+getActiveSymbol(): string { return this.activeSymbol; }
+getNextTicket(): { value: number } { return this.nextTicket; }
+getLatestBuyLockedFromEa(): boolean { return this.latestBuyLockedFromEa; }
+getLatestSellLockedFromEa(): boolean { return this.latestSellLockedFromEa; }
+getPendingBridgeOrders(): readonly BridgeOrder[] { return this.pendingBridgeOrders; }
+getMt5BridgeClients(): ReadonlySet<WebSocket> { return this.mt5BridgeClients; }
+getWebDashboardClients(): ReadonlySet<WebSocket> { return this.webDashboardClients; }
+getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean } { return this.webRequestTest; }
 ```
 
 Note: `mt5BridgeClients` and `webDashboardClients` return `ReadonlySet<WebSocket>` to prevent external code from calling `.add()`/`.delete()` on the set reference. However, `ReadonlySet` still allows `.has()` and `.size`, which is what `index.ts` needs.
@@ -191,7 +190,7 @@ Replace all direct field accesses with getters or methods:
 | Old (line) | New |
 |------------|-----|
 | `() => store.tradeConfig` (60, 61, 65) | `() => store.config` |
-| `() => store.webRequestTest` (66) | `() => store.webRequestTest` |
+| `() => store.webRequestTest` (66) | `() => store.getWebRequestTest()` |
 | `store.webRequestTest.status = "pending"` (68) | `store.updateWebRequestTest({ status: "pending", ... })` |
 | `store.webRequestTest.triggerTest = true` (69) | `store.updateWebRequestTest({ triggerTest: true, ... })` |
 | `store.webRequestTest.lastTested = ...` (70) | `store.updateWebRequestTest({ ... })` |
@@ -203,10 +202,12 @@ Replace all direct field accesses with getters or methods:
 | `store.webRequestTest.triggerTest = false` (79) | `store.updateWebRequestTest({ triggerTest: false })` |
 | `store.activeSymbol = symbol` (100) | `store.switchSymbol(symbol)` |
 | `store.symbolStates.activeSymbol = symbol` (101) | handled by `switchSymbol()` |
-| `store.mt5BridgeClients.add(ws)` (143) | `store.mt5BridgeClients` is read-only, need method |
-| `store.mt5BridgeClients.delete(ws)` (147) | need method |
-| `store.webDashboardClients.add(ws)` (176) | need method |
-| `store.webDashboardClients.delete(ws)` (179) | need method |
+| `store.mt5BridgeClients.add(ws)` (143) | `store.addBridgeClient(ws)` |
+| `store.mt5BridgeClients.delete(ws)` (147) | `store.removeBridgeClient(ws)` |
+| `store.toggleTrading(!store.tradeConfig.isActive)` (161) | `store.toggleTrading(!store.config.isActive)` |
+| `store.tradesList.forEach(...)` (164) | `store.trades.forEach(...)` |
+| `store.webDashboardClients.add(ws)` (176) | `store.addDashboardClient(ws)` |
+| `store.webDashboardClients.delete(ws)` (179) | `store.removeDashboardClient(ws)` |
 
 ### 5. Add methods for Set mutations
 

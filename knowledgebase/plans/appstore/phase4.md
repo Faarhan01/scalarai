@@ -6,7 +6,7 @@ Add `Object.freeze(store)` in development to catch accidental mutations at runti
 
 ## Implementation
 
-Add one line to `backend/src/index.ts` after creating the `AppStore` instance (after line 39):
+Add one line to `backend/src/index.ts` after creating the `AppStore` instance:
 
 ```ts
 const store = new AppStore();
@@ -30,57 +30,39 @@ After Phase 1 makes all fields private, `Object.freeze(store)` catches:
    (store as any).newField = "value";  // TypeError in strict mode
    ```
 
-3. **Mutation via TypeScript type assertions:**
-   ```ts
-   (store as any).tradesList = [];  // TypeError in strict mode
-   ```
-
 ## What This Does NOT Catch
 
 1. **Shallow freeze only**: Nested objects/arrays are not frozen.
    - `store.config.lotSize = 999` would still work if `config` object is not frozen
-   - `store.trades.push(newTrade)` would still work if `trades` array is not frozen
+   - This is fine — `updateSettings()` intentionally mutates `tradeConfig` properties
 
 2. **Set/Map contents**: `Object.freeze()` only freezes the Set/Map reference, not its contents.
    - `store.mt5BridgeClients.add(ws)` would still work
-   - This is why Phase 1 adds `ReadonlySet<WebSocket>` getters
+   - This is fine — `addBridgeClient()` intentionally mutates the Set
 
 3. **Internal mutations**: `Object.freeze()` does not catch mutations inside `AppStore` methods (which is intentional).
-
-## Complementary Approaches
-
-### Deep freeze for critical objects
-
-If you want to catch nested mutations, deep-freeze critical state objects in the constructor:
-
-```ts
-constructor() {
-  this.tradeConfig = Object.freeze(getDefaultTradeConfig());
-  this.nextTicket = Object.freeze({ value: scalarAiDb.getMaxTicket() + 1 });
-  // ...
-}
-```
-
-### Proxy-based deep freeze (experimental)
-
-```ts
-if (process.env.NODE_ENV !== "production") {
-  const handler: ProxyHandler<AppStore> = {
-    set(target, prop, value) {
-      throw new TypeError(`Cannot set property ${String(prop)} on AppStore`);
-    },
-  };
-  Object.freeze(store);
-}
-```
-
-This catches attempts to add new properties but not nested mutations.
 
 ## When to Apply
 
 - Apply AFTER Phase 1 (private fields) so TypeScript doesn't complain about `private` fields being frozen
-- Apply BEFORE Phase 2 (interface split) so you catch any missed mutations during the interface transition
-- Remove or conditionally apply if performance testing shows freeze overhead (unlikely for a single object)
+- Apply AFTER Phase 2 (interface split) so you catch any missed mutations during the interface transition
+- Do NOT apply before Phase 1 — it will fail because public fields can't be frozen if they're reassigned in the constructor
+
+## Do NOT Deep-Freeze Mutable State
+
+**Do NOT deep-freeze `tradeConfig`, `tradesList`, or other objects that need to be mutated.** These are intentionally mutable — `updateSettings()`, `placeTrade()`, `closeTrade()`, and `resetStats()` all modify them. Freezing them would break the app.
+
+```ts
+// WRONG — this breaks updateSettings()
+constructor() {
+  this.tradeConfig = Object.freeze(getDefaultTradeConfig());  // breaks app
+}
+
+// CORRECT — only freeze the store reference
+if (process.env.NODE_ENV !== "production") {
+  Object.freeze(store);
+}
+```
 
 ## Verification
 

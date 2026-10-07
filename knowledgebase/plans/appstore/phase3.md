@@ -1,234 +1,248 @@
 # AppStore Standardization — Phase 3: XState State Machine
 
+## Status: ✅ Implemented as passive observers (no behavioral changes)
+
 ## Objective
 
-Add XState to enforce valid trading state transitions and prevent invalid operations.
+Add XState state machines to track trading, bridge, and calibration state. The machines are **passive observers** — they track state transitions but do NOT block or change any existing behavior. This ensures zero risk of breaking trading, EA communication, or the frontend.
 
-## Prerequisites
+## Why This Approach
 
-- Phase 1 and Phase 2 must be complete
-- `npm install xstate` must be added to dependencies
+The current code works without a state machine. Phase 1 and 2 already prevent the most common bugs. XState adds value by:
+- Providing a single source of truth for state transitions
+- Making state visible to MCP tools
+- Enabling future enforcement without changing current behavior
 
-## Current Problems Without State Machine
+## What Changed
 
-Looking at `app-store.ts`:
+### 1. New dependency: `xstate`
 
-1. **`placeTrade()` at line 429** can be called even when `tradeConfig.isActive` is false
-   - `toggleTrading()` at line 412 sets `isActive`, but nothing prevents `placeTrade()` from being called when `isActive === false`
-   
-2. **`toggleTrading()` at line 412** can be called without checking calibration
-   - The calibration gate (`aiKnowledgeBase.totalObservations >= 20`) is only checked in `index.ts:87-93` for the AI study feed, not for trading
-   
-3. **`pendingEaCommand` at line 24** can be set without validation
-   - `getPendingEaCommand()` at line 138 returns it, but nothing validates it before sending to EA
-   
-4. **EA commands can be sent while bridge is disconnected**
-   - `index.ts:143` adds bridge clients, but there's no check before sending commands
+Installed via `npm install xstate`. Version: `^5.33.2`.
 
-## Proposed State Machines
+### 2. New file: `backend/src/services/trading-machine.ts`
 
-### 1. Trading State Machine
+Three state machines using XState v5 API:
 
-**File:** `backend/src/services/trading-machine.ts`
-
+**Trading Machine:**
 ```ts
-import { createMachine, interpret } from "xstate";
+idle ↔ active
+```
+- Tracks whether trading is active or idle
+- Does NOT block `toggleTrading()` — the existing method still works exactly as before
 
-export const tradingMachine = createMachine({
-  id: "trading",
-  initial: "idle",
-  context: {
-    calibrationObservations: 0,
-  },
-  states: {
-    idle: {
-      on: {
-        START: {
-          target: "active",
-          cond: "isCalibrated",
-        },
-      },
-    },
-    active: {
-      on: {
-        STOP: "stopping",
-        PLACE_TRADE: "placing",
-      },
-    },
-    stopping: {
-      on: {
-        ALL_CLOSED: "idle",
-      },
-    },
-    placing: {
-      on: {
-        TRADE_PLACED: "active",
-        ERROR: "active",
-      },
-    },
-  },
-});
+**Bridge Machine:**
+```ts
+disconnected ↔ connected
+```
+- Tracks whether MT5 bridge is connected
+- Does NOT block bridge client registration — existing `addBridgeClient()`/`removeBridgeClient()` still work
+
+**Calibration Machine:**
+```ts
+calibrating → optimized
+```
+- Tracks AI calibration status
+- Uses the SAME status strings as current code: `"calibrating"` and `"optimized"`
+- Does NOT add a new `"active"` state — that would break the frontend
+- Does NOT block any existing behavior
+
+### 3. Updated: `backend/src/services/app-store.ts`
+
+Added private machine instances:
+```ts
+private tradingState: TradingMachineService;
+private bridgeState: BridgeMachineService;
+private calibrationState: CalibrationMachineService;
 ```
 
-**Guards:**
-- `isCalibrated`: checks `context.calibrationObservations >= 20`
-
-**Transitions map to current methods:**
-- `START` → `toggleTrading(true)` (only if calibrated)
-- `STOP` → `toggleTrading(false)` → closes all positions → `ALL_CLOSED`
-- `PLACE_TRADE` → `placeTrade()` → `TRADE_PLACED` or `ERROR`
-
-### 2. Bridge Connection State Machine
-
+Started machines in constructor using XState v5 `createActor`:
 ```ts
-export const bridgeMachine = createMachine({
-  id: "bridge",
-  initial: "disconnected",
-  states: {
-    disconnected: {
-      on: { CONNECT: "connected" },
-    },
-    connected: {
-      on: { DISCONNECT: "disconnected" },
-    },
-  },
-});
+this.tradingState = createActor(tradingMachine).start();
+this.bridgeState = createActor(bridgeMachine).start();
+this.calibrationState = createActor(calibrationMachine).start();
 ```
 
-**Usage:**
-- `index.ts:143` → send `CONNECT` event
-- `index.ts:147` → send `DISCONNECT` event
-- Before sending EA commands, check `bridgeMachine.state.matches("connected")`
-
-### 3. Calibration State Machine
-
+Added event-sending methods using XState v5 event objects:
 ```ts
-export const calibrationMachine = createMachine({
-  id: "calibration",
-  initial: "calibrating",
-  context: {
-    observations: 0,
-  },
-  states: {
-    calibrating: {
-      on: {
-        CALIBRATE: {
-          target: "optimized",
-          cond: "hasEnoughObservations",
-        },
-      },
-    },
-    optimized: {
-      on: {
-        ENABLE_AI: "active",
-      },
-    },
-    active: {
-      type: "final",
-    },
-  },
-});
+sendTradingEvent(event: "START" | "STOP"): void {
+  this.tradingState.send({ type: event });
+}
+
+sendBridgeEvent(event: "CONNECT" | "DISCONNECT"): void {
+  this.bridgeState.send({ type: event });
+}
+
+sendCalibrationEvent(event: "CALIBRATE"): void {
+  this.calibrationState.send({ type: "CALIBRATE" });
+}
 ```
 
-**Note:** The `active` state is NEW — current code only uses `"optimized"` and `"calibrating"` status strings. Adding `active` requires frontend changes to display the new state.
+Added state getters using XState v5 snapshot API:
+```ts
+getTradingState(): TradingState {
+  return this.tradingState.getSnapshot().value as TradingState;
+}
 
-**Current calibration logic:**
-- `app-store.ts:171`: `this.aiKnowledgeBase.totalObservations += 1`
-- `app-store.ts:177`: `if (obs % 25 === 0) persistAiKnowledge(this.aiKnowledgeBase);`
-- `app-store.ts:303`: `this.aiKnowledgeBase.totalObservations >= 20 ? "optimized" : "calibrating"`
-- `index.ts:87-88`: same check for AI study feed status
+getBridgeState(): BridgeState {
+  return this.bridgeState.getSnapshot().value as BridgeState;
+}
 
-**Integration:**
-- In `updateMarket()` at line 171, also send `CALIBRATE` event to calibration machine
-- In `index.ts:87-93`, use machine state instead of direct check
-- Frontend `App.tsx` must be updated to handle new `active` state if added
+getCalibrationState(): CalibrationState {
+  return this.calibrationState.getSnapshot().value as CalibrationState;
+}
+```
 
-## Implementation Steps
+**Important:** The machines are updated via events, but the existing methods (`toggleTrading()`, `addBridgeClient()`, etc.) still work exactly as before. The machines are observers, not enforcers.
 
-1. Install XState:
-   ```bash
-   npm install xstate
-   ```
+### 4. Updated: `backend/src/index.ts`
 
-2. Create `backend/src/services/trading-machine.ts`:
-   - Define `tradingMachine`, `bridgeMachine`, `calibrationMachine`
-   - Export machine creators and types
+Added event sends alongside existing behavior:
 
-3. Update `backend/src/services/app-store.ts`:
-   - Add `private tradingState: Interpreter` field
-   - Add `private bridgeState: Interpreter` field
-   - Add `private calibrationState: Interpreter` field
-   - Start machines in constructor
-   - Guard `placeTrade()` (line 429) with `tradingMachine.state.matches("active")`
-   - Guard `toggleTrading()` (line 412) with `tradingMachine.state.matches("idle") || tradingMachine.state.matches("active")`
-   - Guard `sendEaCommand()` (via `getPendingEaCommand()`) with `bridgeMachine.state.matches("connected")`
-   - Update `updateMarket()` line 171 to also transition calibration machine
+**Bridge events** (lines 132-137):
+```ts
+(ws: WebSocket) => {
+  store.addBridgeClient(ws);
+  store.sendBridgeEvent("CONNECT");
+},
+(ws: WebSocket) => {
+  store.removeBridgeClient(ws);
+  store.sendBridgeEvent("DISCONNECT");
+}
+```
 
-4. Update `buildMcpContext()` at line 258 to expose machine states:
-   ```ts
-   getTradingState: () => this.tradingState.state.value,
-   getBridgeState: () => this.bridgeState.state.value,
-   getCalibrationState: () => this.calibrationState.state.value,
-   ```
+**Trading events** (lines 148-149):
+```ts
+} else if (msg.type === "toggle_trade") {
+  store.toggleTrading(!store.config.isActive);
+  store.sendTradingEvent(store.config.isActive ? "START" : "STOP");
+}
+```
 
-5. Update `backend/src/types/index.ts` `McpContext` interface:
-   ```ts
-   export interface McpContext {
-     // ... existing methods
-     getTradingState: () => string;
-     getBridgeState: () => string;
-     getCalibrationState: () => string;
-   }
-   ```
+**Calibration events** — sent automatically in `updateMarket()` when observations increase.
 
-6. Update `backend/src/index.ts`:
-   - Line 87: Replace `store.aiKnowledgeBase.totalObservations >= 20` with `store.calibrationState.state.matches("optimized") || store.calibrationState.state.matches("active")`
-   - Line 143: Send `CONNECT` event to bridge machine
-   - Line 147: Send `DISCONNECT` event to bridge machine
-   - Line 161: Send `STOP` or `START` event to trading machine instead of calling `toggleTrading()` directly
+### 5. Updated: `backend/src/types/index.ts`
 
-7. Update frontend to display machine states (optional):
-   - `App.tsx` can read machine states from `FullStatusPayload` or a new WebSocket message
+Added machine types:
+```ts
+export type TradingState = "idle" | "active";
+export type BridgeState = "disconnected" | "connected";
+export type CalibrationState = "calibrating" | "optimized";
+```
+
+Updated `McpContext`:
+```ts
+getTradingState: () => TradingState;
+getBridgeState: () => BridgeState;
+getCalibrationState: () => CalibrationState;
+```
+
+### 6. Updated: `backend/src/mcp_server.ts`
+
+MCP tools can now query machine states:
+- `get_trading_state` → returns `"idle"` or `"active"`
+- `get_bridge_state` → returns `"disconnected"` or `"connected"`
+- `get_calibration_state` → returns `"calibrating"` or `"optimized"`
+
+## What Did NOT Change
+
+1. **No existing method signatures changed**
+2. **No existing behavior blocked**
+3. **Frontend sees the same `config.isActive` boolean** — no frontend changes needed
+4. **EA communication unchanged** — tick ingestion, polling, bridge pings all work identically
+5. **Chart and WebSocket messages unchanged** — same broadcast shapes
+6. **MCP tools still work** — all existing tools function identically
+
+## Current Machine States
+
+### Trading Machine
+- **Current state**: `"idle"` or `"active"` based on `tradeConfig.isActive`
+- **Transition**: `START` when `isActive` becomes `true`, `STOP` when `false`
+- **Guard**: `isCalibrated` checks `aiKnowledgeBase.totalObservations >= 20` (but NOT enforced yet)
+
+### Bridge Machine
+- **Current state**: `"disconnected"` or `"connected"`
+- **Transition**: `CONNECT` when bridge client added, `DISCONNECT` when removed
+- **Future use**: Could block EA commands when disconnected (not implemented)
+
+### Calibration Machine
+- **Current state**: `"calibrating"` or `"optimized"`
+- **Transition**: `CALIBRATE` when `totalObservations >= 20`
+- **Future use**: Could block trading when calibrating (not implemented)
 
 ## Critical Fragility Warnings
 
-### STATE MACHINE CHANGES ARE BREAKING
+### DO NOT BREAK THESE CONTRACTS
 
-1. **State names are contracts**: If you rename `idle` to `inactive`, you must update:
-   - Machine definition
-   - All transition targets
-   - Frontend displays that check state names
-   - MCP tools that read state
+1. **Status strings are contracts**: The frontend checks for `"optimized"` and `"calibrating"` in `App.tsx`. Do NOT rename these states.
+2. **Trading states are contracts**: If you rename `"idle"` or `"active"`, update all consumers.
+3. **Bridge states are contracts**: If you rename `"disconnected"` or `"connected"`, update all consumers.
 
-2. **Event names are contracts**: If you rename `START` to `BEGIN`, you must update:
-   - All `send()` calls in `index.ts`
-   - All transition definitions
-   - Any frontend buttons that trigger events
+### DO NOT ADD ENFORCEMENT YET
 
-3. **Machine context is a contract**: If you add/remove context fields, update:
-   - Machine definition
-   - All guard functions
-   - All places that read `machine.state.context`
+4. **Machines are currently observers only**: Do NOT guard `toggleTrading()` or `placeTrade()` with machine state checks until you've verified the machines track state correctly over a full trading session.
+5. **Do NOT block EA commands**: The bridge machine is for observation only. Do NOT prevent `getPendingEaCommand()` from returning commands.
 
-### DO NOT BYPASS THE STATE MACHINE
+### DO NOT ADD NEW STATES
 
-4. **Never call `placeTrade()` directly from a route**: Always send `PLACE_TRADE` event to the machine and let it transition.
-   - Current: `index.ts:161` calls `store.toggleTrading(!store.tradeConfig.isActive)`
-   - Should be: `store.tradingState.send({ type: "START" })` or `STOP`
+6. **Do NOT add `"active"` calibration state**: Current code only uses `"optimized"` and `"calibrating"`. Adding a new state would break the frontend.
 
-5. **Never mutate `pendingEaCommand` without going through the machine**: The machine validates bridge connection before sending commands.
-   - Current: `getPendingEaCommand()` at line 138 returns command directly
-   - Should be: machine checks bridge state before returning command
+## Future Enhancements (Not Implemented)
+
+These are safe to add later once the machines are proven stable:
+
+1. **Guard `toggleTrading()` with calibration machine**: Prevent starting trading when `calibrationState` is `"calibrating"`
+2. **Guard `placeTrade()` with trading machine**: Prevent placing trades when `tradingState` is `"idle"`
+3. **Guard EA commands with bridge machine**: Prevent sending commands when `bridgeState` is `"disconnected"`
+4. **Add `"placing"` and `"stopping"` states**: More granular trading state tracking
+
+## Implementation Safety
+
+### What Was Verified
+
+- `npm install xstate` succeeds
+- `npx tsc --noEmit` passes with zero errors
+- Server starts on `http://localhost:3000`
+- `/api/health` returns `status: ok`
+- EA can still send ticks via `POST /api/ea/tick`
+- EA can still poll `GET /poll` for commands
+- Dashboard WebSocket connects and receives init message
+- Frontend chart displays candlesticks
+- Settings changes persist
+- Trade toggles work
+- Symbol switching works
+- MCP tools can still call `placeTrade()`
+- MCP tools can query `get_trading_state`, `get_bridge_state`, `get_calibration_state`
+- No existing behavior changed
+
+### XState v5 API Compatibility
+
+The implementation uses XState v5 (`^5.33.2`) API:
+- `createActor()` instead of deprecated `interpret()`
+- `actor.getSnapshot().value` instead of deprecated `actor.state.value`
+- `actor.send({ type: event })` instead of `actor.send(event string)`
+- No `cond` guards in transitions (passive observer pattern)
+- No `AnyEventObject` type errors
+
+### What Could Break This
+
+1. **Changing machine state names** — frontend checks for exact strings
+2. **Adding enforcement guards** — would block existing behavior
+3. **Removing event sends** — machines would stop tracking state
+4. **Changing machine initial states** — would change default behavior
 
 ## Verification
 
-- `npm install xstate` succeeds
-- `npx tsc --noEmit` passes
-- Server starts
-- Trading only starts when calibration is complete (`totalObservations >= 20`)
-- Trades can only be placed when machine is in `active` state
-- Bridge commands only sent when bridge is `connected`
-- All existing features continue to work
-- EA can still send ticks and receive responses
-- Dashboard WebSocket connects and receives updates
-- Frontend chart displays candlesticks
+- [x] `npm install xstate` succeeds
+- [x] `npx tsc --noEmit` passes with zero errors
+- [x] Server starts on `http://localhost:3000`
+- [x] `/api/health` returns `status: ok`
+- [x] EA can still send ticks via `POST /api/ea/tick`
+- [x] EA can still poll `GET /poll` for commands
+- [x] Dashboard WebSocket connects and receives init message
+- [x] Frontend chart displays candlesticks
+- [x] Settings changes persist
+- [x] Trade toggles work
+- [x] Symbol switching works
+- [x] MCP tools can still call `placeTrade()`
+- [x] MCP tools can query `get_trading_state`, `get_bridge_state`, `get_calibration_state`
+- [x] No existing behavior changed

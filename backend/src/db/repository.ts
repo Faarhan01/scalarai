@@ -15,6 +15,12 @@ import {
   AiKnowledgeRow,
   AiStrategyRow,
   StrategyMode,
+  MarketCandleRow,
+  ObservationRow,
+  BacktestResultRow,
+  StrategyTemplateRow,
+  StrategyVersionRow,
+  StrategySymbolPerformanceRow,
 } from "../types";
 
 export class ScalarAiDb {
@@ -458,6 +464,219 @@ export class ScalarAiDb {
     const dbSizeBytes = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
     
     return { tickCount, logCount, tradeCount, dbSizeBytes };
+  }
+
+  // Market candles
+  insertCandle(candle: MarketCandleRow): void {
+    this.db.prepare(
+      `INSERT INTO market_candles (symbol, time, open, high, low, close, volume, direction, minute_bucket) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      candle.symbol,
+      candle.time,
+      candle.open,
+      candle.high,
+      candle.low,
+      candle.close,
+      candle.volume ?? null,
+      candle.direction,
+      candle.minute_bucket
+    );
+  }
+
+  getCandles(symbol: string, from?: number, to?: number, limit = 1000): MarketCandleRow[] {
+    let query = `SELECT * FROM market_candles WHERE symbol = ?`;
+    const params: unknown[] = [symbol];
+    if (from !== undefined) {
+      query += ` AND time >= ?`;
+      params.push(from);
+    }
+    if (to !== undefined) {
+      query += ` AND time <= ?`;
+      params.push(to);
+    }
+    query += ` ORDER BY time ASC LIMIT ?`;
+    params.push(Math.min(limit, 10000));
+    return this.db.prepare(query).all(...params) as MarketCandleRow[];
+  }
+
+  getLatestCandle(symbol: string): MarketCandleRow | undefined {
+    return this.db.prepare(`SELECT * FROM market_candles WHERE symbol = ? ORDER BY time DESC LIMIT 1`).get(symbol) as MarketCandleRow | undefined;
+  }
+
+  // Observations
+  insertObservation(observation: ObservationRow): void {
+    this.db.prepare(
+      `INSERT INTO observations (id, symbol, timestamp, direction, velocity, price, candle_id, tags, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      observation.id,
+      observation.symbol,
+      observation.timestamp,
+      observation.direction,
+      observation.velocity,
+      observation.price,
+      observation.candle_id ?? null,
+      observation.tags,
+      observation.metadata
+    );
+  }
+
+  getObservations(symbol?: string, from?: number, to?: number, limit = 500): ObservationRow[] {
+    let query = `SELECT * FROM observations`;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (symbol) {
+      clauses.push(`symbol = ?`);
+      params.push(symbol);
+    }
+    if (from !== undefined) {
+      clauses.push(`timestamp >= ?`);
+      params.push(from);
+    }
+    if (to !== undefined) {
+      clauses.push(`timestamp <= ?`);
+      params.push(to);
+    }
+    if (clauses.length > 0) {
+      query += ` WHERE ${clauses.join(" AND ")}`;
+    }
+    query += ` ORDER BY timestamp DESC LIMIT ?`;
+    params.push(Math.min(limit, 5000));
+    return this.db.prepare(query).all(...params) as ObservationRow[];
+  }
+
+  // Strategy templates
+  insertStrategyTemplate(template: StrategyTemplateRow): void {
+    this.db.prepare(
+      `INSERT INTO strategy_templates (id, name, description, mode, category, rules, default_config, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      template.id,
+      template.name,
+      template.description,
+      template.mode,
+      template.category,
+      template.rules,
+      template.default_config,
+      template.tags,
+      template.created_at,
+      template.updated_at
+    );
+  }
+
+  getAllStrategyTemplates(): StrategyTemplateRow[] {
+    return this.db.prepare(`SELECT * FROM strategy_templates ORDER BY created_at DESC`).all() as StrategyTemplateRow[];
+  }
+
+  getStrategyTemplateById(id: string): StrategyTemplateRow | undefined {
+    return this.db.prepare(`SELECT * FROM strategy_templates WHERE id = ?`).get(id) as StrategyTemplateRow | undefined;
+  }
+
+  upsertStrategyTemplate(template: StrategyTemplateRow): void {
+    this.db.prepare(
+      `INSERT INTO strategy_templates (id, name, description, mode, category, rules, default_config, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, mode = excluded.mode, category = excluded.category, rules = excluded.rules, default_config = excluded.default_config, tags = excluded.tags, updated_at = excluded.updated_at`
+    ).run(
+      template.id,
+      template.name,
+      template.description,
+      template.mode,
+      template.category,
+      template.rules,
+      template.default_config,
+      template.tags,
+      template.created_at,
+      template.updated_at
+    );
+  }
+
+  // Strategy versions
+  insertStrategyVersion(version: StrategyVersionRow): void {
+    this.db.prepare(
+      `INSERT INTO strategy_versions (id, strategy_id, symbol, name, description, mode, rules, config, parent_version_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      version.id,
+      version.strategy_id,
+      version.symbol,
+      version.name,
+      version.description,
+      version.mode,
+      version.rules,
+      version.config,
+      version.parent_version_id ?? null,
+      version.created_by,
+      version.created_at
+    );
+  }
+
+  getStrategyVersions(strategyId: string): StrategyVersionRow[] {
+    return this.db.prepare(`SELECT * FROM strategy_versions WHERE strategy_id = ? ORDER BY created_at DESC`).all(strategyId) as StrategyVersionRow[];
+  }
+
+  // Backtest results
+  insertBacktestResult(result: BacktestResultRow): void {
+    this.db.prepare(
+      `INSERT INTO backtest_results (id, strategy_id, strategy_version_id, symbol, from_time, to_time, initial_balance, final_balance, total_trades, wins, losses, win_rate, profit_factor, max_drawdown, sharpe_ratio, avg_win, avg_loss, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      result.id,
+      result.strategy_id,
+      result.strategy_version_id ?? null,
+      result.symbol,
+      result.from_time,
+      result.to_time,
+      result.initial_balance,
+      result.final_balance,
+      result.total_trades,
+      result.wins,
+      result.losses,
+      result.win_rate,
+      result.profit_factor,
+      result.max_drawdown,
+      result.sharpe_ratio,
+      result.avg_win,
+      result.avg_loss,
+      result.metadata,
+      result.created_at
+    );
+  }
+
+  getBacktestResults(strategyId?: string, symbol?: string): BacktestResultRow[] {
+    let query = `SELECT * FROM backtest_results`;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (strategyId) {
+      clauses.push(`strategy_id = ?`);
+      params.push(strategyId);
+    }
+    if (symbol) {
+      clauses.push(`symbol = ?`);
+      params.push(symbol);
+    }
+    if (clauses.length > 0) {
+      query += ` WHERE ${clauses.join(" AND ")}`;
+    }
+    query += ` ORDER BY created_at DESC LIMIT 100`;
+    return this.db.prepare(query).all(...params) as BacktestResultRow[];
+  }
+
+  // Strategy symbol performance
+  upsertStrategySymbolPerformance(perf: StrategySymbolPerformanceRow): void {
+    this.db.prepare(
+      `INSERT INTO strategy_symbol_performance (id, strategy_id, symbol, total_trades, wins, losses, win_rate, total_profit, avg_profit_per_trade, max_drawdown, last_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(strategy_id, symbol) DO UPDATE SET total_trades = excluded.total_trades, wins = excluded.wins, losses = excluded.losses, win_rate = excluded.win_rate, total_profit = excluded.total_profit, avg_profit_per_trade = excluded.avg_profit_per_trade, max_drawdown = excluded.max_drawdown, last_updated = excluded.last_updated`
+    ).run(
+      perf.id,
+      perf.strategy_id,
+      perf.symbol,
+      perf.total_trades,
+      perf.wins,
+      perf.losses,
+      perf.win_rate,
+      perf.total_profit,
+      perf.avg_profit_per_trade,
+      perf.max_drawdown,
+      perf.last_updated
+    );
+  }
+
+  getStrategySymbolPerformance(strategyId: string): StrategySymbolPerformanceRow[] {
+    return this.db.prepare(`SELECT * FROM strategy_symbol_performance WHERE strategy_id = ?`).all(strategyId) as StrategySymbolPerformanceRow[];
   }
 
   // Migrations

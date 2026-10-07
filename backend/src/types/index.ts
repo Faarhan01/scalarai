@@ -1,3 +1,5 @@
+import { WebSocket } from "ws";
+
 export enum StrategyMode {
   TREND_FOLLOWING = "TREND_FOLLOWING",
   MEAN_REVERSION = "MEAN_REVERSION",
@@ -170,6 +172,21 @@ export interface MarketTelemetry {
   sellLocked: boolean;
 }
 
+export interface SymbolStateEntry {
+  ticks: Tick[];
+  candles: CandleBar[];
+  telemetry: MarketTelemetry[];
+  connection: EAConnectionDetails;
+  currentPrice: number;
+  lastDirection: "up" | "down" | "flat";
+  tickCount: number;
+}
+
+export interface SymbolStates {
+  map: Map<string, SymbolStateEntry>;
+  activeSymbol: string;
+}
+
 export interface WebRequestTestState {
   status: "idle" | "pending" | "success" | "failed";
   lastTested: string;
@@ -252,7 +269,40 @@ export interface McpContext {
   placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<{ success: boolean; message: string }>;
   closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
   resetStats: () => Promise<void>;
+  getTradingState: () => TradingState;
+  getBridgeState: () => BridgeState;
+  getCalibrationState: () => CalibrationState;
 }
+
+export interface AppStoreReadOnly {
+  config: TradeConfig;
+  trades: readonly TradeRecord[];
+  logs: readonly SystemLog[];
+  getAiKnowledgeBase(): AiKnowledgeBase;
+  getAiSynthesizedStrategy(): AiSynthesizedStrategy;
+  getStrategySignal(): { type: string; reason: string; confidence?: number } | null;
+  getSymbolStates(): SymbolStates;
+  getActiveSymbol(): string;
+  getNextTicket(): { value: number };
+  getLatestBuyLockedFromEa(): boolean;
+  getLatestSellLockedFromEa(): boolean;
+  getPendingBridgeOrders(): readonly BridgeOrder[];
+  getMt5BridgeClients(): ReadonlySet<WebSocket>;
+  getWebDashboardClients(): ReadonlySet<WebSocket>;
+  getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
+
+  getFullStatusPayload(): FullStatusPayload;
+  getAndClearPendingOrders(): BridgeOrder[];
+  getPendingEaCommand(): { action: string; lot: number; sl: number; tp: number } | null;
+  getTradingState(): TradingState;
+  getBridgeState(): BridgeState;
+  getCalibrationState(): CalibrationState;
+  buildMcpContext(): McpContext;
+}
+
+export type TradingState = "idle" | "active";
+export type BridgeState = "disconnected" | "connected";
+export type CalibrationState = "calibrating" | "optimized";
 
 export interface BridgeOrder {
   action: string;
@@ -356,4 +406,94 @@ export interface SymbolMetadataRow {
   broker: string | null;
   account_number: string | null;
   last_connected: string | null;
+}
+
+export interface MarketCandleRow {
+  id: number;
+  symbol: string;
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+  direction: "up" | "down" | "flat";
+  minute_bucket: number;
+  created_at: string;
+}
+
+export interface ObservationRow {
+  id: string;
+  symbol: string;
+  timestamp: number;
+  direction: "up" | "down" | "flat";
+  velocity: number;
+  price: number;
+  candle_id: number | null;
+  tags: string;
+  metadata: string;
+  created_at: string;
+}
+
+export interface BacktestResultRow {
+  id: string;
+  strategy_id: string;
+  strategy_version_id: string | null;
+  symbol: string;
+  from_time: number;
+  to_time: number;
+  initial_balance: number;
+  final_balance: number;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  profit_factor: number;
+  max_drawdown: number;
+  sharpe_ratio: number;
+  avg_win: number;
+  avg_loss: number;
+  metadata: string;
+  created_at: string;
+}
+
+export interface StrategyTemplateRow {
+  id: string;
+  name: string;
+  description: string;
+  mode: string;
+  category: string;
+  rules: string;
+  default_config: string;
+  tags: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StrategyVersionRow {
+  id: string;
+  strategy_id: string;
+  symbol: string;
+  name: string;
+  description: string;
+  mode: string;
+  rules: string;
+  config: string;
+  parent_version_id: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface StrategySymbolPerformanceRow {
+  id: string;
+  strategy_id: string;
+  symbol: string;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_profit: number;
+  avg_profit_per_trade: number;
+  max_drawdown: number;
+  last_updated: string;
 }

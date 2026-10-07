@@ -1,30 +1,35 @@
-import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder } from "../types";
+import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder, AppStoreReadOnly, TradingState, BridgeState, CalibrationState } from "../types";
 import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState } from "./market-ingestion";
 import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
 import { evaluateSimulatedStrategy, openSimulatedPosition, closeSimulatedPosition, AppCallbacks, TradeState } from "./trade-execution";
 import { getDefaultTradeConfig, getDefaultAiKnowledgeBase, getDefaultAiSynthesizedStrategy, createSystemLog } from "./defaults";
+import { createActor } from "xstate";
 import { WebSocket } from "ws";
 import { normalizeIp } from "../utils/ip";
+import { tradingMachine, bridgeMachine, calibrationMachine, TradingMachineService, BridgeMachineService, CalibrationMachineService } from "./trading-machine";
 
-export class AppStore {
-  tradeConfig: TradeConfig;
-  tradesList: TradeRecord[];
-  systemLogs: SystemLog[];
-  aiKnowledgeBase: AiKnowledgeBase;
-  aiSynthesizedStrategy: AiSynthesizedStrategy;
-  lastStrategySignal: { type: string; reason: string; confidence?: number } | null;
-  symbolStates: SymbolStates;
-  activeSymbol: string;
-  lastProcessedTelemetryIndex: number;
-  nextTicket: { value: number };
-  latestBuyLockedFromEa: boolean;
-  latestSellLockedFromEa: boolean;
-  pendingBridgeOrders: BridgeOrder[];
-  pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
-  mt5BridgeClients: Set<WebSocket>;
-  webDashboardClients: Set<WebSocket>;
-  webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
+export class AppStore implements AppStoreReadOnly {
+  private tradeConfig: TradeConfig;
+  private tradesList: TradeRecord[];
+  private systemLogs: SystemLog[];
+  private aiKnowledgeBase: AiKnowledgeBase;
+  private aiSynthesizedStrategy: AiSynthesizedStrategy;
+  private lastStrategySignal: { type: string; reason: string; confidence?: number } | null;
+  private symbolStates: SymbolStates;
+  private activeSymbol: string;
+  private lastProcessedTelemetryIndex: number;
+  private nextTicket: { value: number };
+  private latestBuyLockedFromEa: boolean;
+  private latestSellLockedFromEa: boolean;
+  private pendingBridgeOrders: BridgeOrder[];
+  private pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
+  private mt5BridgeClients: Set<WebSocket>;
+  private webDashboardClients: Set<WebSocket>;
+  private webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
+  private tradingState: TradingMachineService;
+  private bridgeState: BridgeMachineService;
+  private calibrationState: CalibrationMachineService;
 
   constructor() {
     this.tradeConfig = getDefaultTradeConfig();
@@ -50,6 +55,84 @@ export class AppStore {
       details: "Awaiting first WebRequest test trigger.",
       triggerTest: false,
     };
+    this.tradingState = createActor(tradingMachine).start();
+    this.bridgeState = createActor(bridgeMachine).start();
+    this.calibrationState = createActor(calibrationMachine).start();
+  }
+
+  get config(): TradeConfig { return this.tradeConfig; }
+  get trades(): readonly TradeRecord[] { return this.tradesList; }
+  get logs(): readonly SystemLog[] { return this.systemLogs; }
+  getAiKnowledgeBase(): AiKnowledgeBase { return this.aiKnowledgeBase; }
+  getAiSynthesizedStrategy(): AiSynthesizedStrategy { return this.aiSynthesizedStrategy; }
+  getStrategySignal(): { type: string; reason: string; confidence?: number } | null { return this.lastStrategySignal; }
+  getSymbolStates(): SymbolStates { return this.symbolStates; }
+  getActiveSymbol(): string { return this.activeSymbol; }
+  getNextTicket(): { value: number } { return this.nextTicket; }
+  getLatestBuyLockedFromEa(): boolean { return this.latestBuyLockedFromEa; }
+  getLatestSellLockedFromEa(): boolean { return this.latestSellLockedFromEa; }
+  getPendingBridgeOrders(): readonly BridgeOrder[] { return this.pendingBridgeOrders; }
+  getMt5BridgeClients(): ReadonlySet<WebSocket> { return this.mt5BridgeClients; }
+  getWebDashboardClients(): ReadonlySet<WebSocket> { return this.webDashboardClients; }
+  getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean } { return this.webRequestTest; }
+
+  sendTradingEvent(event: "START" | "STOP"): void {
+    this.tradingState.send({ type: event });
+  }
+
+  sendBridgeEvent(event: "CONNECT" | "DISCONNECT"): void {
+    this.bridgeState.send({ type: event });
+  }
+
+  sendCalibrationEvent(event: "CALIBRATE"): void {
+    this.calibrationState.send({ type: "CALIBRATE" });
+  }
+
+  getTradingState(): TradingState {
+    return this.tradingState.getSnapshot().value as TradingState;
+  }
+
+  getBridgeState(): BridgeState {
+    return this.bridgeState.getSnapshot().value as BridgeState;
+  }
+
+  getCalibrationState(): CalibrationState {
+    return this.calibrationState.getSnapshot().value as CalibrationState;
+  }
+
+  updateWebRequestTest(update: { status?: "idle" | "pending" | "success" | "failed"; error?: string; details?: string; triggerTest?: boolean; lastTested?: string }): void {
+    if (update.status !== undefined) this.webRequestTest.status = update.status;
+    if (update.error !== undefined) this.webRequestTest.error = update.error;
+    if (update.details !== undefined) this.webRequestTest.details = update.details;
+    if (update.triggerTest !== undefined) this.webRequestTest.triggerTest = update.triggerTest;
+    if (update.lastTested !== undefined) this.webRequestTest.lastTested = update.lastTested;
+  }
+
+  switchSymbol(symbol: string): void {
+    this.activeSymbol = symbol;
+    this.symbolStates.activeSymbol = symbol;
+    this.addLog("SERVER", "INFO", `Active market symbol switched to: ${symbol}`);
+    this.broadcastToDashboards({ type: "init", payload: this.getFullStatusPayload() });
+  }
+
+  addBridgeClient(ws: WebSocket): void {
+    this.mt5BridgeClients.add(ws);
+    this.sendBridgeEvent("CONNECT");
+    this.broadcastToDashboards({ type: "connection", isBridgeConnected: true });
+  }
+
+  removeBridgeClient(ws: WebSocket): void {
+    this.mt5BridgeClients.delete(ws);
+    this.sendBridgeEvent("DISCONNECT");
+    this.broadcastToDashboards({ type: "connection", isBridgeConnected: this.mt5BridgeClients.size > 0 });
+  }
+
+  addDashboardClient(ws: WebSocket): void {
+    this.webDashboardClients.add(ws);
+  }
+
+  removeDashboardClient(ws: WebSocket): void {
+    this.webDashboardClients.delete(ws);
   }
 
   loadFromDb(): void {
@@ -177,6 +260,7 @@ export class AppStore {
     if (obs % 25 === 0) {
       persistAiKnowledge(this.aiKnowledgeBase);
     }
+    this.sendCalibrationEvent("CALIBRATE");
 
     if (!state.connection.isEaConnected) {
       this.addLog("EA", "SUCCESS", `${symbol} MT5 Expert Advisor linked! Real-time velocity baseline metric: ${numVelocity.toFixed(4)} pt/s.`);
@@ -321,6 +405,9 @@ export class AppStore {
       placeTrade: async (type: "BUY" | "SELL", reason?: string) => this.placeTrade(type, reason || "MCP initiated trade"),
       closeTrade: async (tradeId: string) => this.closeTrade(tradeId),
       resetStats: async () => Promise.resolve(this.resetStats()),
+      getTradingState: () => this.getTradingState(),
+      getBridgeState: () => this.getBridgeState(),
+      getCalibrationState: () => this.getCalibrationState(),
     };
   }
 
@@ -411,6 +498,7 @@ export class AppStore {
 
   toggleTrading(isActive: boolean): TradeConfig {
     this.tradeConfig.isActive = isActive;
+    this.sendTradingEvent(isActive ? "START" : "STOP");
     const statusLabel = this.tradeConfig.isActive ? "STARTED" : "STOPPED";
     this.addLog("SERVER", "INFO", `Trading remote state toggled to: ${statusLabel}`);
     if (!this.tradeConfig.isActive) {

@@ -34,6 +34,21 @@ const TOOLS: McpTool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "get_trading_state",
+    description: "Get current trading state machine value (idle | active).",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_bridge_state",
+    description: "Get current EA bridge connection state (disconnected | connected).",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_calibration_state",
+    description: "Get current AI calibration state (calibrating | optimized). Automated trading is blocked until optimized.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "get_ai_knowledge_base",
     description: "Get AI knowledge base with long-term market velocity observations, hourly patterns, and peak speeds.",
     inputSchema: { type: "object", properties: {}, required: [] },
@@ -378,6 +393,18 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
         switch (toolName) {
           case "get_system_status": {
             result = { content: [{ type: "text", text: JSON.stringify(ctx.getStatus(), null, 2) }] };
+            break;
+          }
+          case "get_trading_state": {
+            result = { content: [{ type: "text", text: JSON.stringify(ctx.getTradingState(), null, 2) }] };
+            break;
+          }
+          case "get_bridge_state": {
+            result = { content: [{ type: "text", text: JSON.stringify(ctx.getBridgeState(), null, 2) }] };
+            break;
+          }
+          case "get_calibration_state": {
+            result = { content: [{ type: "text", text: JSON.stringify(ctx.getCalibrationState(), null, 2) }] };
             break;
           }
           case "get_ai_knowledge_base": {

@@ -1,27 +1,6 @@
-import { Tick, EAConnectionDetails, CandleBar } from "../types";
+import { Tick, EAConnectionDetails, CandleBar, MarketTelemetry, SymbolStateEntry, SymbolStates } from "../types";
 
-export interface SymbolStateEntry {
-  ticks: Tick[];
-  candles: CandleBar[];
-  telemetry: TelemetryRecord[];
-  connection: EAConnectionDetails;
-  currentPrice: number;
-  lastDirection: "up" | "down" | "flat";
-  tickCount: number;
-}
-
-export interface TelemetryRecord {
-  timestamp: number;
-  price: number;
-  velocity: number;
-  buyLocked: boolean;
-  sellLocked: boolean;
-}
-
-export interface SymbolStates {
-  map: Map<string, SymbolStateEntry>;
-  activeSymbol: string;
-}
+export type { SymbolStates, SymbolStateEntry } from "../types";
 
 export function createSymbolStates(initialActiveSymbol = ""): SymbolStates {
   const map = new Map<string, SymbolStateEntry>();

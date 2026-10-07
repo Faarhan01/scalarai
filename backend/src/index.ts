@@ -57,50 +57,40 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.tradeConfig, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
-  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.tradeConfig);
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
+  registerMarketRoutes(app, store.updateMarket.bind(store), () => store.config);
   registerSettingsRoutes(
     app,
     (params) => store.updateSettings(params),
-    () => store.tradeConfig,
-    () => store.webRequestTest,
+    () => store.config,
+    () => store.getWebRequestTest(),
     () => {
-      store.webRequestTest.status = "pending";
-      store.webRequestTest.triggerTest = true;
-      store.webRequestTest.lastTested = new Date().toISOString();
-      store.webRequestTest.details = "Verification probe initiated. Waiting for MT5 bridge...";
-      store.broadcastToDashboards({ type: "webrequest_test", testState: store.webRequestTest });
+      store.updateWebRequestTest({ status: "pending", triggerTest: true, lastTested: new Date().toISOString(), details: "Verification probe initiated. Waiting for MT5 bridge..." });
+      store.broadcastToDashboards({ type: "webrequest_test", testState: store.getWebRequestTest() });
     },
     (report) => {
-      store.webRequestTest.status = report.status as any;
-      store.webRequestTest.error = report.error || "";
-      store.webRequestTest.details = report.details || "";
-      store.webRequestTest.lastTested = new Date().toISOString();
-      store.webRequestTest.triggerTest = false;
-      store.broadcastToDashboards({ type: "webrequest_test", testState: store.webRequestTest });
+      store.updateWebRequestTest({ status: report.status as "idle" | "pending" | "success" | "failed", error: report.error || "", details: report.details || "", lastTested: new Date().toISOString(), triggerTest: false });
+      store.broadcastToDashboards({ type: "webrequest_test", testState: store.getWebRequestTest() });
       store.addLog("SERVER", report.status === "success" ? "SUCCESS" : "WARNING", `WebRequest verification report: ${report.status.toUpperCase()} - ${report.details}`);
     },
     process.env.SCALARAI_MCP_API_KEY
   );
   registerTradeRoutes(app, (isActive: boolean) => store.toggleTrading(isActive), () => store.resetStats(), process.env.SCALARAI_MCP_API_KEY);
   registerAiRoutes(app, () => ({
-    status: store.aiKnowledgeBase.totalObservations >= 20 ? "optimized" : "calibrating",
-    message: store.aiKnowledgeBase.totalObservations >= 20 ? "Quantitative baseline calibrated." : "AI is analyzing market speed baseline... Awaiting sufficient expert data stream from MetaTrader 5 terminal.",
-    count: store.aiKnowledgeBase.totalObservations,
-    aiKnowledgeBase: store.aiKnowledgeBase,
-    aiSynthesizedStrategy: store.aiSynthesizedStrategy,
-    candleStream: getSymbolState(store.symbolStates, store.activeSymbol).ticks,
-    averageVelocity: store.aiKnowledgeBase.globalAverageSpeed,
+    status: store.getAiKnowledgeBase().totalObservations >= 20 ? "optimized" : "calibrating",
+    message: store.getAiKnowledgeBase().totalObservations >= 20 ? "Quantitative baseline calibrated." : "AI is analyzing market speed baseline... Awaiting sufficient expert data stream from MetaTrader 5 terminal.",
+    count: store.getAiKnowledgeBase().totalObservations,
+    aiKnowledgeBase: store.getAiKnowledgeBase(),
+    aiSynthesizedStrategy: store.getAiSynthesizedStrategy(),
+    candleStream: getSymbolState(store.getSymbolStates(), store.getActiveSymbol()).ticks,
+    averageVelocity: store.getAiKnowledgeBase().globalAverageSpeed,
   }));
   registerMcpRoute(app, store.buildMcpContext(), process.env.SCALARAI_MCP_API_KEY);
   registerStatusRoute(
     app,
     store.getFullStatusPayload.bind(store),
     (symbol: string) => {
-      store.activeSymbol = symbol;
-      store.symbolStates.activeSymbol = symbol;
-      store.addLog("SERVER", "INFO", `Active market symbol switched to: ${symbol}`);
-      store.broadcastToDashboards({ type: "init", payload: store.getFullStatusPayload() });
+      store.switchSymbol(symbol);
     },
     store.getAndClearPendingOrders.bind(store),
     process.env.SCALARAI_MCP_API_KEY
@@ -140,12 +130,10 @@ async function startServer() {
       }
     },
     (ws: WebSocket) => {
-      store.mt5BridgeClients.add(ws);
-      store.broadcastToDashboards({ type: "connection", isBridgeConnected: true });
+      store.addBridgeClient(ws);
     },
     (ws: WebSocket) => {
-      store.mt5BridgeClients.delete(ws);
-      store.broadcastToDashboards({ type: "connection", isBridgeConnected: store.mt5BridgeClients.size > 0 });
+      store.removeBridgeClient(ws);
     }
   );
 
@@ -158,10 +146,10 @@ async function startServer() {
         if (msg.type === "ping") {
           ws.send(JSON.stringify({ type: "pong", clientTime: msg.clientTime, serverTime: Date.now() }));
         } else if (msg.type === "toggle_trade") {
-          store.toggleTrading(!store.tradeConfig.isActive);
+          store.toggleTrading(!store.config.isActive);
         } else if (msg.type === "close_all") {
           const tradeState = store.buildTradeState();
-          store.tradesList.forEach((t: TradeRecord) => {
+          store.trades.forEach((t: TradeRecord) => {
             if (t.status === "OPEN") closeSimulatedPosition(tradeState, t, "Closed from remote web dashboard.", store);
           });
           store.broadcastTradesUpdate();
@@ -173,10 +161,10 @@ async function startServer() {
       }
     },
     (ws: WebSocket) => {
-      store.webDashboardClients.add(ws);
+      store.addDashboardClient(ws);
     },
     (ws: WebSocket) => {
-      store.webDashboardClients.delete(ws);
+      store.removeDashboardClient(ws);
     }
   );
 
