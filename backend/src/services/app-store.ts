@@ -119,24 +119,6 @@ export class AppStore implements AppStoreReadOnly {
   switchSymbol(symbol: string): void {
     this.activeSymbol = symbol;
     this.symbolStates.activeSymbol = symbol;
-    const state = getSymbolState(this.symbolStates, symbol);
-    if (state.candles.length === 0) {
-      try {
-        const rows = scalarAiDb.getCandles(symbol, undefined, undefined, 200);
-        if (rows.length > 0) {
-          state.candles = rows.map((r) => ({
-            time: r.time,
-            open: r.open,
-            high: r.high,
-            low: r.low,
-            close: r.close,
-            volume: r.volume,
-            direction: (r.direction || (r.close >= r.open ? "up" : "down")) as "up" | "down",
-          }));
-          state.currentPrice = rows[rows.length - 1].close;
-        }
-      } catch {}
-    }
     this.addLog("SERVER", "INFO", `Active market symbol switched to: ${symbol}`);
     this.broadcastToDashboards({ type: "init", payload: this.getFullStatusPayload() });
   }

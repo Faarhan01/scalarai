@@ -6,7 +6,6 @@ import { BacktestEngine } from "./services/strategy-backtest";
 import { updateKnowledgeBaseFromTelemetry, formatKnowledgeBase } from "./services/knowledge";
 import { analyzeMarket, analyzeStrategyPerformance, suggestStrategyOptimizations, recommendStrategyForConditions } from "./services/strategy-research";
 import { parseTimestamp, parseLimit } from "./utils/time";
-import { STRATEGY_TEMPLATES, createStrategyFromTemplate } from "./services/strategy-templates";
 
 export interface McpTool {
   name: string;
@@ -30,7 +29,7 @@ export interface McpToolCallParams {
   arguments: Record<string, any>;
 }
 
-export const TOOLS: McpTool[] = [
+const TOOLS: McpTool[] = [
   {
     name: "get_system_status",
     description: "Get full ScalarAI system status: config, connection, trades, logs, stats, AI strategy, and symbol states.",
@@ -795,6 +794,7 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             break;
           }
           case "list_strategy_templates": {
+            const { STRATEGY_TEMPLATES } = require("./services/strategy-templates");
             const templates = STRATEGY_TEMPLATES.map(t => ({
               id: t.id,
               name: t.name,
@@ -814,6 +814,7 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
               break;
             }
             try {
+              const { createStrategyFromTemplate } = require("./services/strategy-templates");
               const strategy = createStrategyFromTemplate(templateId, args.overrides);
               scalarAiDb.upsertAiStrategy(strategy);
               result = { content: [{ type: "text", text: JSON.stringify({ success: true, strategy }, null, 2) }] };

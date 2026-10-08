@@ -1,6 +1,4 @@
 import Database from "better-sqlite3";
-import fs from "fs";
-import path from "path";
 import {
   TradeConfig,
   TradeRecord,
@@ -461,7 +459,8 @@ export class ScalarAiDb {
     const logCount = (this.db.prepare(`SELECT COUNT(*) as count FROM system_logs`).get() as { count: number }).count;
     const tradeCount = (this.db.prepare(`SELECT COUNT(*) as count FROM trades`).get() as { count: number }).count;
     
-    const dbPath = path.join(process.cwd(), "backend/data/scalarai.sqlite");
+    const dbPath = process.cwd() + "/backend/data/scalarai.sqlite";
+    const fs = require("fs");
     const dbSizeBytes = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
     
     return { tickCount, logCount, tradeCount, dbSizeBytes };
@@ -522,25 +521,19 @@ export class ScalarAiDb {
   }
 
   getCandles(symbol: string, from?: number, to?: number, limit = 1000): MarketCandleRow[] {
-    const maxLimit = Math.min(limit, 10000);
-    if (from !== undefined && to !== undefined) {
-      return this.db.prepare(
-        `SELECT * FROM market_candles WHERE symbol = ? AND time >= ? AND time <= ? ORDER BY time ASC LIMIT ?`
-      ).all(symbol, from, to, maxLimit) as MarketCandleRow[];
-    }
+    let query = `SELECT * FROM market_candles WHERE symbol = ?`;
+    const params: unknown[] = [symbol];
     if (from !== undefined) {
-      return this.db.prepare(
-        `SELECT * FROM market_candles WHERE symbol = ? AND time >= ? ORDER BY time ASC LIMIT ?`
-      ).all(symbol, from, maxLimit) as MarketCandleRow[];
+      query += ` AND time >= ?`;
+      params.push(from);
     }
     if (to !== undefined) {
-      return this.db.prepare(
-        `SELECT * FROM (SELECT * FROM market_candles WHERE symbol = ? AND time <= ? ORDER BY time DESC LIMIT ?) ORDER BY time ASC`
-      ).all(symbol, to, maxLimit) as MarketCandleRow[];
+      query += ` AND time <= ?`;
+      params.push(to);
     }
-    return this.db.prepare(
-      `SELECT * FROM (SELECT * FROM market_candles WHERE symbol = ? ORDER BY time DESC LIMIT ?) ORDER BY time ASC`
-    ).all(symbol, maxLimit) as MarketCandleRow[];
+    query += ` ORDER BY time ASC LIMIT ?`;
+    params.push(Math.min(limit, 10000));
+    return this.db.prepare(query).all(...params) as MarketCandleRow[];
   }
 
   getLatestCandle(symbol: string): MarketCandleRow | undefined {

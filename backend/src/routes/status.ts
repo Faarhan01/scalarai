@@ -44,7 +44,6 @@ export function registerStatusRoute(
   };
 
   app.get("/poll", handlePendingTrades);
-  app.get("/api/poll", handlePendingTrades);
   app.get("/get-pending-trades", handlePendingTrades);
   app.get("/api/get-pending-trades", handlePendingTrades);
 }

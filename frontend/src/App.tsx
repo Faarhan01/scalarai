@@ -174,9 +174,9 @@ export default function App() {
         setStrategiesList(data);
       }
     } catch (err) {
-      console.warn("Initial strategies fetch pending backend:", err);
+      showError("Failed to fetch strategies");
     }
-  }, []);
+  }, [showError]);
 
   // Fetch Initial Status
   const fetchStatus = useCallback(async () => {
@@ -204,9 +204,9 @@ export default function App() {
         if (data.webRequestStatus) settings.setWebRequestStatus(data.webRequestStatus);
       }
     } catch (err) {
-      console.warn("Initial status fetch pending backend:", err);
+      showError("Failed to fetch server status");
     }
-  }, [settings.setWebRequestStatus]);
+  }, [showError, settings.setWebRequestStatus]);
 
   // Sync WebSocket
   const { sendWsMessage } = useWebSocket({
@@ -313,8 +313,8 @@ export default function App() {
     })
       .then((res) => res.json())
       .then((data) => {
-        if (data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
-          setCandles(data.candles);
+        if (data.candles && Array.isArray(data.candles)) {
+          setCandles((prev) => mergeCandles(prev, data.candles).slice(-2000));
         }
       })
       .catch(() => {

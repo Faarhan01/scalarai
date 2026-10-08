@@ -125,7 +125,7 @@ async function startServer() {
     console.log(`Step Index Scalper full-stack server running on http://localhost:${PORT}`);
   });
 
-  const allowedOrigin = process.env.FRONTEND_URL;
+  const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
 
   createBridgeServer(
     server,
