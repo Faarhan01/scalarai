@@ -22,24 +22,29 @@ export function requireApiKey(expectedApiKey?: string) {
 - If `expectedApiKey` is set → requires `Authorization: Bearer <key>`
 - In development without `SCALARAI_MCP_API_KEY`, all protected routes are open
 
-**Note:** `mcp_server.ts` has its own auth check — it always requires a valid Bearer token regardless of `expectedApiKey`.
+**Note:** `mcp_server.ts` has its own auth check — it only requires Bearer auth when `expectedApiKey` is set and non-empty, matching `auth.ts` behavior.
 
 ## `cors.ts`
 
 ```ts
+const ALLOWED_ORIGIN = process.env.FRONTEND_URL;
+
 export function corsMiddleware(req, res, next) {
   const origin = req.headers.origin;
-  if (origin) res.header("Access-Control-Allow-Origin", origin);
-  else res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Credentials", "true");
+  if (ALLOWED_ORIGIN && origin && origin !== ALLOWED_ORIGIN && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
+    return res.status(403).json({ error: "Forbidden: origin not allowed" });
+  }
+  res.header("Access-Control-Allow-Origin", origin || "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
   next();
 }
 ```
 
-Reflects request Origin, credentials allowed, handles OPTIONS preflight.
+Configurable origin allowlist via `FRONTEND_URL`. Allows localhost/127.0.0.1 for development. Returns 204 for OPTIONS preflight.
 
 ## `error.ts`
 
@@ -100,6 +105,8 @@ In-memory sliding-window rate limiter. Default: 3600 requests per minute per IP.
 - `/api/market/bulk-candles`
 - `/api/market/candles`
 - `/api/market/history`
+- `/api/market/symbols`
+- `/api/market/observations`
 - `/api/status`
 - `/api/poll`
 - `/poll`

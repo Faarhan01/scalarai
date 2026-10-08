@@ -5,7 +5,7 @@ import { requireApiKey } from "../middleware/auth";
 
 export function registerMarketRoutes(
   app: Application,
-  updateMarket: (data: UpdateMarketPayload, clientIp?: string) => void,
+  updateMarket: (data: UpdateMarketPayload, clientIp?: string) => Promise<void>,
   getConfig?: () => TradeConfig,
   ingestBulkCandles?: (
     symbol: string,
@@ -43,7 +43,7 @@ export function registerMarketRoutes(
       }
 
       const clientIp = (req as any).ip || (req as any).socket?.remoteAddress || "127.0.0.1";
-      updateMarket(body, clientIp);
+      await updateMarket(body, clientIp);
       const currentConfig = getConfig ? getConfig() : null;
 
       res.json({

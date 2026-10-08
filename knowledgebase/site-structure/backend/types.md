@@ -35,6 +35,39 @@ export interface TradeConfig {
 }
 ```
 
+### `TradeSessionStats`
+
+```ts
+export interface TradeSessionStats {
+  totalProfit: number;
+  tradesCount: number;
+  winRate: number;
+  activePositionsCount: number;
+  lastHeartbeatTime: string | null;
+}
+```
+
+### `Tick`
+
+```ts
+export interface Tick {
+  symbol?: string;
+  time: number;
+  price: number;
+  direction: "up" | "down" | "flat";
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number | null;
+  velocity?: number;
+  buyLocked?: boolean;
+  sellLocked?: boolean;
+  spread?: number;
+  session?: string;
+}
+```
+
 ### `TradeRecord`
 
 ```ts
@@ -64,27 +97,6 @@ export interface SystemLog {
   level: "INFO" | "SUCCESS" | "WARNING" | "ERROR";
   source: "SERVER" | "EA" | "AI";
   message: string;
-}
-```
-
-### `Tick`
-
-```ts
-export interface Tick {
-  symbol?: string;
-  time: number;
-  price: number;
-  direction: "up" | "down" | "flat";
-  open?: number;
-  high?: number;
-  low?: number;
-  close?: number;
-  volume?: number | null;
-  velocity?: number;
-  buyLocked?: boolean;
-  sellLocked?: boolean;
-  spread?: number;
-  session?: string;
 }
 ```
 
@@ -319,36 +331,21 @@ export interface ObservationInsights {
 
 ## State Machine Types
 
-### `AppStoreReadOnly`
-
-```ts
-export interface AppStoreReadOnly {
-  config: TradeConfig;
-  trades: readonly TradeRecord[];
-  logs: readonly SystemLog[];
-  getAiKnowledgeBase(): AiKnowledgeBase;
-  getAiSynthesizedStrategy(): AiSynthesizedStrategy;
-  getStrategySignal(): { type: string; reason: string; confidence?: number } | null;
-  getSymbolStates(): SymbolStates;
-  getActiveSymbol(): string;
-  getNextTicket(): { value: number };
-  getLatestBuyLockedFromEa(): boolean;
-  getLatestSellLockedFromEa(): boolean;
-  getPendingBridgeOrders(): readonly BridgeOrder[];
-  getMt5BridgeClients(): ReadonlySet<WebSocket>;
-  getWebDashboardClients(): ReadonlySet<WebSocket>;
-  getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
-  getTradingState(): TradingState;
-  getBridgeState(): BridgeState;
-  getCalibrationState(): CalibrationState;
-}
-```
-
-### State Machine Types
+### `TradingState`
 
 ```ts
 export type TradingState = "idle" | "active";
+```
+
+### `BridgeState`
+
+```ts
 export type BridgeState = "disconnected" | "connected";
+```
+
+### `CalibrationState`
+
+```ts
 export type CalibrationState = "calibrating" | "optimized";
 ```
 
@@ -440,14 +437,39 @@ export interface McpContext {
   synthesizeStrategy: () => Promise<AiSynthesizedStrategy>;
   updateSettings: (params: Partial<TradeConfig>) => Promise<TradeConfig>;
   toggleTrading: (isActive: boolean) => Promise<TradeConfig>;
-  placeTrade: (type: "BUY" | "SELL", reason?: string) => Promise<{ success: boolean; message: string }>;
+  placeTrade: (
+    type: "BUY" | "SELL",
+    reason?: string,
+    options?: { symbol?: string; lotSize?: number; sl?: number; tp?: number }
+  ) => Promise<{ success: boolean; message: string; ticket?: number }>;
   closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
+  closeAllTrades: (symbol?: string) => Promise<{ success: boolean; closedCount: number; message: string }>;
+  switchSymbol: (symbol: string) => void;
+  getSymbols: () => Array<{
+    symbol: string;
+    isConnected: boolean;
+    currentPrice: number;
+    tickCount: number;
+    digits?: number | null;
+    tickSize?: number | null;
+  }>;
   resetStats: () => Promise<void>;
   getTradingState: () => TradingState;
   getBridgeState: () => BridgeState;
   getCalibrationState: () => CalibrationState;
+  getObservations: (filters?: ObservationFilters) => Observation[];
+  generateInsights: (symbol: string, from?: number, to?: number) => ObservationInsights;
+  backtestStrategyWithHistory: (
+    strategyId: string,
+    symbol: string,
+    from: number,
+    to: number,
+    initialBalance?: number
+  ) => any;
 }
 ```
+
+Built from `store.buildMcpContext()` in `backend/src/index.ts`.
 
 ### `WebRequestTestState`
 
@@ -476,15 +498,28 @@ export interface BridgeOrder {
 }
 ```
 
-### `TradeSessionStats`
+### `AppStoreReadOnly`
 
 ```ts
-export interface TradeSessionStats {
-  totalProfit: number;
-  tradesCount: number;
-  winRate: number;
-  activePositionsCount: number;
-  lastHeartbeatTime: string | null;
+export interface AppStoreReadOnly {
+  config: TradeConfig;
+  trades: readonly TradeRecord[];
+  logs: readonly SystemLog[];
+  getAiKnowledgeBase(): AiKnowledgeBase;
+  getAiSynthesizedStrategy(): AiSynthesizedStrategy;
+  getStrategySignal(): { type: string; reason: string; confidence?: number } | null;
+  getSymbolStates(): SymbolStates;
+  getActiveSymbol(): string;
+  getNextTicket(): { value: number };
+  getLatestBuyLockedFromEa(): boolean;
+  getLatestSellLockedFromEa(): boolean;
+  getPendingBridgeOrders(): readonly BridgeOrder[];
+  getMt5BridgeClients(): ReadonlySet<WebSocket>;
+  getWebDashboardClients(): ReadonlySet<WebSocket>;
+  getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
+  getTradingState(): TradingState;
+  getBridgeState(): BridgeState;
+  getCalibrationState(): CalibrationState;
 }
 ```
 
@@ -508,3 +543,9 @@ export interface TradeSessionStats {
 - `SymbolStateEntry` — ticks, candles, telemetry, connection, currentPrice, lastDirection, tickCount
 - `TelemetryRecord` — timestamp, price, velocity, buyLocked, sellLocked
 - `SymbolStates` — map, activeSymbol
+
+## Backtest Types
+
+- `BacktestCandle` — time, open, high, low, close, direction, volume
+- `BacktestTrade` — entryTime, exitTime, type, entryPrice, exitPrice, profit, reason
+- `BacktestResult` — strategyId, strategyMode, symbol, fromTime, toTime, initialBalance, finalBalance, totalTrades, wins, losses, winRate, profitFactor, maxDrawdown, sharpeRatio, avgWin, avgLoss, trades

@@ -1,4 +1,4 @@
-import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder, AppStoreReadOnly, TradingState, BridgeState, CalibrationState, Observation, ObservationFilters, ObservationInsights, SymbolStateEntry, StrategyMode } from "../types";
+import { TradeConfig, TradeRecord, SystemLog, AiKnowledgeBase, AiSynthesizedStrategy, McpContext, EAConnectionDetails, Tick, FullStatusPayload, UpdateMarketPayload, BridgeOrder, AppStoreReadOnly, TradingState, BridgeState, CalibrationState, Observation, ObservationFilters, ObservationInsights, SymbolStateEntry, StrategyMode, EaCommand, EaConfirmation, EaPosition, EaLog } from "../types";
 import { SymbolStates, createSymbolStates, createBlankSymbolState, getSymbolState, updateMarket as updateMarketState } from "./market-ingestion";
 import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
@@ -25,9 +25,11 @@ export class AppStore implements AppStoreReadOnly {
   private latestBuyLockedFromEa: boolean;
   private latestSellLockedFromEa: boolean;
   private pendingBridgeOrders: BridgeOrder[];
-  private pendingEaCommand: { action: string; lot: number; sl: number; tp: number } | null;
+  private pendingEaCommands: EaCommand[];
   private mt5BridgeClients: Set<WebSocket>;
   private webDashboardClients: Set<WebSocket>;
+  private eaPositions: EaPosition[];
+  private eaPositionsLastSync: string;
   private webRequestTest: { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
   private tradingState: TradingMachineService;
   private bridgeState: BridgeMachineService;
@@ -48,9 +50,11 @@ export class AppStore implements AppStoreReadOnly {
     this.latestBuyLockedFromEa = false;
     this.latestSellLockedFromEa = false;
     this.pendingBridgeOrders = [];
-    this.pendingEaCommand = null;
+    this.pendingEaCommands = [];
     this.mt5BridgeClients = new Set<WebSocket>();
     this.webDashboardClients = new Set<WebSocket>();
+    this.eaPositions = [];
+    this.eaPositionsLastSync = "";
     this.webRequestTest = {
       status: "idle",
       lastTested: "",
@@ -231,6 +235,8 @@ export class AppStore implements AppStoreReadOnly {
         lastHeartbeatTime: activeState.connection.lastPing,
       },
       webRequestStatus: this.webRequestTest,
+      eaPositions: this.eaPositions,
+      eaPositionsLastSync: this.eaPositionsLastSync,
     };
   }
 
@@ -240,13 +246,58 @@ export class AppStore implements AppStoreReadOnly {
     return list;
   }
 
-  getPendingEaCommand(): { action: string; lot: number; sl: number; tp: number } | null {
-    const cmd = this.pendingEaCommand;
-    this.pendingEaCommand = null;
-    return cmd;
+  getPendingEaCommands(): EaCommand[] {
+    const list = this.pendingEaCommands.filter(c => c.status === "pending");
+    list.forEach(c => { c.status = "sent"; });
+    return list;
   }
 
-  updateMarket(data: UpdateMarketPayload, clientIp?: string): void {
+  handleEaConfirmation(confirmation: EaConfirmation): void {
+    const cmd = this.pendingEaCommands.find(c => c.ticket === confirmation.ticket && c.status === "sent");
+    if (cmd) {
+      cmd.status = confirmation.success ? "confirmed" : "failed";
+      cmd.error = confirmation.error;
+      this.addLog(
+        "EA",
+        confirmation.success ? "SUCCESS" : "ERROR",
+        `Command ${cmd.action} for ticket #${confirmation.ticket} ${confirmation.success ? "executed successfully" : "failed: " + (confirmation.error || "unknown error")}`
+      );
+    }
+  }
+
+  handleEaPositionsReport(positions: EaPosition[]): void {
+    this.eaPositions = positions;
+    this.eaPositionsLastSync = new Date().toISOString();
+    const state = getSymbolState(this.symbolStates, this.activeSymbol);
+    state.connection.isEaConnected = true;
+    state.connection.lastPing = new Date().toISOString();
+    this.addLog("EA", "SUCCESS", `EA connection confirmed via position sync: ${positions.length} positions reported.`);
+  }
+
+  handleEaLogs(logs: EaLog[]): void {
+    for (const log of logs) {
+      const level = log.level === "WARN" ? "WARNING" : log.level;
+      this.addLog(log.source || "EA", level, `[EA] ${log.message}`);
+    }
+  }
+
+  queueEaConfigUpdate(config: Record<string, unknown>): void {
+    const cmd: EaCommand = {
+      id: crypto.randomUUID(),
+      action: "CONFIG_UPDATE",
+      symbol: this.activeSymbol,
+      lot: 0,
+      sl: 0,
+      tp: 0,
+      reason: "runtime config update",
+      timestamp: Date.now(),
+      status: "pending",
+    };
+    (cmd as any).configUpdate = config;
+    this.pendingEaCommands.push(cmd);
+  }
+
+  async updateMarket(data: UpdateMarketPayload, clientIp?: string): Promise<void> {
     const symbol = (data.symbol && data.symbol.trim()) || this.activeSymbol || "Step Index";
     if (!this.activeSymbol || this.activeSymbol === "") {
       this.activeSymbol = symbol;
@@ -339,7 +390,7 @@ export class AppStore implements AppStoreReadOnly {
     }
 
     if (this.tradeConfig.isActive) {
-      evaluateSimulatedStrategy(this.buildTradeState(), this).catch((err) => {
+      await evaluateSimulatedStrategy(this.buildTradeState(), this).catch((err) => {
         console.error("Strategy evaluation error on tick:", err);
       });
     }
@@ -374,8 +425,9 @@ export class AppStore implements AppStoreReadOnly {
       latestSellLockedFromEa: this.latestSellLockedFromEa,
       nextTicket: this.nextTicket,
       pendingBridgeOrders: this.pendingBridgeOrders,
-      pendingEaCommand: this.pendingEaCommand,
+      pendingEaCommands: this.pendingEaCommands,
       mt5BridgeClients: this.mt5BridgeClients,
+      eaPositions: this.eaPositions,
     };
   }
 
@@ -421,6 +473,8 @@ export class AppStore implements AppStoreReadOnly {
             details: "Awaiting first WebRequest test trigger.",
             triggerTest: false,
           },
+          eaPositions: this.eaPositions,
+          eaPositionsLastSync: this.eaPositionsLastSync,
         };
       },
       getAiStudyFeed: async () => ({

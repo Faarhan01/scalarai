@@ -62,22 +62,29 @@ Response includes current config + `pendingAction`, `pendingLot`, `pendingSL`, `
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/update-market` | Optional | Single tick or bulk candles from EA/dashboard |
+| POST | `/api/market/bulk-candles` | Optional | Dedicated high-speed bulk candle upload from MT5 EA |
 | GET | `/api/market/history` | No | Tick history with optional `symbol`, `from`, `to`, `limit` query params (max 5000) |
+| GET | `/api/market/candles` | No | OHLC candles with optional `symbol`, `from`, `to`, `limit` (max 10000) |
+| GET | `/api/market/symbols` | No | Known symbols list with active symbol |
+| GET | `/api/market/observations` | No | AI observations with optional `symbol`, `from`, `to`, `direction`, `minVelocity`, `limit` |
 
-`POST /api/update-market` validates price/symbol, calls `updateMarket()` or `ingestBulkCandles()`, returns current config snapshot.
+`POST /api/update-market` accepts either:
+- Single tick: `{ symbol?, price?, close?, velocity?, buyLocked?, sellLocked?, ... }`
+- Bulk candles: `{ symbol, candles: [{ time, open, high, low, close, volume?, direction? }], digits?, tickSize? }`
 
-Bulk candles format: `{ symbol, candles: [{ time, open, high, low, close, volume?, direction? }], digits?, tickSize? }`
+`POST /api/market/bulk-candles` accepts:
+- `{ symbol, candles: [{ time, open, high, low, close, volume?, direction? }], digits?, tickSize? }`
 
 ### `mcp.ts`
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/mcp` | **Required** | MCP JSON-RPC 2.0 handler |
-| POST | `/api/mcp` | **Required** | MCP JSON-RPC 2.0 handler (alternate path) |
+| POST | `/mcp` | Conditional | MCP JSON-RPC 2.0 handler |
+| POST | `/api/mcp` | Conditional | MCP JSON-RPC 2.0 handler (alternate path) |
 | GET | `/mcp` | No | Server info: name, version, status, toolsCount, protocol, endpoint |
 | GET | `/api/mcp` | No | Server info (alternate path) |
 
-Always requires Bearer auth regardless of `SCALARAI_MCP_API_KEY`. See `mcp.md` for tool list.
+Auth is only enforced when `SCALARAI_MCP_API_KEY` is set; otherwise requests pass through. See `mcp.md` for tool list.
 
 ### `settings.ts`
 

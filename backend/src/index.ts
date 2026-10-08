@@ -57,7 +57,7 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
+  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommands.bind(store), store.handleEaConfirmation.bind(store), store.handleEaPositionsReport.bind(store), undefined, store.handleEaLogs.bind(store));
   registerMarketRoutes(
     app,
     store.updateMarket.bind(store),

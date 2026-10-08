@@ -241,6 +241,8 @@ export interface FullStatusPayload {
   lastStrategySignal: { type: string; reason: string; confidence?: number } | null;
   stats: TradeSessionStats;
   webRequestStatus: WebRequestTestState;
+  eaPositions: EaPosition[];
+  eaPositionsLastSync: string;
 }
 
 export interface AiStudyFeedPayload {
@@ -332,13 +334,16 @@ export interface AppStoreReadOnly {
   getLatestBuyLockedFromEa(): boolean;
   getLatestSellLockedFromEa(): boolean;
   getPendingBridgeOrders(): readonly BridgeOrder[];
+  getPendingEaCommands(): readonly EaCommand[];
+  handleEaConfirmation(confirmation: EaConfirmation): void;
+  handleEaPositionsReport(positions: EaPosition[]): void;
+  handleEaLogs(logs: EaLog[]): void;
   getMt5BridgeClients(): ReadonlySet<WebSocket>;
   getWebDashboardClients(): ReadonlySet<WebSocket>;
   getWebRequestTest(): { status: "idle" | "pending" | "success" | "failed"; lastTested: string; error: string; details: string; triggerTest: boolean };
 
   getFullStatusPayload(): FullStatusPayload;
   getAndClearPendingOrders(): BridgeOrder[];
-  getPendingEaCommand(): { action: string; lot: number; sl: number; tp: number } | null;
   getTradingState(): TradingState;
   getBridgeState(): BridgeState;
   getCalibrationState(): CalibrationState;
@@ -358,6 +363,50 @@ export interface BridgeOrder {
   id: string;
   ticket: number;
   timestamp: number;
+}
+
+export interface EaCommand {
+  action: "BUY" | "SELL" | "CLOSE_ALL" | "CLOSE_BY_TICKET" | "CONFIG_UPDATE";
+  symbol: string;
+  lot: number;
+  sl: number;
+  tp: number;
+  ticket?: number;
+  reason?: string;
+  id: string;
+  timestamp: number;
+  status: "pending" | "sent" | "confirmed" | "failed";
+  error?: string;
+}
+
+export interface EaConfirmation {
+  action: string;
+  ticket: number;
+  success: boolean;
+  error?: string;
+  symbol: string;
+  magic: number;
+  timestamp: number;
+}
+
+export interface EaPosition {
+  ticket: number;
+  type: "BUY" | "SELL";
+  symbol: string;
+  volume: number;
+  openPrice: number;
+  sl: number;
+  tp: number;
+  profit: number;
+  magic: number;
+  openTime: string;
+}
+
+export interface EaLog {
+  level: "INFO" | "SUCCESS" | "ERROR" | "WARN";
+  message: string;
+  timestamp: string;
+  source: "EA";
 }
 
 export interface SettingsRow {

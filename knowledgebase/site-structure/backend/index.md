@@ -15,8 +15,9 @@ backend/src/
 │   ├── ea.ts                      # GET /api/ea/download, /api/ea/generator-source, /api/ea/template
 │   │                               # POST /api/ea/tick, POST /api/update-market
 │   ├── health.ts                  # GET /api/health
-│   ├── market.ts                  # POST /api/update-market (bulk candles), GET /api/market/history
-│   ├── mcp.ts                     # POST /mcp, GET /mcp (server info)
+│   ├── market.ts                  # POST /api/update-market, POST /api/market/bulk-candles
+│   │                               # GET /api/market/history, /api/market/candles, /api/market/symbols, /api/market/observations
+│   ├── mcp.ts                     # POST /mcp, POST /api/mcp, GET /mcp, GET /api/mcp
 │   ├── settings.ts                # GET/POST /api/settings, /api/test-webrequest/*
 │   │                               # GET/POST /api/settings/db-retention
 │   ├── status.ts                  # GET /api/status, POST /api/status/switch-symbol
@@ -24,8 +25,8 @@ backend/src/
 │   ├── strategies.ts              # GET/POST /api/strategies, GET /api/strategies/:id
 │   └── trades.ts                  # POST /api/toggle-trade, POST /api/reset-stats
 ├── websockets/
-│   ├── bridge.ts                  # WS /mt5-bridge — onMessage, onConnect, onClose
-│   └── dashboard.ts               # WS /ws/live, /ws, /live-feed — onMessage, onConnect, onClose
+│   ├── bridge.ts                  # WS /mt5-bridge — onMessage, onConnect, onClose, allowedOrigin
+│   └── dashboard.ts               # WS /ws/live, /ws, /live-feed — onMessage, onConnect, onClose, allowedOrigin
 ├── services/
 │   ├── app-store.ts               # AppStore class — ALL state + business logic (720 lines)
 │   ├── defaults.ts                # Factories: getDefaultTradeConfig, getDefaultAiKnowledgeBase, etc.
@@ -44,7 +45,7 @@ backend/src/
 │   └── trading-machine.ts         # xstate machines: tradingMachine, bridgeMachine, calibrationMachine
 ├── middleware/
 │   ├── auth.ts                    # requireApiKey(expectedApiKey?) — passes if empty/missing
-│   ├── cors.ts                    # Reflects request Origin, credentials allowed
+│   ├── cors.ts                    # Strict origin allowlist, rejects mismatched origins
 │   ├── error.ts                   # Centralized error handler
 │   ├── logger.ts                  # HTTP request/response logging
 │   └── rateLimit.ts               # In-memory sliding-window rate limiter (default 3600 req/min, exempts streaming paths)
@@ -73,6 +74,7 @@ backend/src/
 - Creates Vite dev server or static file serving
 - Creates WebSocket servers with connect/disconnect handlers
 - Background intervals: analysis worker (5 min), DB cleanup (1 hour)
+- `FRONTEND_URL` env var is passed to WebSocket servers as `allowedOrigin`
 
 ### `AppStore` class — `services/app-store.ts` (720 lines)
 
@@ -102,18 +104,20 @@ Single source of truth for all application state and mutations. Fields are `priv
 - `loadFromDb()` — hydrates from SQLite
 - `addLog()`, `broadcastToDashboards()`, `broadcastTradesUpdate()`
 - `getFullStatusPayload(): FullStatusPayload`
-- `getAndClearPendingOrders()`, `getPendingEaCommand()`
+- `getAndClearPendingOrders(): BridgeOrder[]`, `getPendingEaCommand()`
 - `updateMarket(data: UpdateMarketPayload, clientIp?)` — core tick processing
 - `ingestBulkCandles(symbol, candles, metadata?)` — bulk candle ingestion
 - `buildTradeState(): TradeState` — snapshot for trade execution
 - `buildMcpContext(): McpContext` — context for MCP tools
 - `runBackgroundAnalysisWorker()` — processes telemetry, updates AI knowledge
 - `updateSettings(params)`, `toggleTrading(isActive)`, `placeTrade()`, `closeTrade()`, `resetStats()`
+- `closeAllTrades(symbol?)` — closes all open positions
 - `switchSymbol(symbol)` — switches active symbol, loads candles from DB
 - `updateWebRequestTest(update)` — partial update of WebRequest test state
 - `sendTradingEvent(event)`, `sendBridgeEvent(event)`, `sendCalibrationEvent(event)` — xstate transitions
 - `getTradingState()`, `getBridgeState()`, `getCalibrationState()` — xstate snapshots
 - `addBridgeClient(ws)`, `removeBridgeClient(ws)`, `addDashboardClient(ws)`, `removeDashboardClient(ws)`
+- `getSymbolsList()` — returns connected symbol list for MCP/status
 - `loadAiSynthesizedStrategy()`, `loadAiKnowledgeBase()`
 - `analyzeMarket(): Promise<string>` — stub for MCP type requirement
 
@@ -121,8 +125,8 @@ Single source of truth for all application state and mutations. Fields are `priv
 
 ```ts
 // index.ts
-registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store));
-registerMarketRoutes(app, store.updateMarket.bind(store), () => store.config, store.ingestBulkCandles.bind(store), () => store.getActiveSymbol());
+registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommand.bind(store), process.env.SCALARAI_MCP_API_KEY);
+registerMarketRoutes(app, store.updateMarket.bind(store), () => store.config, store.ingestBulkCandles.bind(store), () => store.getActiveSymbol(), process.env.SCALARAI_MCP_API_KEY);
 registerSettingsRoutes(app, (params) => store.updateSettings(params), () => store.config, () => store.getWebRequestTest(), ...);
 registerTradeRoutes(app, (isActive: boolean) => store.toggleTrading(isActive), () => store.resetStats(), process.env.SCALARAI_MCP_API_KEY);
 registerMcpRoute(app, store.buildMcpContext(), process.env.SCALARAI_MCP_API_KEY);
@@ -143,7 +147,7 @@ createDashboardServer(server, sendInit, onMessage, onConnect?, onClose?, allowed
 
 `index.ts` uses `onConnect`/`onClose` to maintain `store.mt5BridgeClients` and `store.webDashboardClients` sets and broadcast connection state changes.
 
-Both servers now support `request_history` messages from clients.
+Both servers support `request_history` messages from clients.
 
 ### Auth Behavior
 
@@ -153,7 +157,7 @@ Both servers now support `request_history` messages from clients.
 
 This means in development without `SCALARAI_MCP_API_KEY`, all protected routes are open.
 
-`mcp_server.ts` has its own auth check — it always requires a valid Bearer token regardless of `expectedApiKey`.
+`mcp_server.ts` auth: only enforced when `expectedApiKey` is set and non-empty; otherwise requests pass through.
 
 ### Important: Do NOT Delete or Rename
 
@@ -165,7 +169,7 @@ This means in development without `SCALARAI_MCP_API_KEY`, all protected routes a
 
 - `PORT` — server port (default 3000)
 - `SCALARAI_MCP_API_KEY` — if set, protects MCP route and other routes with Bearer auth
-- `FRONTEND_URL` — allowed origin for WebSocket servers
+- `FRONTEND_URL` — allowed origin for WebSocket servers; also used by CORS middleware
 - `NODE_ENV` — production uses static files, dev uses Vite middleware
 
 ### Backend Data Directory
@@ -179,7 +183,7 @@ backend/data/
 ## Data Flow
 
 1. MT5 EA → `POST /api/ea/tick` → `store.updateMarket()` → updates symbol state, AI knowledge, strategy eval, broadcasts dashboards
-2. MT5 EA → `POST /api/update-market` → bulk candles or single tick → `store.updateMarket()` or `store.ingestBulkCandles()`
+2. MT5 EA → `POST /api/update-market` or `POST /api/market/bulk-candles` → bulk candles or single tick → `store.updateMarket()` or `store.ingestBulkCandles()`
 3. MT5 Bridge → `WS /mt5-bridge` → receives pending orders/commands, supports `request_history`
 4. Dashboard → `WS /ws/live` → receives init, tick, trade, log, config updates, supports `request_history`
 5. Frontend → `POST /api/settings` → `store.updateSettings()` → persists + broadcasts

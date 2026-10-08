@@ -15,14 +15,19 @@ describe("MQL5 EA Generator", () => {
     expect(code.length).toBeGreaterThan(1000);
     // Checks for MQL5 forward declarations
     expect(code).toContain("void PushHistoricalCandles(int count);");
-    expect(code).toContain("void ManageTrailingStop(double bid, double ask);");
     expect(code).toContain("void BroadcastMarketUpdate();");
+    expect(code).toContain("void SyncWithWebApp();");
+    expect(code).toContain("void ProcessPendingRemoteCommands(string jsonResponse, double bid, double ask);");
+    expect(code).toContain("void ReportExecutionResult(string action, int ticket, bool success, string error);");
+    expect(code).toContain("void SyncPositions();");
     // Check for proper 64-bit integer format specifier %I64d
     expect(code).toContain("%I64d");
     expect(code).not.toContain("%lld");
     // Check bulk candles endpoint
     expect(code).toContain("/api/market/bulk-candles");
-    expect(code).toContain("/api/update-market");
+    expect(code).toContain("/api/ea/tick");
+    expect(code).toContain("/api/ea/confirm");
+    expect(code).toContain("/api/ea/positions");
   });
 
   it("should keep backend and frontend generators aligned", () => {

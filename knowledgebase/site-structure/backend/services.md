@@ -43,31 +43,31 @@ Single source of truth for all application state and mutations. Fields are `priv
 - `getWebRequestTest()`
 
 **Key methods:**
-- `loadFromDb()` — hydrates from SQLite via `loadStateFromDb()`
+- `loadFromDb()` — hydrates from SQLite
 - `addLog(source, level, message)` — creates log, persists, keeps max 80
 - `broadcastToDashboards(payload)` — sends JSON to all WS dashboard clients
 - `broadcastTradesUpdate()` — sends `{ type: "trades", trades, stats }`
-- `getFullStatusPayload(): FullStatusPayload` — assembles full status response
-- `getAndClearPendingOrders(): BridgeOrder[]` — returns and clears pending bridge orders
-- `getPendingEaCommand()` — returns and clears pending EA command
-- `updateMarket(data, clientIp?)` — core tick processing: updates symbol state, AI knowledge, strategy eval, broadcasts
+- `getFullStatusPayload(): FullStatusPayload`
+- `getAndClearPendingOrders(): BridgeOrder[]`, `getPendingEaCommand()`
+- `updateMarket(data: UpdateMarketPayload, clientIp?)` — core tick processing
 - `ingestBulkCandles(symbol, candles, metadata?)` — bulk candle ingestion
-- `buildTradeState(): TradeState` — creates snapshot for trade execution
-- `buildMcpContext(): McpContext` — creates context for MCP tools
+- `buildTradeState(): TradeState` — snapshot for trade execution
+- `buildMcpContext(): McpContext` — context for MCP tools
 - `runBackgroundAnalysisWorker()` — processes unprocessed telemetry, updates AI knowledge
 - `updateSettings(params)` — updates config, persists, broadcasts
 - `toggleTrading(isActive)` — toggles trading, force-closes open trades if stopping
-- `placeTrade(type, reason)` — opens simulated position
+- `placeTrade(type, reason, options?)` — opens simulated position
 - `closeTrade(tradeId)` — closes open trade
+- `closeAllTrades(symbol?)` — closes all open positions, optionally for a specific symbol
 - `resetStats()` — clears trade list, resets DB
 - `switchSymbol(symbol)` — switches active symbol, loads candles from DB
 - `updateWebRequestTest(update)` — partial update of WebRequest test state
 - `sendTradingEvent(event)`, `sendBridgeEvent(event)`, `sendCalibrationEvent(event)` — xstate transitions
 - `getTradingState()`, `getBridgeState()`, `getCalibrationState()` — xstate snapshots
 - `addBridgeClient(ws)`, `removeBridgeClient(ws)`, `addDashboardClient(ws)`, `removeDashboardClient(ws)`
-- `loadAiSynthesizedStrategy()` — loads AI strategy from DB or initializes default
-- `loadAiKnowledgeBase()` — loads knowledge base from DB or initializes default
-- `analyzeMarket()` — stub returning string for MCP type requirement
+- `getSymbolsList()` — returns connected symbol list for MCP/status endpoints
+- `loadAiSynthesizedStrategy()`, `loadAiKnowledgeBase()`
+- `analyzeMarket(): Promise<string>` — stub for MCP type requirement
 
 ### `defaults.ts` — Default Factories
 
@@ -89,6 +89,7 @@ EA features:
 - Remote command processing via JSON response parsing
 - WebRequest sync every 3s
 - Trailing stop logic
+- `PushHistoricalCandles(count)` — pushes up to 1000 historical candles on init
 
 ### `knowledge.ts` — AI Knowledge Base
 
@@ -120,6 +121,8 @@ EA features:
 - `linkObservationToStrategy(observationId, strategyId)` — links observation to strategy via metadata
 - `getObservationsForStrategy(strategyId): Observation[]` — observations linked to a strategy
 
+All JSON.parse calls on stored tags/metadata are wrapped in try-catch for crash safety.
+
 ### `state-persistence.ts` — Database Persistence
 
 - `loadStateFromDb()` — loads config, knowledge, strategy, trades, logs from SQLite
@@ -144,6 +147,7 @@ EA features:
 - `evaluateMeanReversion(ctx, config)` — Bollinger Bands + RSI + momentum confirmation
 - `evaluateAiAdaptive(ctx, config)` — velocity + acceleration + EMA confirmation + speed divergence
 - `evaluateCustomStrategy(ctx, config)` — rule-based with conditions
+- `evaluateStrategyBacktest(mode, limit): BacktestResult` — backtest against recent ticks
 
 **Indicator math:**
 - `calculateEMA(prices, period)`
@@ -155,12 +159,12 @@ EA features:
 
 **Class:** `BacktestEngine`
 
-- `backtest(strategyId, symbol, from, to, initialBalance?): BacktestResult` — runs strategy against historical candles
+- `runBacktest(strategyMode, candles, config, initialBalance?): BacktestResult` — runs strategy against historical candles
 
 **Key interfaces:**
 - `BacktestCandle` — time, open, high, low, close, direction, volume
 - `BacktestTrade` — entryTime, exitTime, type, entryPrice, exitPrice, profit, reason
-- `BacktestResult` — strategyId, strategyMode, symbol, fromTime, toTime, initialBalance, finalBalance, totalTrades, wins, losses, winRate, totalProfit, maxDrawdown, trades
+- `BacktestResult` — strategyId, strategyMode, symbol, fromTime, toTime, initialBalance, finalBalance, totalTrades, wins, losses, winRate, profitFactor, maxDrawdown, sharpeRatio, avgWin, avgLoss, trades
 
 ### `strategy-research.ts` — Market & Strategy Analysis
 

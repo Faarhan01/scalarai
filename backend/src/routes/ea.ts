@@ -2,15 +2,20 @@ import { Request, Response, NextFunction, Application } from "express";
 import path from "path";
 import fs from "fs";
 import { generateMql5Code } from "../services/ea-generator";
-import { TradeConfig, UpdateMarketPayload, FullStatusPayload } from "../types";
+import { saveCustomEaTemplate } from "../services/ea-remote-update";
+import { TradeConfig, UpdateMarketPayload, FullStatusPayload, EaCommand, EaConfirmation, EaPosition, EaLog } from "../types";
 import { requireApiKey } from "../middleware/auth";
 
 export function registerEaRoutes(
   app: Application,
   getStatus: () => FullStatusPayload,
   getConfig: () => TradeConfig,
-  onTick: (data: UpdateMarketPayload, clientIp?: string) => void,
-  getPendingEaCommand?: () => { action: string; lot: number; sl: number; tp: number } | null,
+  onTick: (data: UpdateMarketPayload, clientIp?: string) => Promise<void>,
+  getPendingEaCommands?: () => EaCommand[],
+  onEaConfirmation?: (confirmation: EaConfirmation) => void,
+  onEaPositionsReport?: (positions: EaPosition[]) => void,
+  queueEaConfigUpdate?: (config: Record<string, unknown>) => void,
+  onEaLogs?: (logs: EaLog[]) => void,
   apiKey?: string
 ) {
   const authMiddleware = apiKey ? requireApiKey(apiKey) : undefined;
@@ -46,7 +51,7 @@ export function registerEaRoutes(
     }
   });
 
-  app.post("/api/ea/tick", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+  app.post("/api/ea/tick", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const account = body.account;
@@ -74,11 +79,11 @@ export function registerEaRoutes(
       };
 
       const clientIp = (req as any).ip || (req as any).socket?.remoteAddress || "127.0.0.1";
-      onTick(payload, clientIp);
+      await onTick(payload, clientIp);
       const status = getStatus();
-      const pendingCmd = getPendingEaCommand ? getPendingEaCommand() : null;
+      const pendingCommands = getPendingEaCommands ? getPendingEaCommands() : [];
 
-      res.json({
+      const responsePayload: any = {
         isActive: status.config.isActive,
         selectedStrategy: status.config.selectedStrategy,
         lotSize: status.config.lotSize,
@@ -90,11 +95,25 @@ export function registerEaRoutes(
         tradingMode: status.config.tradingMode,
         isAiModeEnabled: status.config.isAiModeEnabled,
         selectedAssets: status.config.selectedAssets,
-        pendingAction: pendingCmd ? pendingCmd.action : "NONE",
-        pendingLot: pendingCmd ? pendingCmd.lot : 0,
-        pendingSL: pendingCmd ? pendingCmd.sl : 0,
-        pendingTP: pendingCmd ? pendingCmd.tp : 0,
-      });
+        pendingCommands: pendingCommands.map(cmd => {
+          const base: any = {
+            action: cmd.action,
+            lot: cmd.lot,
+            sl: cmd.sl,
+            tp: cmd.tp,
+            ticket: cmd.ticket,
+            symbol: cmd.symbol,
+            reason: cmd.reason,
+            id: cmd.id,
+          };
+          if (cmd.action === "CONFIG_UPDATE") {
+            base.configUpdate = (cmd as any).configUpdate;
+          }
+          return base;
+        }),
+      };
+      
+      res.json(responsePayload);
     } catch (err: unknown) {
       console.error("EA tick handler error:", err);
       res.status(500).json({ error: "Internal server error" });
@@ -207,5 +226,144 @@ refpoint=2
     res.setHeader("Content-Disposition", "attachment; filename=step_index_chart.tpl");
     res.setHeader("Content-Type", "text/plain");
     res.send(templateCode);
+  });
+
+  app.post("/api/ea/confirm", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const confirmations = Array.isArray(body.confirmations) ? body.confirmations : [body];
+      
+      if (onEaConfirmation) {
+        confirmations.forEach((c: any) => {
+          onEaConfirmation({
+            action: c.action,
+            ticket: Number(c.ticket),
+            success: Boolean(c.success),
+            error: c.error || "",
+            symbol: c.symbol || "Step Index",
+            magic: Number(c.magic || 20260617),
+            timestamp: Date.now(),
+          });
+        });
+      }
+      
+      res.json({ status: "ok", processed: confirmations.length });
+    } catch (err: unknown) {
+      console.error("EA confirmation handler error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/ea/positions", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const positions = Array.isArray(body.positions) ? body.positions : [];
+      
+      if (onEaPositionsReport) {
+        onEaPositionsReport(positions.map((p: any) => ({
+          ticket: Number(p.ticket),
+          type: p.type,
+          symbol: p.symbol || "Step Index",
+          volume: Number(p.volume),
+          openPrice: Number(p.openPrice),
+          sl: Number(p.sl),
+          tp: Number(p.tp),
+          profit: Number(p.profit),
+          magic: Number(p.magic || 20260617),
+          openTime: p.openTime || new Date().toISOString(),
+        })));
+      }
+      
+      res.json({ status: "ok", processed: positions.length });
+    } catch (err: unknown) {
+      console.error("EA positions handler error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/ea/version", (req: Request, res: Response) => {
+    try {
+      const code = generateMql5Code();
+      const versionMatch = code.match(/#property\s+version\s+"([^"]+)"/);
+      const version = versionMatch ? versionMatch[1] : "unknown";
+      res.json({ version });
+    } catch (err: unknown) {
+      res.status(500).json({ error: "Failed to fetch EA version" });
+    }
+  });
+
+  app.get("/api/ea/code", (req: Request, res: Response) => {
+    try {
+      const code = generateMql5Code();
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(code);
+    } catch (err: unknown) {
+      res.status(500).json({ error: "Failed to fetch EA code" });
+    }
+  });
+
+  app.post("/api/ea/code", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const code = typeof body.code === "string" ? body.code : "";
+      
+      if (!code || code.trim().length < 50) {
+        return res.status(400).json({ error: "EA code appears too short or missing." });
+      }
+
+      const saved = saveCustomEaTemplate(code);
+      
+      if (!saved) {
+        return res.status(500).json({ error: "Failed to persist EA code on server." });
+      }
+
+      res.json({ status: "ok", message: "EA code updated. Next download will use this version." });
+    } catch (err: unknown) {
+      console.error("EA code update error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/ea/config", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const config = body.config || body;
+      
+      if (!config || typeof config !== "object") {
+        return res.status(400).json({ error: "Missing config object" });
+      }
+
+      if (queueEaConfigUpdate) {
+        queueEaConfigUpdate(config as Record<string, unknown>);
+      }
+      
+      res.json({ status: "ok", message: "Config update queued for EA." });
+    } catch (err: unknown) {
+      console.error("EA config update error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/ea/logs", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const logs = Array.isArray(body.logs) ? body.logs : [];
+      
+      if (onEaLogs) {
+        onEaLogs(
+          logs.map((log: any) => ({
+            level: log.level || "INFO",
+            message: typeof log.message === "string" ? log.message : String(log.message || ""),
+            timestamp: log.timestamp || new Date().toISOString(),
+            source: "EA",
+          }))
+        );
+      }
+      
+      res.json({ status: "ok", processed: logs.length });
+    } catch (err: unknown) {
+      console.error("EA logs handler error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 }
