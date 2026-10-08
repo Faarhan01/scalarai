@@ -2,7 +2,7 @@ import { Request, Response, NextFunction, Application } from "express";
 import path from "path";
 import fs from "fs";
 import { generateMql5Code } from "../services/ea-generator";
-import { saveCustomEaTemplate } from "../services/ea-remote-update";
+import { saveCustomEaTemplate, resetCustomEaTemplate, isCustomTemplateActive, getCustomTemplateStatus } from "../services/ea-remote-update";
 import { TradeConfig, UpdateMarketPayload, FullStatusPayload, EaCommand, EaConfirmation, EaPosition, EaLog } from "../types";
 import { requireApiKey } from "../middleware/auth";
 
@@ -83,6 +83,8 @@ export function registerEaRoutes(
       const status = getStatus();
       const pendingCommands = getPendingEaCommands ? getPendingEaCommands() : [];
 
+      const firstPending = pendingCommands.length > 0 ? pendingCommands[0] : null;
+
       const responsePayload: any = {
         isActive: status.config.isActive,
         selectedStrategy: status.config.selectedStrategy,
@@ -95,6 +97,13 @@ export function registerEaRoutes(
         tradingMode: status.config.tradingMode,
         isAiModeEnabled: status.config.isAiModeEnabled,
         selectedAssets: status.config.selectedAssets,
+        // Legacy single-command backward-compatibility for all existing EAs:
+        pendingAction: firstPending ? firstPending.action : "NONE",
+        pendingLot: firstPending ? firstPending.lot : 0,
+        pendingSL: firstPending ? firstPending.sl : 0,
+        pendingTP: firstPending ? firstPending.tp : 0,
+        pendingTicket: firstPending ? firstPending.ticket : 0,
+        // Modern multi-command batch for v3+ EAs:
         pendingCommands: pendingCommands.map(cmd => {
           const base: any = {
             action: cmd.action,
@@ -238,6 +247,7 @@ refpoint=2
           onEaConfirmation({
             action: c.action,
             ticket: Number(c.ticket),
+            mt5Ticket: c.mt5Ticket !== undefined ? Number(c.mt5Ticket) : undefined,
             success: Boolean(c.success),
             error: c.error || "",
             symbol: c.symbol || "Step Index",
@@ -294,11 +304,173 @@ refpoint=2
 
   app.get("/api/ea/code", (req: Request, res: Response) => {
     try {
-      const code = generateMql5Code();
+      const queryUrl = (req.query.url as string)?.trim();
+      let appUrl = queryUrl || `${req.protocol}://${req.get("host")}`;
+      appUrl = appUrl.replace(/\/$/, "");
+      if (!appUrl) appUrl = "http://127.0.0.1:3000";
+
+      const currentConfig = getConfig();
+      const code = generateMql5Code(appUrl, currentConfig);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.send(code);
     } catch (err: unknown) {
       res.status(500).json({ error: "Failed to fetch EA code" });
+    }
+  });
+
+  app.get("/api/ea/install-script", (req: Request, res: Response) => {
+    try {
+      const queryUrl = (req.query.url as string)?.trim();
+      let appUrl = queryUrl || `${req.protocol}://${req.get("host")}`;
+      appUrl = appUrl.replace(/\/$/, "");
+      if (!appUrl) appUrl = "http://127.0.0.1:3000";
+
+      const script = `@echo off
+setlocal enabledelayedexpansion
+title Scalar AI - MT5 EA Auto-Installer
+echo ====================================================
+echo        Scalar AI MT5 Expert Advisor Auto-Installer
+echo ====================================================
+echo.
+echo Searching for MetaTrader 5 Experts directory...
+set "TARGET_DIR="
+
+for /d %%D in ("%APPDATA%\\MetaQuotes\\Terminal\\*") do (
+    if exist "%%D\\MQL5\\Experts" (
+        set "TARGET_DIR=%%D\\MQL5\\Experts"
+    )
+)
+
+if "!TARGET_DIR!"=="" (
+    echo [NOTICE] Standard MT5 directory not found in APPDATA.
+    echo Saving ScalarAI_MultiAsset_EA.mq5 to current directory...
+    set "TARGET_DIR=%CD%"
+) else (
+    echo [FOUND] MT5 Experts directory:
+    echo "!TARGET_DIR!"
+)
+
+echo.
+echo Downloading latest EA from ${appUrl}...
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('${appUrl}/api/ea/download', '!TARGET_DIR!\\ScalarAI_MultiAsset_EA.mq5')"
+
+if exist "!TARGET_DIR!\\ScalarAI_MultiAsset_EA.mq5" (
+    echo.
+    echo ====================================================
+    echo [SUCCESS] ScalarAI_MultiAsset_EA.mq5 installed!
+    echo ====================================================
+    echo.
+    echo NEXT STEPS:
+    echo 1. Open MetaTrader 5
+    echo 2. Open Tools -^> Options -^> Expert Advisors
+    echo    - Check "Allow WebRequest for listed URL"
+    echo    - Add URL: ${appUrl}
+    echo 3. In MT5 Navigator window, right-click "Experts" and click "Refresh"
+    echo 4. Drag "ScalarAI_MultiAsset_EA" onto your chart!
+    echo.
+) else (
+    echo.
+    echo [ERROR] Download failed. Please download the .mq5 file directly from the web dashboard.
+)
+pause
+`;
+      res.setHeader("Content-Disposition", "attachment; filename=Install_ScalarAI_EA.bat");
+      res.setHeader("Content-Type", "application/x-bat; charset=utf-8");
+      res.send(script);
+    } catch (err: unknown) {
+      res.status(500).json({ error: "Failed to generate installer script" });
+    }
+  });
+
+  app.get("/api/ea/install-powershell", (req: Request, res: Response) => {
+    try {
+      const queryUrl = (req.query.url as string)?.trim();
+      let appUrl = queryUrl || `${req.protocol}://${req.get("host")}`;
+      appUrl = appUrl.replace(/\/$/, "");
+      if (!appUrl) appUrl = "http://127.0.0.1:3000";
+
+      const psScript = `# Scalar AI - MetaTrader 5 Expert Advisor Installer
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host "    Scalar AI MT5 Expert Advisor PowerShell Setup   " -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host ""
+
+$appUrl = "${appUrl}"
+$eaDownloadUrl = "$appUrl/api/ea/download"
+$eaFileName = "ScalarAI_MultiAsset_EA.mq5"
+
+Write-Host "Searching for MetaTrader 5 Terminal directories in APPDATA..." -ForegroundColor Yellow
+$terminalBase = Join-Path $env:APPDATA "MetaQuotes\\Terminal"
+$installedPaths = @()
+
+if (Test-Path $terminalBase) {
+    $dirs = Get-ChildItem -Path $terminalBase -Directory
+    foreach ($dir in $dirs) {
+        $expertsPath = Join-Path $dir.FullName "MQL5\\Experts"
+        if (Test-Path $expertsPath) {
+            $destFile = Join-Path $expertsPath $eaFileName
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                Invoke-WebRequest -Uri $eaDownloadUrl -OutFile $destFile -UseBasicParsing
+                Write-Host "[SUCCESS] Installed EA to: $destFile" -ForegroundColor Green
+                $installedPaths += $destFile
+            } catch {
+                Write-Host "[WARNING] Could not write to $destFile : $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+    }
+}
+
+if ($installedPaths.Count -eq 0) {
+    $localDest = Join-Path (Get-Location) $eaFileName
+    Write-Host "[NOTICE] Standard APPDATA MT5 folder not found. Downloading to current folder: $localDest" -ForegroundColor Yellow
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $eaDownloadUrl -OutFile $localDest -UseBasicParsing
+    Write-Host "[SUCCESS] Saved EA to: $localDest" -ForegroundColor Green
+    Write-Host "Please manually copy $eaFileName to your MT5 'MQL5\\Experts' folder." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host "NEXT STEPS IN METATRADER 5:" -ForegroundColor Green
+Write-Host "1. In MT5, open Tools -> Options -> Expert Advisors"
+Write-Host "2. Check 'Allow WebRequest for listed URL'"
+Write-Host "3. Add this exact URL: $appUrl" -ForegroundColor Cyan
+Write-Host "4. Check 'Allow Algo Trading'"
+Write-Host "5. Open Navigator (Ctrl+N), right-click 'Experts' -> 'Refresh'"
+Write-Host "6. Drag 'ScalarAI_MultiAsset_EA' onto your Step Index chart!"
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host ""
+Read-Host -Prompt "Press Enter to exit"
+`;
+      res.setHeader("Content-Disposition", "attachment; filename=Install_ScalarAI_EA.ps1");
+      res.setHeader("Content-Type", "application/x-powershell; charset=utf-8");
+      res.send(psScript);
+    } catch (err: unknown) {
+      res.status(500).json({ error: "Failed to generate PowerShell installer script" });
+    }
+  });
+
+  app.get("/api/ea/template-status", (req: Request, res: Response) => {
+    try {
+      const status = getCustomTemplateStatus();
+      res.json(status);
+    } catch (err: unknown) {
+      res.status(500).json({ error: "Failed to read template status" });
+    }
+  });
+
+  app.post("/api/ea/reset", authMiddleware || ((req: Request, res: Response, next: NextFunction) => next()), (req: Request, res: Response) => {
+    try {
+      const reset = resetCustomEaTemplate();
+      if (reset) {
+        res.json({ status: "ok", message: "EA template reset to official production master code." });
+      } else {
+        res.status(500).json({ error: "Failed to reset EA template" });
+      }
+    } catch (err: unknown) {
+      console.error("EA template reset error:", err);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -307,17 +479,12 @@ refpoint=2
       const body = req.body || {};
       const code = typeof body.code === "string" ? body.code : "";
       
-      if (!code || code.trim().length < 50) {
-        return res.status(400).json({ error: "EA code appears too short or missing." });
+      const saveResult = saveCustomEaTemplate(code);
+      if (!saveResult.success) {
+        return res.status(400).json({ error: `Custom EA rejected: ${saveResult.error}` });
       }
 
-      const saved = saveCustomEaTemplate(code);
-      
-      if (!saved) {
-        return res.status(500).json({ error: "Failed to persist EA code on server." });
-      }
-
-      res.json({ status: "ok", message: "EA code updated. Next download will use this version." });
+      res.json({ status: "ok", message: "EA code validated and saved. Next download will use this version." });
     } catch (err: unknown) {
       console.error("EA code update error:", err);
       res.status(500).json({ error: "Internal server error" });

@@ -235,14 +235,26 @@ export class AppStore implements AppStoreReadOnly {
   }
 
   handleEaConfirmation(confirmation: EaConfirmation): void {
-    const cmd = this.pendingEaCommands.find(c => c.ticket === confirmation.ticket && c.status === "sent");
+    const cmd = this.pendingEaCommands.find(c =>
+      (c.ticket === confirmation.ticket || (confirmation.action === "CLOSE_ALL" && c.action === "CLOSE_ALL")) &&
+      (c.status === "sent" || c.status === "pending")
+    );
     if (cmd) {
       cmd.status = confirmation.success ? "confirmed" : "failed";
       cmd.error = confirmation.error;
+      if (confirmation.mt5Ticket && confirmation.mt5Ticket > 0) {
+        const trade = this.tradesList.find(t => t.ticket === confirmation.ticket);
+        if (trade) {
+          trade.mt5Ticket = confirmation.mt5Ticket;
+          try {
+            scalarAiDb.updateTrade(trade.id, { ticket: confirmation.ticket });
+          } catch {}
+        }
+      }
       this.addLog(
         "EA",
         confirmation.success ? "SUCCESS" : "ERROR",
-        `Command ${cmd.action} for ticket #${confirmation.ticket} ${confirmation.success ? "executed successfully" : "failed: " + (confirmation.error || "unknown error")}`
+        `Command ${cmd.action} (Ticket #${confirmation.ticket || cmd.ticket}${confirmation.mt5Ticket ? ` / MT5 #${confirmation.mt5Ticket}` : ""}) ${confirmation.success ? "executed successfully on MT5" : "failed: " + (confirmation.error || "unknown error")}`
       );
     }
   }
@@ -253,7 +265,76 @@ export class AppStore implements AppStoreReadOnly {
     const state = getSymbolState(this.symbolStates, this.activeSymbol);
     state.connection.isEaConnected = true;
     state.connection.lastPing = new Date().toISOString();
-    this.addLog("EA", "SUCCESS", `EA connection confirmed via position sync: ${positions.length} positions reported.`);
+
+    let updatedAny = false;
+    const reportedMt5Tickets = new Set(positions.map(p => p.ticket));
+
+    // 1. Sync live profits, prices, and SL/TP from EA positions into matching open trades
+    for (const pos of positions) {
+      let matchingTrade = this.tradesList.find(t => (t.ticket === pos.ticket || t.mt5Ticket === pos.ticket) && t.status === "OPEN");
+
+      if (!matchingTrade) {
+        matchingTrade = this.tradesList.find(t => t.status === "OPEN" && t.symbol === pos.symbol && t.type === pos.type && !t.mt5Ticket);
+        if (matchingTrade) {
+          matchingTrade.mt5Ticket = pos.ticket;
+        }
+      }
+
+      if (matchingTrade) {
+        matchingTrade.profit = pos.profit;
+        if (pos.openPrice > 0) matchingTrade.entryPrice = pos.openPrice;
+        if (pos.sl > 0) matchingTrade.sl = pos.sl;
+        if (pos.tp > 0) matchingTrade.tp = pos.tp;
+        updatedAny = true;
+      } else {
+        // Trade opened externally on MT5: import into tradesList so site & MCP know about it
+        const importedTrade: TradeRecord = {
+          id: crypto.randomUUID(),
+          ticket: pos.ticket,
+          mt5Ticket: pos.ticket,
+          symbol: pos.symbol || this.activeSymbol,
+          type: pos.type,
+          entryPrice: pos.openPrice,
+          lotSize: pos.volume,
+          profit: pos.profit,
+          status: "OPEN",
+          openTime: pos.openTime || new Date().toLocaleTimeString(),
+          strategy: this.tradeConfig.selectedStrategy,
+          reason: "Synchronized from MetaTrader 5 terminal",
+          sl: pos.sl > 0 ? pos.sl : undefined,
+          tp: pos.tp > 0 ? pos.tp : undefined,
+        };
+        this.tradesList.unshift(importedTrade);
+        try { scalarAiDb.insertTrade(importedTrade); } catch {}
+        updatedAny = true;
+      }
+    }
+
+    // 2. Any trade marked OPEN that was previously confirmed on MT5, but is no longer reported:
+    // It was closed on MT5 (SL/TP hit, trailing stop reached, or closed by broker)
+    for (const trade of this.tradesList) {
+      if (trade.status === "OPEN" && trade.mt5Ticket && !reportedMt5Tickets.has(trade.mt5Ticket)) {
+        trade.status = "CLOSED";
+        trade.closeTime = new Date().toLocaleTimeString();
+        trade.closePrice = getSymbolState(this.symbolStates, trade.symbol || this.activeSymbol).currentPrice;
+        trade.reason = "Position liquidated or SL/TP hit on MetaTrader 5";
+        try {
+          scalarAiDb.updateTrade(trade.id, {
+            status: trade.status,
+            closeTime: trade.closeTime,
+            closePrice: trade.closePrice,
+            profit: trade.profit,
+            reason: trade.reason,
+          });
+        } catch {}
+        this.addLog("EA", "SUCCESS", `MT5 closed position #${trade.mt5Ticket} (Final Profit: ${trade.profit > 0 ? "+" : ""}$${trade.profit})`);
+        updatedAny = true;
+      }
+    }
+
+    if (updatedAny) {
+      this.broadcastTradesUpdate();
+    }
   }
 
   handleEaLogs(logs: EaLog[]): void {
@@ -485,6 +566,7 @@ export class AppStore implements AppStoreReadOnly {
       ) => this.placeTrade(type, reason || "MCP initiated trade", options),
       closeTrade: async (tradeId: string) => this.closeTrade(tradeId),
       closeAllTrades: async (symbol?: string) => this.closeAllTrades(symbol),
+      modifyTrade: async (tradeId: string, options: { sl?: number; tp?: number }) => this.modifyTrade(tradeId, options),
       switchSymbol: (symbol: string) => this.switchSymbol(symbol),
       getSymbols: () => this.getSymbolsList(),
       resetStats: async () => Promise.resolve(this.resetStats()),
@@ -616,6 +698,17 @@ export class AppStore implements AppStoreReadOnly {
     this.addLog("SERVER", "WARNING", "Strategy configurations changed. Running parameters updated.");
     persistSettings(this.tradeConfig);
     this.broadcastToDashboards({ type: "config", config: this.tradeConfig });
+
+    // Sync parameters dynamically to connected MT5 EA
+    this.queueEaConfigUpdate({
+      lotSize: this.tradeConfig.lotSize,
+      stopLossPoints: this.tradeConfig.stopLossPoints,
+      takeProfitPoints: this.tradeConfig.takeProfitPoints,
+      trailingStopPoints: this.tradeConfig.useTrailingStop ? this.tradeConfig.trailingStopPoints : 0,
+      trailingStepPoints: 10,
+      maxTrades: this.tradeConfig.maxTrades,
+    });
+
     return this.tradeConfig;
   }
 
@@ -630,6 +723,17 @@ export class AppStore implements AppStoreReadOnly {
         const tradeState = this.buildTradeState();
         openTrades.forEach((t: TradeRecord) => closeSimulatedPosition(tradeState, t, "Forced termination from remote dashboard.", this));
       }
+      this.pendingEaCommands.push({
+        id: crypto.randomUUID(),
+        action: "CLOSE_ALL",
+        symbol: this.activeSymbol,
+        lot: 0,
+        sl: 0,
+        tp: 0,
+        reason: "Trading deactivated from dashboard",
+        timestamp: Date.now(),
+        status: "pending",
+      });
     }
     persistSettings(this.tradeConfig);
     this.broadcastToDashboards({ type: "config", config: this.tradeConfig });
@@ -650,11 +754,40 @@ export class AppStore implements AppStoreReadOnly {
     return { success: false, message: `Trade execution blocked by risk controls or opposite positions.` };
   }
 
+  async modifyTrade(
+    tradeId: string,
+    options: { sl?: number; tp?: number }
+  ): Promise<{ success: boolean; message: string }> {
+    const trade = this.tradesList.find(t => (t.id === tradeId || String(t.ticket) === tradeId || String(t.mt5Ticket) === tradeId) && t.status === "OPEN");
+    if (!trade) return { success: false, message: `Open trade with ID or ticket ${tradeId} not found` };
+
+    if (options.sl !== undefined) trade.sl = options.sl;
+    if (options.tp !== undefined) trade.tp = options.tp;
+
+    const targetTicket = trade.mt5Ticket || trade.ticket;
+    const cmd: EaCommand = {
+      id: crypto.randomUUID(),
+      action: "MODIFY_POSITION",
+      symbol: trade.symbol || this.activeSymbol,
+      lot: trade.lotSize,
+      sl: options.sl ?? (trade.sl || 0),
+      tp: options.tp ?? (trade.tp || 0),
+      ticket: targetTicket,
+      reason: "SL/TP modified from remote dashboard / MCP",
+      timestamp: Date.now(),
+      status: "pending",
+    };
+    this.pendingEaCommands.push(cmd);
+    this.broadcastTradesUpdate();
+    this.addLog("SERVER", "INFO", `Queued SL/TP modification for Trade #${trade.ticket} [${trade.symbol || this.activeSymbol}] (SL: ${options.sl ?? "keep"}, TP: ${options.tp ?? "keep"})`);
+    return { success: true, message: `Queued modification for trade #${trade.ticket}` };
+  }
+
   async closeTrade(tradeId: string): Promise<{ success: boolean; message: string }> {
-    const trade = this.tradesList.find((t: TradeRecord) => t.id === tradeId && t.status === "OPEN");
+    const trade = this.tradesList.find((t: TradeRecord) => (t.id === tradeId || String(t.ticket) === tradeId || String(t.mt5Ticket) === tradeId) && t.status === "OPEN");
     if (!trade) return { success: false, message: `Open trade with id ${tradeId} not found` };
     const tradeState = this.buildTradeState();
-    closeSimulatedPosition(tradeState, trade, "Closed via MCP request.", this);
+    closeSimulatedPosition(tradeState, trade, "Closed via MCP / web request.", this);
     return { success: true, message: `Trade ${tradeId} closed` };
   }
 
@@ -663,6 +796,20 @@ export class AppStore implements AppStoreReadOnly {
     const openTrades = this.tradesList.filter((t: TradeRecord) => t.status === "OPEN" && (!targetSymbol || t.symbol === targetSymbol));
     const tradeState = this.buildTradeState();
     openTrades.forEach((t: TradeRecord) => closeSimulatedPosition(tradeState, t, "Liquidated via command.", this));
+
+    // Also queue global CLOSE_ALL to MT5
+    this.pendingEaCommands.push({
+      id: crypto.randomUUID(),
+      action: "CLOSE_ALL",
+      symbol: targetSymbol || this.activeSymbol,
+      lot: 0,
+      sl: 0,
+      tp: 0,
+      reason: "Liquidate all positions command",
+      timestamp: Date.now(),
+      status: "pending",
+    });
+
     return { success: true, closedCount: openTrades.length, message: `Liquidated ${openTrades.length} open position(s).` };
   }
 

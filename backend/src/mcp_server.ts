@@ -211,6 +211,19 @@ const TOOLS: McpTool[] = [
     inputSchema: { type: "object", properties: { tradeId: { type: "string" } }, required: ["tradeId"] },
   },
   {
+    name: "modify_trade_sl_tp",
+    description: "Modify Stop Loss (SL) and/or Take Profit (TP) points on an open trade or MT5 ticket. Propagates command to MT5 EA.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tradeId: { type: "string", description: "Trade ID or ticket number" },
+        sl: { type: "number", description: "New Stop Loss in points (optional)" },
+        tp: { type: "number", description: "New Take Profit in points (optional)" },
+      },
+      required: ["tradeId"],
+    },
+  },
+  {
     name: "close_all_trades",
     description: "Close all open positions immediately (globally or for a specific symbol).",
     inputSchema: {
@@ -649,6 +662,17 @@ export function createMcpHandler(ctx: McpContext, expectedApiKey: string) {
             }
             const closeResult = await ctx.closeTrade(args.tradeId);
             result = { content: [{ type: "text", text: JSON.stringify(closeResult, null, 2) }] };
+            break;
+          }
+          case "modify_trade_sl_tp": {
+            if (!args.tradeId) {
+              return res.json({ jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: tradeId is required" } });
+            }
+            const modifyResult = await ctx.modifyTrade(String(args.tradeId), {
+              sl: typeof args.sl === "number" ? args.sl : undefined,
+              tp: typeof args.tp === "number" ? args.tp : undefined,
+            });
+            result = { content: [{ type: "text", text: JSON.stringify(modifyResult, null, 2) }] };
             break;
           }
           case "close_all_trades": {

@@ -29,26 +29,115 @@ function getCustomEaTemplatePath(): string {
   return path.join(process.cwd(), "backend", "generated-ea", "ScalarAI_MultiAsset_EA.mq5");
 }
 
+export interface EaValidationResult {
+  valid: boolean;
+  error?: string;
+  version?: string;
+}
+
+export function validateEaCode(code: string): EaValidationResult {
+  if (!code || typeof code !== "string") {
+    return { valid: false, error: "Empty or invalid code string" };
+  }
+  if (code.length < 1500) {
+    return { valid: false, error: "Code too short (must be complete EA, at least 1500 characters)" };
+  }
+  if (!code.includes("OnInit")) {
+    return { valid: false, error: "Missing required 'OnInit()' entry point" };
+  }
+  if (!code.includes("OnTick")) {
+    return { valid: false, error: "Missing required 'OnTick()' event handler" };
+  }
+  if (!code.includes("<Trade\\Trade.mqh>") && !code.includes("<Trade/Trade.mqh>")) {
+    return { valid: false, error: "Missing required '#include <Trade\\Trade.mqh>' standard library" };
+  }
+  if (!code.includes("CTrade")) {
+    return { valid: false, error: "Missing 'CTrade trade' trade execution instance" };
+  }
+  if (!code.includes("InpWebServerUrl")) {
+    return { valid: false, error: "Missing required 'InpWebServerUrl' input parameter" };
+  }
+  if (!code.includes("WebRequest")) {
+    return { valid: false, error: "Missing required 'WebRequest' API communication calls" };
+  }
+  if (code.includes("SYMBOL_FILLING_RETURN")) {
+    return { valid: false, error: "Contains illegal identifier 'SYMBOL_FILLING_RETURN' (causes MT5 compiler error)" };
+  }
+
+  const versionMatch = code.match(/#property\s+version\s+"([^"]+)"/);
+  const version = versionMatch ? versionMatch[1] : undefined;
+
+  return { valid: true, version };
+}
+
 export function getCustomEaTemplate(): string | null {
   const customPath = getCustomEaTemplatePath();
   try {
     if (fs.existsSync(customPath)) {
-      return fs.readFileSync(customPath, "utf-8");
+      const code = fs.readFileSync(customPath, "utf-8");
+      const validation = validateEaCode(code);
+      if (validation.valid) {
+        return code;
+      } else {
+        console.warn(`[EA TEMPLATE] Custom template on disk failed validation: ${validation.error}. Falling back to master generator.`);
+      }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn("[EA TEMPLATE] Failed to read custom template:", err);
   }
   return null;
 }
 
-export function saveCustomEaTemplate(code: string): boolean {
+export function isCustomTemplateActive(): boolean {
+  return getCustomEaTemplate() !== null;
+}
+
+export function getCustomTemplateStatus(): { active: boolean; valid: boolean; version?: string; error?: string } {
+  const customPath = getCustomEaTemplatePath();
+  try {
+    if (fs.existsSync(customPath)) {
+      const code = fs.readFileSync(customPath, "utf-8");
+      const validation = validateEaCode(code);
+      return {
+        active: true,
+        valid: validation.valid,
+        version: validation.version,
+        error: validation.error,
+      };
+    }
+  } catch (err: unknown) {
+    return { active: false, valid: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  return { active: false, valid: true };
+}
+
+export function resetCustomEaTemplate(): boolean {
+  const customPath = getCustomEaTemplatePath();
+  try {
+    if (fs.existsSync(customPath)) {
+      fs.unlinkSync(customPath);
+      console.log("[EA TEMPLATE] Custom template removed. Official master template restored.");
+    }
+    return true;
+  } catch (err) {
+    console.error("[EA TEMPLATE] Failed to remove custom template:", err);
+    return false;
+  }
+}
+
+export function saveCustomEaTemplate(code: string): { success: boolean; error?: string } {
+  const validation = validateEaCode(code);
+  if (!validation.valid) {
+    return { success: false, error: validation.error };
+  }
   const customPath = getCustomEaTemplatePath();
   try {
     fs.mkdirSync(path.dirname(customPath), { recursive: true });
     fs.writeFileSync(customPath, code, "utf-8");
-    return true;
-  } catch {
-    return false;
+    return { success: true };
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Filesystem error: ${errorMsg}` };
   }
 }
 

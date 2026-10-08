@@ -24,7 +24,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   onApplySettings,
   selectedStrategy,
 }) => {
-  const isLocked = aiStudyStatus !== "optimized" && aiStudyStatus !== "active";
+  const isLocked = config.selectedStrategy === "AI_ADAPTIVE" && aiStudyStatus === "calibrating";
 
   return (
     <div className={`card-panel flex flex-col justify-between transition-all duration-300 relative overflow-hidden ${
@@ -32,8 +32,8 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         ? "border-emerald-500/40 bg-slate-900/90 shadow-emerald-950/20"
         : "border-indigo-500/30 bg-slate-900/90"
     }`}>
-      {/* sleek locked screen overlay */}
-      {aiStudyStatus === "calibrating" && (
+      {/* sleek locked screen overlay only for AI_ADAPTIVE mode */}
+      {isLocked && (
         <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center z-10 animate-fade-in">
           <Lock className="w-6 h-6 text-indigo-400 mb-2.5 animate-bounce" />
           <p className="text-xs font-black text-indigo-300 uppercase tracking-widest mb-1 font-mono">Calibration Gate</p>

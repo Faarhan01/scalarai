@@ -51,6 +51,7 @@ export interface Tick {
 export interface TradeRecord {
   id: string;
   ticket: number;
+  mt5Ticket?: number;
   symbol?: string;
   type: "BUY" | "SELL";
   entryPrice: number;
@@ -62,6 +63,8 @@ export interface TradeRecord {
   closeTime?: string;
   strategy: StrategyMode;
   reason: string;
+  sl?: number;
+  tp?: number;
 }
 
 export interface SystemLog {
@@ -310,6 +313,7 @@ export interface McpContext {
   ) => Promise<{ success: boolean; message: string; ticket?: number }>;
   closeTrade: (tradeId: string) => Promise<{ success: boolean; message: string }>;
   closeAllTrades: (symbol?: string) => Promise<{ success: boolean; closedCount: number; message: string }>;
+  modifyTrade: (tradeId: string, options: { sl?: number; tp?: number }) => Promise<{ success: boolean; message: string }>;
   switchSymbol: (symbol: string) => void;
   getSymbols: () => Array<{ symbol: string; isConnected: boolean; currentPrice: number; tickCount: number; digits?: number | null; tickSize?: number | null }>;
   resetStats: () => Promise<void>;
@@ -366,7 +370,7 @@ export interface BridgeOrder {
 }
 
 export interface EaCommand {
-  action: "BUY" | "SELL" | "CLOSE_ALL" | "CLOSE_BY_TICKET" | "CONFIG_UPDATE";
+  action: "BUY" | "SELL" | "CLOSE_ALL" | "CLOSE_BY_TICKET" | "CONFIG_UPDATE" | "MODIFY_POSITION";
   symbol: string;
   lot: number;
   sl: number;
@@ -382,6 +386,7 @@ export interface EaCommand {
 export interface EaConfirmation {
   action: string;
   ticket: number;
+  mt5Ticket?: number;
   success: boolean;
   error?: string;
   symbol: string;

@@ -8,17 +8,6 @@ function validateAppUrl(appUrl: string | undefined): string {
     if (!["http:", "https:"].includes(parsed.protocol)) {
       return "";
     }
-    if (
-      parsed.hostname === "localhost" ||
-      parsed.hostname === "127.0.0.1" ||
-      parsed.hostname.startsWith("192.168.") ||
-      parsed.hostname.startsWith("10.") ||
-      parsed.hostname.startsWith("172.")
-    ) {
-      if (process.env.NODE_ENV === "production") {
-        return "";
-      }
-    }
     return raw;
   } catch {
     return "";
@@ -28,14 +17,15 @@ function validateAppUrl(appUrl: string | undefined): string {
 export function generateMql5Code(appUrl?: string, config?: Partial<TradeConfig>): string {
   const clientUrl = validateAppUrl(appUrl) || "http://127.0.0.1:3000";
   const escapedUrl = clientUrl.replace(/\\/g, "\\\\");
+
   const lotSize = config?.lotSize ?? 0.1;
-  const maxTrades = config?.maxTrades ?? 3;
-  const takeProfitPoints = config?.takeProfitPoints ?? 300;
-  const stopLossPoints = config?.stopLossPoints ?? 150;
-  const useTrailingStop = config?.useTrailingStop ?? true;
-  const trailingStopPoints = config?.trailingStopPoints ?? 100;
   const selectedStrategy = config?.selectedStrategy ?? "TREND_FOLLOWING";
   const isActive = config?.isActive ?? false;
+  const takeProfitPoints = config?.takeProfitPoints ?? 300;
+  const stopLossPoints = config?.stopLossPoints ?? 150;
+  const trailingStopPoints = config?.trailingStopPoints ?? 100;
+  const useTrailingStop = config?.useTrailingStop ?? true;
+  const maxTrades = config?.maxTrades ?? 3;
 
   return `//+------------------------------------------------------------------+
 //|                                     ScalarAI_MultiAsset_EA.mq5    |
@@ -44,72 +34,85 @@ export function generateMql5Code(appUrl?: string, config?: Partial<TradeConfig>)
 //+------------------------------------------------------------------+
 #property copyright "Scalar AI Technologies"
 #property link      "${escapedUrl}"
-#property version   "2.00"
-#property description "Scalar AI Multi-Asset Algorithmic Trading EA with Live Telemetry"
-#property description "Streams live ticks, OHLCV candles, and account status to web & MCP."
-#property description "IMPORTANT: Add '${escapedUrl}' to MT5 allowed WebRequest URLs!"
+#property version   "3.05"
+#property description "Scalar AI Multi-Asset Remote Execution & Telemetry EA"
+#property description "Streams real-time ticks, candles, positions and executes web/MCP strategy signals."
+#property description "IMPORTANT: Add '${escapedUrl}' to MT5 Tools -> Options -> Expert Advisors -> Allow WebRequest!"
 
 //--- Include standard trade library
 #include <Trade\\Trade.mqh>
 CTrade trade;
 
-//--- Forward function declarations (required by MQL5 compiler)
-void PushHistoricalCandles(int count);
-void ManageTrailingStop(double bid, double ask);
-void BroadcastMarketUpdate();
-void SyncWithWebApp();
-void ExecuteScalpingLogic(double bid, double ask);
-void UpdateChartDisplay(double bid, double ask);
-void CountPositions(int &buyCount, int &sellCount);
-void CloseAllPositions();
-void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask);
-
 //--- Expert Input Parameters
-input group "=== Risk Settings ==="
+input group "=== Risk & Trade Execution Settings ==="
 input double   InpLotSize         = ${lotSize};        // Lot Size to Trade
-input int      InpMaxTrades       = ${maxTrades};       // Maximum open positions
-input double   InpTakeProfitPts   = ${takeProfitPoints};   // Take Profit (Points)
-input double   InpStopLossPts     = ${stopLossPoints};     // Stop Loss (Points)
+input string   InpStrategyMode    = "${selectedStrategy}"; // Strategy Mode Label
+input int      InpMaxTrades       = ${maxTrades};       // Maximum Concurrent Trades
 
-input group "=== Trailing Settings ==="
-input bool     InpUseTrailing     = ${useTrailingStop};    // Enable Trailing Stop
-input double   InpTrailingStopPts = ${trailingStopPoints}; // Trailing Stop Distance (Pts)
-input double   InpTrailingStepPts = 50;                     // Trailing Step (Pts)
-
-input group "=== Trading Mode & Filters ==="
-enum ENUM_TRADING_MODE {
-   MODE_SCALPING = 0, // Scalping Mode (Micro structures & live ticks)
-   MODE_SWING    = 1  // Swing Trading (Confirmed Bar Closes)
-};
-input ENUM_TRADING_MODE InpTradingMode = MODE_SCALPING; // Trading Mode Selector
-input double   InpMinAtrFilter    = 0.05;               // Minimum ATR Volatility Filter (Pt)
-
-input group "=== Web App API Integration ==="
+input group "=== Web App & API Integration ==="
 input string   InpWebServerUrl    = "${escapedUrl}";         // Web App Base URL
 input string   InpDashboardUrl    = "${escapedUrl}/api/update-market"; // Dashboard Live Feed URL
-input int      InpSyncIntervalSec = 3;                      // Heartbeat interval in seconds
-input bool     InpSendTicksToWeb  = true;                   // Broadcast live candle data to web
+input int      InpSyncIntervalSec = 2;                      // Telemetry Sync Interval (Seconds)
+input bool     InpSendTicksToWeb  = true;                   // Stream Real-Time Ticks to Web
+input bool     InpSendPositions   = true;                   // Report Open Positions Each Sync
 
-//--- Indicator Handles
-int glEmaFastHandle = INVALID_HANDLE;
-int glEmaSlowHandle = INVALID_HANDLE;
-int glAdxHandle     = INVALID_HANDLE;
-int glBbHandle      = INVALID_HANDLE;
-int glStochHandle   = INVALID_HANDLE;
-int glAtrHandle     = INVALID_HANDLE;
+//--- Forward function declarations (required by MQL5 compiler)
+void PushHistoricalCandles(int count);
+void BroadcastMarketUpdate();
+void SyncWithWebApp();
+void ProcessPendingRemoteCommands(string jsonResponse, double bid, double ask);
+void ReportExecutionResult(string action, ulong siteTicket, ulong mt5Ticket, bool success, string error);
+void SyncPositions();
+void UpdateChartDisplay(double bid, double ask);
+void CheckForEaUpdate();
+void ApplyRuntimeConfigUpdate(const string &jsonConfig);
+string FetchEaCodeFromServer();
+bool SaveUpdateFile(string code);
+void EaLogPush(string level, string message);
+string EscapeJsonString(string str);
+void ShipEaLogsToServer();
+void CloseAllPositions();
+void ClosePositionByTicket(ulong ticket);
+void ModifyPosition(ulong ticket, double slPoints, double tpPoints);
+void CountPositions(int &buyCount, int &sellCount);
+void ManageTrailingStop(double bid, double ask);
+double NormalizeVolume(double volume);
+double GetEffectiveLotSize();
+double GetEffectiveSL();
+double GetEffectiveTP();
+double GetEffectiveTrailingStop();
+double GetEffectiveTrailingStep();
+int GetEffectiveMaxTrades();
 
 //--- Global Variables
-datetime  glLastSyncTime  = 0;
-string    glEAVersion     = "2.00";
-int       glMagicNumber   = 20260617;
-bool      glTradingActive = ${isActive ? "true" : "false"};
-string    glStrategyMode  = "${selectedStrategy}";
+datetime  glLastSyncTime        = 0;
+string    glEAVersion           = "3.05";
+int       glMagicNumber         = 20260617;
+bool      glTradingActive       = ${isActive ? "true" : "false"};
+string    glStrategyMode        = "${selectedStrategy}";
+string    glServerVersion       = "";
+bool      glUpdateAvailable     = false;
+bool      glNeedsHistoryPush    = true;
 
-//--- Connection Diagnostics
-int       glLastWebResCode = 0;
-int       glLastWebErrCode = 0;
-string    glLastDiagMsg    = "WAITING FOR FIRST TICK TO SYNC...";
-bool      glInternetOk     = false;
+//--- Runtime Config Overrides (updated from server dynamically)
+double    glRuntimeLotSize      = ${lotSize};
+double    glRuntimeSL           = ${stopLossPoints};
+double    glRuntimeTP           = ${takeProfitPoints};
+double    glRuntimeTrailingStop = ${useTrailingStop ? trailingStopPoints : 0};
+double    glRuntimeTrailingStep = 10;
+int       glRuntimeMaxTrades    = ${maxTrades};
+bool      glRuntimeConfigLoaded = false;
+
+//--- Diagnostic State
+int       glLastWebResCode      = 0;
+int       glLastWebErrCode      = 0;
+string    glLastDiagMsg         = "INITIALIZING...";
+bool      glInternetOk          = false;
+
+//--- EA Log Buffer (safe fixed-capacity ring buffer)
+#define GL_EA_LOG_MAX 50
+string    glEaLogBuffer[GL_EA_LOG_MAX];
+int       glEaLogCount          = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -117,37 +120,38 @@ bool      glInternetOk     = false;
 int OnInit()
   {
    trade.SetExpertMagicNumber(glMagicNumber);
-   Print("Scalar AI EA Initialized on ", _Symbol, ". Web URL: ", InpWebServerUrl);
-   
-   // Create indicator handles
-   glEmaFastHandle = iMA(_Symbol, _Period, 9, 0, MODE_EMA, PRICE_CLOSE);
-   glEmaSlowHandle = iMA(_Symbol, _Period, 21, 0, MODE_EMA, PRICE_CLOSE);
-   glAdxHandle     = iADX(_Symbol, _Period, 14);
-   glBbHandle      = iBands(_Symbol, _Period, 20, 0, 2.0, PRICE_CLOSE);
-   glStochHandle   = iStochastic(_Symbol, _Period, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
-   glAtrHandle     = iATR(_Symbol, _Period, 14);
+   trade.SetDeviationInPoints(50);
 
-   if(glEmaFastHandle == INVALID_HANDLE || glEmaSlowHandle == INVALID_HANDLE ||
-      glAdxHandle == INVALID_HANDLE || glBbHandle == INVALID_HANDLE ||
-      glStochHandle == INVALID_HANDLE || glAtrHandle == INVALID_HANDLE)
-     {
-      Print("CRITICAL: Failed to create mathematical indicator handles!");
-      return(INIT_FAILED);
-     }
-   
-   // Push recent historical candles to the web backend in a single fast batch
-   PushHistoricalCandles(150);
-   
+   // Auto-detect broker filling mode for Deriv & Forex brokers
+   uint filling = (uint)SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+   if((filling & SYMBOL_FILLING_IOC) != 0)
+      trade.SetTypeFilling(ORDER_FILLING_IOC);
+   else if((filling & SYMBOL_FILLING_FOK) != 0)
+      trade.SetTypeFilling(ORDER_FILLING_FOK);
+   else
+      trade.SetTypeFilling(ORDER_FILLING_RETURN);
+
+   // Initialize 1-second timer for real-time display and telemetry
+   EventSetTimer(1);
+
+   // Initialize log buffer safely
+   glEaLogCount = 0;
+   for(int i = 0; i < GL_EA_LOG_MAX; i++) glEaLogBuffer[i] = "";
+
+   glNeedsHistoryPush = true;
+   glLastDiagMsg = "INITIALIZED. Awaiting first tick...";
+
+   Print("Scalar AI EA v", glEAVersion, " initialized on ", _Symbol, ". Target Server: ", InpWebServerUrl);
+   EaLogPush("INFO", "Scalar AI EA v" + glEAVersion + " initialized on " + _Symbol);
+
    Comment("==============================================\\n" +
-           "  SCALAR AI MULTI-ASSET EA ONLINE\\n" +
-           "  Symbol: " + _Symbol + "\\n" +
-           "  Status: INITIALIZED & INDICATORS LOADED\\n" +
-           "  Trading Mode: " + (InpTradingMode == MODE_SCALPING ? "SCALPING" : "SWING TRADING") + "\\n" +
-           "  Web Feed URL: " + InpDashboardUrl + "\\n" +
-           "  Lot Size: " + DoubleToString(InpLotSize, 2) + "\\n" +
-           "  Allow WebRequests in Options for updates!\\n" +
+           "  SCALAR AI MULTI-ASSET EA v" + glEAVersion + "\\n" +
+           "  Symbol: " + _Symbol + " (" + IntegerToString(_Digits) + " Digits)\\n" +
+           "  Status: INITIALIZED - Awaiting live ticks\\n" +
+           "  Target Server: " + InpWebServerUrl + "\\n" +
+           "  Allow WebRequest in MT5 Tools -> Options!\\n" +
            "==============================================");
-           
+
    return(INIT_SUCCEEDED);
   }
 
@@ -156,15 +160,22 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   IndicatorRelease(glEmaFastHandle);
-   IndicatorRelease(glEmaSlowHandle);
-   IndicatorRelease(glAdxHandle);
-   IndicatorRelease(glBbHandle);
-   IndicatorRelease(glStochHandle);
-   IndicatorRelease(glAtrHandle);
+   EventKillTimer();
+   Comment("");
+   Print("Scalar AI EA stopped on ", _Symbol, ". Reason code: ", reason);
+  }
 
-   Comment("Scalar AI EA Stopped on " + _Symbol + ".");
-   Print("EA shutdown code: ", reason);
+//+------------------------------------------------------------------+
+//| Expert timer function (keeps chart display live every second)    |
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(currentBid > 0 && currentAsk > 0)
+     {
+      UpdateChartDisplay(currentBid, currentAsk);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -175,323 +186,94 @@ void OnTick()
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    if(currentBid <= 0 || currentAsk <= 0) return;
-   
-   // 1. Process local trailing stop logic
-   if(InpUseTrailing)
+
+   // 1. One-time candle history upload on initial tick
+   if(glNeedsHistoryPush)
      {
-      ManageTrailingStop(currentBid, currentAsk);
-     }
-     
-   // 2. Broadcast live market updates to Dashboard & MCP
-   if(InpSendTicksToWeb)
-     {
-      BroadcastMarketUpdate();
+      glNeedsHistoryPush = false;
+      PushHistoricalCandles(150);
      }
 
-   // 3. Periodic Web Telemetry synchronization & remote command updates
+   // 2. Stream real-time market tick to Web & MCP (throttled to max 1 per second to prevent chart freeze)
    datetime now = TimeCurrent();
+   static datetime lastBroadcastTime = 0;
+   if(InpSendTicksToWeb && (now - lastBroadcastTime >= 1))
+     {
+      BroadcastMarketUpdate();
+      lastBroadcastTime = now;
+     }
+
+   // 3. Periodic synchronization & remote command processor
    if(now - glLastSyncTime >= InpSyncIntervalSec)
      {
       SyncWithWebApp();
       glLastSyncTime = now;
      }
 
-   // 4. Execution of advanced mathematical trading rules
+   // 4. Trailing stop management for open positions
    if(glTradingActive)
      {
-      ExecuteScalpingLogic(currentBid, currentAsk);
+      ManageTrailingStop(currentBid, currentAsk);
      }
-   
-   // 5. Update chart telemetry metrics
+
+   // 5. Update chart telemetry display
    UpdateChartDisplay(currentBid, currentAsk);
   }
 
 //+------------------------------------------------------------------+
-//| Core Advanced Mathematical Strategy Signal Processor            |
+//| Push historical candle data to backend in a single JSON batch    |
 //+------------------------------------------------------------------+
-void ExecuteScalpingLogic(double bid, double ask)
+void PushHistoricalCandles(int count)
   {
-   static datetime lastBarTime = 0;
-   datetime currentBarTime = 0;
-   datetime timeArr[];
-   ArraySetAsSeries(timeArr, true);
-   if(CopyTime(_Symbol, _Period, 0, 1, timeArr) > 0)
-     {
-      currentBarTime = timeArr[0];
-     }
-
-   if(InpTradingMode == MODE_SWING)
-     {
-      if(currentBarTime == lastBarTime && lastBarTime != 0) return;
-     }
-
-   if(PositionsTotal() >= InpMaxTrades) return;
-
-   double emaFast[], emaSlow[];
-   ArraySetAsSeries(emaFast, true);
-   ArraySetAsSeries(emaSlow, true);
-   if(CopyBuffer(glEmaFastHandle, 0, 0, 2, emaFast) < 2) return;
-   if(CopyBuffer(glEmaSlowHandle, 0, 0, 2, emaSlow) < 2) return;
-
-   double adxMain[];
-   ArraySetAsSeries(adxMain, true);
-   if(CopyBuffer(glAdxHandle, 0, 0, 2, adxMain) < 2) return;
-
-   double bbUpper[], bbLower[];
-   ArraySetAsSeries(bbUpper, true);
-   ArraySetAsSeries(bbLower, true);
-   if(CopyBuffer(glBbHandle, 1, 0, 2, bbUpper) < 2) return;
-   if(CopyBuffer(glBbHandle, 2, 0, 2, bbLower) < 2) return;
-
-   double stochMain[], stochSig[];
-   ArraySetAsSeries(stochMain, true);
-   ArraySetAsSeries(stochSig, true);
-   if(CopyBuffer(glStochHandle, 0, 0, 2, stochMain) < 2) return;
-   if(CopyBuffer(glStochHandle, 1, 0, 2, stochSig) < 2) return;
-
-   double atrVal[];
-   ArraySetAsSeries(atrVal, true);
-   if(CopyBuffer(glAtrHandle, 0, 0, 2, atrVal) < 2) return;
-
-   if(atrVal[0] < InpMinAtrFilter) return;
+   if(count > 200) count = 200;
+   if(count <= 0) return;
 
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, _Period, 0, 2, rates);
-   if(copied < 2) return;
-
-   double close0 = rates[0].close;
-
-   int totalBuy = 0, totalSell = 0;
-   CountPositions(totalBuy, totalSell);
-
-   bool buyTrigger = false;
-   bool sellTrigger = false;
-
-   if(glStrategyMode == "TREND_FOLLOWING")
+   int copied = CopyRates(_Symbol, _Period, 0, count, rates);
+   if(copied <= 0)
      {
-      bool emaCrossUp = (emaFast[0] > emaSlow[0] && emaFast[1] <= emaSlow[1]);
-      if(emaCrossUp && adxMain[0] > 25.0)
-        {
-         buyTrigger = true;
-        }
-
-      bool emaCrossDown = (emaFast[0] < emaSlow[0] && emaFast[1] >= emaSlow[1]);
-      if(emaCrossDown && adxMain[0] > 25.0)
-        {
-         sellTrigger = true;
-        }
-     }
-   else if(glStrategyMode == "MEAN_REVERSION" || glStrategyMode == "AI_ADAPTIVE")
-     {
-      bool isOverSold = (close0 < bbLower[0]);
-      bool stochCrossUp = (stochMain[0] > stochSig[0] && stochMain[1] <= stochSig[1] && stochMain[0] < 30.0);
-      if(isOverSold && stochCrossUp)
-        {
-         buyTrigger = true;
-        }
-
-      bool isOverBought = (close0 > bbUpper[0]);
-      bool stochCrossDown = (stochMain[0] < stochSig[0] && stochMain[1] >= stochSig[1] && stochMain[0] > 70.0);
-      if(isOverBought && stochCrossDown)
-        {
-         sellTrigger = true;
-        }
+      Print("[HISTORY] CopyRates returned ", copied, ". Broker history still loading.");
+      return;
      }
 
-   if(buyTrigger)
-     {
-      if(totalSell > 0)
-        {
-         Print("[ANTI-HEDGING LOCK] Contradiction! Blocked BUY signal because a SELL position is active on ", _Symbol);
-         return;
-        }
-      if(totalBuy == 0)
-        {
-         double sl = (InpStopLossPts > 0) ? NormalizeDouble(bid - InpStopLossPts * _Point, _Digits) : 0;
-         double tp = (InpTakeProfitPts > 0) ? NormalizeDouble(ask + InpTakeProfitPts * _Point, _Digits) : 0;
-         
-         ResetLastError();
-         if(trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Scalar AI Buy"))
-           {
-            Print("BUY execution success on ", _Symbol, "! Ask: ", ask, " SL: ", sl, " TP: ", tp);
-            if(InpTradingMode == MODE_SWING) lastBarTime = currentBarTime;
-           }
-         else
-           {
-            Print("BUY execution failed on ", _Symbol, "! Error: ", _LastError);
-           }
-        }
-     }
-   else if(sellTrigger)
-     {
-      if(totalBuy > 0)
-        {
-         Print("[ANTI-HEDGING LOCK] Contradiction! Blocked SELL signal because a BUY position is active on ", _Symbol);
-         return;
-        }
-      if(totalSell == 0)
-        {
-         double sl = (InpStopLossPts > 0) ? NormalizeDouble(ask + InpStopLossPts * _Point, _Digits) : 0;
-         double tp = (InpTakeProfitPts > 0) ? NormalizeDouble(bid - InpTakeProfitPts * _Point, _Digits) : 0;
-         
-         ResetLastError();
-         if(trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Scalar AI Sell"))
-           {
-            Print("SELL execution success on ", _Symbol, "! Bid: ", bid, " SL: ", sl, " TP: ", tp);
-            if(InpTradingMode == MODE_SWING) lastBarTime = currentBarTime;
-           }
-         else
-           {
-            Print("SELL execution failed on ", _Symbol, "! Error: ", _LastError);
-           }
-        }
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| Manage trailing stop logic                                        |
-//+------------------------------------------------------------------+
-void ManageTrailingStop(double bid, double ask)
-  {
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-     {
-      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
-        {
-         ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-         double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-         double currentSL = PositionGetDouble(POSITION_SL);
-         
-         if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-           {
-            if(bid - openPrice > InpTrailingStopPts * _Point)
-              {
-               double newSL = NormalizeDouble(bid - InpTrailingStopPts * _Point, _Digits);
-               if(currentSL == 0 || newSL > currentSL + InpTrailingStepPts * _Point)
-                 {
-                  trade.PositionModify(ticket, newSL, PositionGetDouble(POSITION_TP));
-                 }
-              }
-           }
-         else if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_SELL)
-           {
-            if(openPrice - ask > InpTrailingStopPts * _Point)
-              {
-               double newSL = NormalizeDouble(ask + InpTrailingStopPts * _Point, _Digits);
-               if(currentSL == 0 || newSL < currentSL - InpTrailingStepPts * _Point)
-                 {
-                  trade.PositionModify(ticket, newSL, PositionGetDouble(POSITION_TP));
-                 }
-              }
-           }
-        }
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| Count active positions                                           |
-//+------------------------------------------------------------------+
-void CountPositions(int &buyCount, int &sellCount)
-  {
-   buyCount = 0;
-   sellCount = 0;
-   for(int i = 0; i < PositionsTotal(); i++)
-     {
-      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
-        {
-         if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) buyCount++;
-         else if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_SELL) sellCount++;
-        }
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| Connect / Sync with full stack Web App API                       |
-//+------------------------------------------------------------------+
-void SyncWithWebApp()
-  {
-   string url = InpWebServerUrl + "/api/ea/tick";
+   string url = InpWebServerUrl + "/api/market/bulk-candles";
    string headers = "Content-Type: application/json\\r\\n";
+   int timeout = 5000;
+
+   string jsonCandles = "[";
+   for(int i = copied - 1; i >= 0; i--)
+     {
+      string direction = (rates[i].close > rates[i].open) ? "up" :
+                         ((rates[i].close < rates[i].open) ? "down" : "flat");
+      string item = "{\\"time\\":" + IntegerToString((long)rates[i].time) +
+                    ",\\"open\\":" + DoubleToString(rates[i].open, _Digits) +
+                    ",\\"high\\":" + DoubleToString(rates[i].high, _Digits) +
+                    ",\\"low\\":" + DoubleToString(rates[i].low, _Digits) +
+                    ",\\"close\\":" + DoubleToString(rates[i].close, _Digits) +
+                    ",\\"volume\\":" + IntegerToString((long)rates[i].tick_volume) +
+                    ",\\"direction\\":\\"" + direction + "\\"}";
+      StringAdd(jsonCandles, item);
+      if(i > 0) StringAdd(jsonCandles, ",");
+     }
+   StringAdd(jsonCandles, "]");
+
+   string payload = "{\\"symbol\\":\\"" + _Symbol + "\\",\\"digits\\":" + IntegerToString(_Digits) + ",\\"tickSize\\":" + DoubleToString(_Point, _Digits) + ",\\"candles\\":" + jsonCandles + "}";
+
    char post[], result[];
    string resultHeaders;
-   int timeout = 5000;
-   
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double profit = AccountInfoDouble(ACCOUNT_PROFIT);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double margin = AccountInfoDouble(ACCOUNT_MARGIN);
-   string company = AccountInfoString(ACCOUNT_COMPANY);
-   long login = AccountInfoInteger(ACCOUNT_LOGIN);
-   
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   if(bid <= 0) bid = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   if(ask <= 0) ask = bid;
-   
-   string payload = StringFormat(
-      "{\\"account\\":\\"%I64d\\",\\"broker\\":\\"%s\\",\\"balance\\":%.2f,\\"profit\\":%.2f,\\"equity\\":%.2f,\\"margin\\":%.2f,\\"symbol\\":\\"%s\\",\\"bid\\":%.5f,\\"ask\\":%.5f,\\"price\\":%.5f,\\"digits\\":%d,\\"tickSize\\":%.6f,\\"strategy\\":\\"%s\\",\\"version\\":\\"%s\\"}",
-      login, company, balance, profit, equity, margin, _Symbol, bid, ask, bid, (int)_Digits, _Point, glStrategyMode, glEAVersion
-   );
-   
-   StringToCharArray(payload, post);
-   ArrayResize(post, ArraySize(post) - 1);
-   
+   int postLen = StringLen(payload);
+   StringToCharArray(payload, post, 0, postLen, CP_UTF8);
+
    ResetLastError();
    int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
-   glLastWebResCode = res;
-   glLastWebErrCode = _LastError;
-   
-   if(res == -1)
+   if(res == 200)
      {
-      glInternetOk = false;
-      int err = glLastWebErrCode;
-      Print("Web Application connection error code: ", err);
-      if(err == 4014)
-        {
-         glLastDiagMsg = "ERROR 4014: WebRequest is blocked. Open MT5 -> Tools -> Options -> Expert Advisors -> Allow WebRequest for: " + InpWebServerUrl;
-         Print("IMPORTANT: Allow WebRequest in terminal Options -> Expert Advisors -> add URL: ", InpWebServerUrl);
-        }
-      else if(err == 5200)
-        {
-         glLastDiagMsg = "ERROR 5200: URL parsing failure. Check web link inputs!";
-        }
-      else if(err == 5203)
-        {
-         glLastDiagMsg = "ERROR 5203: Host unreachable. Verify server connection!";
-        }
-      else
-        {
-         glLastDiagMsg = "CONNECTION FAULT. Error code: " + IntegerToString(err);
-        }
-     }
-   else if(res == 200)
-     {
-      glInternetOk = true;
-      glLastDiagMsg = "SYNC SUCCESSFUL. Communication lines normal.";
-      string jsonResponse = CharArrayToString(result);
-      
-      if(StringFind(jsonResponse, "\\"isActive\\":true") >= 0)
-        {
-         glTradingActive = true;
-        }
-      else if(StringFind(jsonResponse, "\\"isActive\\":false") >= 0)
-        {
-         glTradingActive = false;
-         if(PositionsTotal() > 0) {
-            CloseAllPositions();
-         }
-        }
-         
-      ProcessPendingRemoteCommand(jsonResponse, bid, ask);
-        
-      if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"TREND_FOLLOWING\\"") >= 0) glStrategyMode = "TREND_FOLLOWING";
-      else if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"MEAN_REVERSION\\"") >= 0) glStrategyMode = "MEAN_REVERSION";
-      else if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"AI_ADAPTIVE\\"") >= 0) glStrategyMode = "AI_ADAPTIVE";
+      Print("[HISTORY] Successfully uploaded ", copied, " historical candles for ", _Symbol);
      }
    else
      {
-      glInternetOk = false;
-      glLastDiagMsg = "HTTP REJECTED. Status: " + IntegerToString(res);
+      Print("[HISTORY] Candle upload returned status ", res, ", error: ", _LastError);
      }
   }
 
@@ -515,231 +297,1019 @@ void BroadcastMarketUpdate()
    double c = rates[0].close;
    long v = rates[0].tick_volume;
    datetime ct = TimeCurrent();
-   
+
    string formatted_time = TimeToString(ct, TIME_DATE|TIME_SECONDS);
    string update_url = InpDashboardUrl;
 
-   string payload = StringFormat(
-      "{\\"symbol\\":\\"%s\\",\\"open\\":%.5f,\\"high\\":%.5f,\\"low\\":%.5f,\\"close\\":%.5f,\\"price\\":%.5f,\\"bid\\":%.5f,\\"ask\\":%.5f,\\"digits\\":%d,\\"tickSize\\":%.6f,\\"volume\\":%I64d,\\"current_time\\":\\"%s\\"}",
-      _Symbol, o, h, l, c, c, currentBid, currentAsk, (int)_Digits, _Point, (long)v, formatted_time
-   );
+   string payload = "{\\"symbol\\":\\"" + _Symbol + "\\"" +
+                    ",\\"open\\":" + DoubleToString(o, _Digits) +
+                    ",\\"high\\":" + DoubleToString(h, _Digits) +
+                    ",\\"low\\":" + DoubleToString(l, _Digits) +
+                    ",\\"close\\":" + DoubleToString(c, _Digits) +
+                    ",\\"price\\":" + DoubleToString(c, _Digits) +
+                    ",\\"bid\\":" + DoubleToString(currentBid, _Digits) +
+                    ",\\"ask\\":" + DoubleToString(currentAsk, _Digits) +
+                    ",\\"digits\\":" + IntegerToString(_Digits) +
+                    ",\\"tickSize\\":" + DoubleToString(_Point, _Digits) +
+                    ",\\"volume\\":" + IntegerToString(v) +
+                    ",\\"current_time\\":\\"" + formatted_time + "\\"}";
 
    char post[], result[];
    string resultHeaders;
-   StringToCharArray(payload, post);
-   ArrayResize(post, ArraySize(post) - 1);
+   int postLen = StringLen(payload);
+   StringToCharArray(payload, post, 0, postLen, CP_UTF8);
 
    string headers = "Content-Type: application/json\\r\\n";
    ResetLastError();
-   int res = WebRequest("POST", update_url, headers, 3000, post, result, resultHeaders);
-   if(res == -1)
-     {
-      if(MathRand() % 100 == 0) {
-         Print("[BROADCAST ERROR] WebRequest update-market failed. Error: ", _LastError);
-         Print("Ensure URL is allowed in Options: ", InpDashboardUrl);
-      }
-     }
+   WebRequest("POST", update_url, headers, 3000, post, result, resultHeaders);
   }
 
 //+------------------------------------------------------------------+
-//| Push historical candle data to backend in a single JSON batch    |
+//| Connect / Sync with full stack Web App API                       |
 //+------------------------------------------------------------------+
-void PushHistoricalCandles(int count)
+void SyncWithWebApp()
   {
-   if(count > 200) count = 200;
-   if(count <= 0) return;
-
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, _Period, 0, count, rates);
-   if(copied <= 0)
-     {
-      Print("[HISTORY] CopyRates failed. Copied: ", copied, ". Broker history may be loading.");
-      return;
-     }
-
-   string url = InpWebServerUrl + "/api/market/bulk-candles";
+   string url = InpWebServerUrl + "/api/ea/tick";
    string headers = "Content-Type: application/json\\r\\n";
-   int timeout = 5000;
-
-   string jsonCandles = "[";
-   for(int i = copied - 1; i >= 0; i--)
-     {
-      string direction = (rates[i].close > rates[i].open) ? "up" :
-                         ((rates[i].close < rates[i].open) ? "down" : "flat");
-      string item = StringFormat(
-         "{\\"time\\":%I64d,\\"open\\":%.5f,\\"high\\":%.5f,\\"low\\":%.5f,\\"close\\":%.5f,\\"volume\\":%I64d,\\"direction\":\"%s\\"}",
-         (long)rates[i].time,
-         rates[i].open,
-         rates[i].high,
-         rates[i].low,
-         rates[i].close,
-         (long)rates[i].tick_volume,
-         direction
-      );
-      jsonCandles = jsonCandles + item;
-      if(i > 0) jsonCandles = jsonCandles + ",";
-     }
-   jsonCandles = jsonCandles + "]";
-
-   string payload = StringFormat(
-      "{\\"symbol\\":\\"%s\\",\\"digits\\":%d,\\"tickSize\\":%.6f,\\"candles\\":%s}",
-      _Symbol, (int)_Digits, _Point, jsonCandles
-   );
-
    char post[], result[];
    string resultHeaders;
-   StringToCharArray(payload, post);
-   ArrayResize(post, ArraySize(post) - 1);
+   int timeout = 5000;
+
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double profit  = AccountInfoDouble(ACCOUNT_PROFIT);
+   double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin  = AccountInfoDouble(ACCOUNT_MARGIN);
+   string company = EscapeJsonString(AccountInfoString(ACCOUNT_COMPANY));
+   long   login   = AccountInfoInteger(ACCOUNT_LOGIN);
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0) bid = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
+   if(ask <= 0) ask = bid;
+
+   string payload = "{\\"account\\":\\"" + IntegerToString(login) + "\\"" +
+                    ",\\"broker\\":\\"" + company + "\\"" +
+                    ",\\"balance\\":" + DoubleToString(balance, 2) +
+                    ",\\"profit\\":" + DoubleToString(profit, 2) +
+                    ",\\"equity\\":" + DoubleToString(equity, 2) +
+                    ",\\"margin\\":" + DoubleToString(margin, 2) +
+                    ",\\"symbol\\":\\"" + _Symbol + "\\"" +
+                    ",\\"bid\\":" + DoubleToString(bid, _Digits) +
+                    ",\\"ask\\":" + DoubleToString(ask, _Digits) +
+                    ",\\"price\\":" + DoubleToString(bid, _Digits) +
+                    ",\\"digits\\":" + IntegerToString(_Digits) +
+                    ",\\"tickSize\\":" + DoubleToString(_Point, _Digits) +
+                    ",\\"strategy\\":\\"" + glStrategyMode + "\\"" +
+                    ",\\"version\\":\\"" + glEAVersion + "\\"}";
+
+   int postLen = StringLen(payload);
+   StringToCharArray(payload, post, 0, postLen, CP_UTF8);
 
    ResetLastError();
    int res = WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
-   if(res == 200)
+   glLastWebResCode = res;
+   glLastWebErrCode = _LastError;
+
+   if(res == -1)
      {
-      Print("[HISTORY] Successfully uploaded ", copied, " historical candles for ", _Symbol);
+      glInternetOk = false;
+      int err = glLastWebErrCode;
+      if(err == 4014)
+        {
+         glLastDiagMsg = "ERROR 4014: WebRequest blocked. Allow '" + InpWebServerUrl + "' in MT5 Tools -> Options -> Expert Advisors!";
+         EaLogPush("ERROR", "WebRequest blocked (4014). Allow URL in MT5 Options.");
+        }
+      else if(err == 5200)
+        {
+         glLastDiagMsg = "ERROR 5200: URL parsing failure. Check web link inputs!";
+         EaLogPush("ERROR", "URL parsing failure (5200).");
+        }
+      else if(err == 5203)
+        {
+         glLastDiagMsg = "ERROR 5203: Host unreachable. Verify server is online!";
+         EaLogPush("ERROR", "Host unreachable (5203).");
+        }
+      else
+        {
+         glLastDiagMsg = "CONNECTION FAULT. Error code: " + IntegerToString(err);
+         EaLogPush("ERROR", "Connection fault: " + IntegerToString(err));
+        }
+     }
+   else if(res == 200)
+     {
+      glInternetOk = true;
+      glLastDiagMsg = "SYNC NORMAL. Communication line operational.";
+      string jsonResponse = CharArrayToString(result);
+
+      if(StringFind(jsonResponse, "\\"isActive\\":true") >= 0)
+        {
+         glTradingActive = true;
+        }
+      else if(StringFind(jsonResponse, "\\"isActive\\":false") >= 0)
+        {
+         if(glTradingActive)
+           {
+            glTradingActive = false;
+            EaLogPush("WARN", "Trading deactivated by server. Closing open positions.");
+            CloseAllPositions();
+           }
+         glTradingActive = false;
+        }
+
+      // Sync active strategy mode
+      if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"TREND_FOLLOWING\\"") >= 0) glStrategyMode = "TREND_FOLLOWING";
+      else if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"MEAN_REVERSION\\"") >= 0) glStrategyMode = "MEAN_REVERSION";
+      else if(StringFind(jsonResponse, "\\"selectedStrategy\\":\\"AI_ADAPTIVE\\"") >= 0) glStrategyMode = "AI_ADAPTIVE";
+
+      // Execute remote trading commands
+      ProcessPendingRemoteCommands(jsonResponse, bid, ask);
+
+      // Report current positions back to web app
+      if(InpSendPositions)
+        {
+         SyncPositions();
+        }
+
+      // Check for remote EA version updates
+      CheckForEaUpdate();
+
+      // Ship buffered diagnostic logs to server
+      ShipEaLogsToServer();
      }
    else
      {
-      Print("[HISTORY] Push historical candles returned status ", res, ", error: ", _LastError);
+      glInternetOk = false;
+      glLastDiagMsg = "HTTP REJECTED. Status: " + IntegerToString(res);
      }
   }
 
 //+------------------------------------------------------------------+
-//| Close all positions when Stop is triggered remotely             |
+//| Volume normalization helper                                      |
 //+------------------------------------------------------------------+
-void CloseAllPositions()
+double NormalizeVolume(double volume)
   {
-   Print("Remote Web Stop Command received. Closing open positions on ", _Symbol);
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double stepLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(minLot <= 0) minLot = 0.01;
+   if(stepLot <= 0) stepLot = 0.01;
+   if(volume < minLot) volume = minLot;
+   if(maxLot > 0 && volume > maxLot) volume = maxLot;
+   volume = MathFloor(volume / stepLot + 0.00001) * stepLot;
+   return NormalizeDouble(volume, 2);
+  }
+
+//+------------------------------------------------------------------+
+//| Process batch of remote commands from web app                    |
+//+------------------------------------------------------------------+
+void ProcessPendingRemoteCommands(string jsonResponse, double bid, double ask)
+  {
+   string dq = CharToString(34);
+   string commandsKey = dq + "pendingCommands" + dq + ":";
+
+   int commandsPos = StringFind(jsonResponse, commandsKey);
+
+   // Fallback to legacy single-command format if pendingCommands array is not found
+   if(commandsPos < 0)
+     {
+      string legacyActionKey = dq + "pendingAction" + dq + ":" + dq;
+      int legPos = StringFind(jsonResponse, legacyActionKey);
+      if(legPos >= 0)
+        {
+         int legStart = legPos + StringLen(legacyActionKey);
+         int legEnd = StringFind(jsonResponse, dq, legStart);
+         if(legEnd > legStart)
+           {
+            string legAction = StringSubstr(jsonResponse, legStart, legEnd - legStart);
+            if(legAction != "NONE" && legAction != "")
+              {
+               double legLot = InpLotSize;
+               string lotKey = dq + "pendingLot" + dq + ":";
+               int lPos = StringFind(jsonResponse, lotKey);
+               if(lPos >= 0)
+                 {
+                  int lStart = lPos + StringLen(lotKey);
+                  int lEnd = StringFind(jsonResponse, ",", lStart);
+                  if(lEnd < 0) lEnd = StringFind(jsonResponse, "}", lStart);
+                  if(lEnd > lStart) legLot = StringToDouble(StringSubstr(jsonResponse, lStart, lEnd - lStart));
+                 }
+               double legSL = 0, legTP = 0;
+               string slKey = dq + "pendingSL" + dq + ":";
+               int slP = StringFind(jsonResponse, slKey);
+               if(slP >= 0)
+                 {
+                  int sStart = slP + StringLen(slKey);
+                  int sEnd = StringFind(jsonResponse, ",", sStart);
+                  if(sEnd < 0) sEnd = StringFind(jsonResponse, "}", sStart);
+                  if(sEnd > sStart) legSL = StringToDouble(StringSubstr(jsonResponse, sStart, sEnd - sStart));
+                 }
+               string tpKey = dq + "pendingTP" + dq + ":";
+               int tpP = StringFind(jsonResponse, tpKey);
+               if(tpP >= 0)
+                 {
+                  int tStart = tpP + StringLen(tpKey);
+                  int tEnd = StringFind(jsonResponse, ",", tStart);
+                  if(tEnd < 0) tEnd = StringFind(jsonResponse, "}", tStart);
+                  if(tEnd > tStart) legTP = StringToDouble(StringSubstr(jsonResponse, tStart, tEnd - tStart));
+                 }
+
+               int stopsLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+               double minStopDist = stopsLevel * _Point;
+               legLot = NormalizeVolume(legLot);
+
+               if(legAction == "BUY")
+                 {
+                  int bCnt = 0, sCnt = 0;
+                  CountPositions(bCnt, sCnt);
+                  if(sCnt == 0 && bCnt == 0)
+                    {
+                     double slPr = (legSL > 0) ? NormalizeDouble(ask - MathMax(legSL * _Point, minStopDist), _Digits) : 0;
+                     double tpPr = (legTP > 0) ? NormalizeDouble(ask + MathMax(legTP * _Point, minStopDist), _Digits) : 0;
+                     ResetLastError();
+                     if(trade.Buy(legLot, _Symbol, ask, slPr, tpPr, "Scalar AI Buy"))
+                       {
+                        Print("[ORDER] Legacy BUY executed on ", _Symbol, " Lot: ", legLot);
+                        ReportExecutionResult("BUY", 0, (ulong)trade.ResultOrder(), true, "");
+                       }
+                     else
+                       {
+                        Print("[ORDER] Legacy BUY failed: ", trade.ResultRetcode());
+                        ReportExecutionResult("BUY", 0, 0, false, "Code: " + IntegerToString(trade.ResultRetcode()));
+                       }
+                    }
+                 }
+               else if(legAction == "SELL")
+                 {
+                  int bCnt = 0, sCnt = 0;
+                  CountPositions(bCnt, sCnt);
+                  if(bCnt == 0 && sCnt == 0)
+                    {
+                     double slPr = (legSL > 0) ? NormalizeDouble(bid + MathMax(legSL * _Point, minStopDist), _Digits) : 0;
+                     double tpPr = (legTP > 0) ? NormalizeDouble(bid - MathMax(legTP * _Point, minStopDist), _Digits) : 0;
+                     ResetLastError();
+                     if(trade.Sell(legLot, _Symbol, bid, slPr, tpPr, "Scalar AI Sell"))
+                       {
+                        Print("[ORDER] Legacy SELL executed on ", _Symbol, " Lot: ", legLot);
+                        ReportExecutionResult("SELL", 0, (ulong)trade.ResultOrder(), true, "");
+                       }
+                     else
+                       {
+                        Print("[ORDER] Legacy SELL failed: ", trade.ResultRetcode());
+                        ReportExecutionResult("SELL", 0, 0, false, "Code: " + IntegerToString(trade.ResultRetcode()));
+                       }
+                    }
+                 }
+               else if(legAction == "CLOSE_ALL")
+                 {
+                  CloseAllPositions();
+                  ReportExecutionResult("CLOSE_ALL", 0, 0, true, "");
+                 }
+              }
+           }
+        }
+      return;
+     }
+
+   int arrayStart = StringFind(jsonResponse, "[", commandsPos);
+   if(arrayStart < 0) return;
+   int arrayEnd = StringFind(jsonResponse, "]", arrayStart);
+   if(arrayEnd < 0) return;
+
+   string commandsArray = StringSubstr(jsonResponse, arrayStart, arrayEnd - arrayStart + 1);
+   if(commandsArray == "[]") return;
+
+   int pos = 0;
+   int processedCount = 0;
+
+   int stopsLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minStopDist = stopsLevel * _Point;
+
+   while(true)
+     {
+      int cmdStart = StringFind(commandsArray, "{", pos);
+      if(cmdStart < 0) break;
+      int cmdEnd = StringFind(commandsArray, "}", cmdStart);
+      if(cmdEnd < 0) break;
+
+      string cmdObj = StringSubstr(commandsArray, cmdStart, cmdEnd - cmdStart + 1);
+      pos = cmdEnd + 1;
+      processedCount++;
+
+      // Extract action
+      string actionKey = dq + "action" + dq + ":";
+      int actionPos = StringFind(cmdObj, actionKey);
+      if(actionPos < 0) continue;
+      int actionStart = actionPos + StringLen(actionKey);
+      int aQuote1 = StringFind(cmdObj, dq, actionStart);
+      if(aQuote1 < 0) continue;
+      int aQuote2 = StringFind(cmdObj, dq, aQuote1 + 1);
+      if(aQuote2 <= aQuote1) continue;
+      string action = StringSubstr(cmdObj, aQuote1 + 1, aQuote2 - aQuote1 - 1);
+
+      // Extract lot
+      double pLot = InpLotSize;
+      string lotKey = dq + "lot" + dq + ":";
+      int lotPos = StringFind(cmdObj, lotKey);
+      if(lotPos >= 0)
+        {
+         int lStart = lotPos + StringLen(lotKey);
+         int lEnd = StringFind(cmdObj, ",", lStart);
+         if(lEnd < 0) lEnd = StringFind(cmdObj, "}", lStart);
+         if(lEnd > lStart) pLot = StringToDouble(StringSubstr(cmdObj, lStart, lEnd - lStart));
+        }
+      pLot = NormalizeVolume(pLot);
+
+      // Extract SL
+      double pSL = 0;
+      string slKey = dq + "sl" + dq + ":";
+      int slPos = StringFind(cmdObj, slKey);
+      if(slPos >= 0)
+        {
+         int sStart = slPos + StringLen(slKey);
+         int sEnd = StringFind(cmdObj, ",", sStart);
+         if(sEnd < 0) sEnd = StringFind(cmdObj, "}", sStart);
+         if(sEnd > sStart) pSL = StringToDouble(StringSubstr(cmdObj, sStart, sEnd - sStart));
+        }
+
+      // Extract TP
+      double pTP = 0;
+      string tpKey = dq + "tp" + dq + ":";
+      int tpPos = StringFind(cmdObj, tpKey);
+      if(tpPos >= 0)
+        {
+         int tStart = tpPos + StringLen(tpKey);
+         int tEnd = StringFind(cmdObj, ",", tStart);
+         if(tEnd < 0) tEnd = StringFind(cmdObj, "}", tStart);
+         if(tEnd > tStart) pTP = StringToDouble(StringSubstr(cmdObj, tStart, tEnd - tStart));
+        }
+
+      // Extract ticket (as ulong)
+      ulong pTicket = 0;
+      string ticketKey = dq + "ticket" + dq + ":";
+      int ticketPos = StringFind(cmdObj, ticketKey);
+      if(ticketPos >= 0)
+        {
+         int tkStart = ticketPos + StringLen(ticketKey);
+         int tkEnd = StringFind(cmdObj, ",", tkStart);
+         if(tkEnd < 0) tkEnd = StringFind(cmdObj, "}", tkStart);
+         if(tkEnd > tkStart) pTicket = (ulong)StringToInteger(StringSubstr(cmdObj, tkStart, tkEnd - tkStart));
+        }
+
+      // Extract symbol
+      string pSymbol = _Symbol;
+      string symbolKey = dq + "symbol" + dq + ":";
+      int symPos = StringFind(cmdObj, symbolKey);
+      if(symPos >= 0)
+        {
+         int smQuote1 = StringFind(cmdObj, dq, symPos + StringLen(symbolKey));
+         if(smQuote1 >= 0)
+           {
+            int smQuote2 = StringFind(cmdObj, dq, smQuote1 + 1);
+            if(smQuote2 > smQuote1) pSymbol = StringSubstr(cmdObj, smQuote1 + 1, smQuote2 - smQuote1 - 1);
+           }
+        }
+
+      // Execute action
+      if(action == "BUY")
+        {
+         int buyCount = 0, sellCount = 0;
+         CountPositions(buyCount, sellCount);
+
+         if(sellCount > 0)
+           {
+            Print("[SIGNAL] Anti-hedging lock: BUY blocked by active SELL on ", pSymbol);
+            EaLogPush("WARN", "BUY blocked: opposite SELL active");
+            ReportExecutionResult("BUY", pTicket, 0, false, "Opposite SELL position active");
+           }
+         else if(buyCount < GetEffectiveMaxTrades())
+           {
+            double slPrice = (pSL > 0) ? NormalizeDouble(ask - MathMax(pSL * _Point, minStopDist), _Digits) : 0;
+            double tpPrice = (pTP > 0) ? NormalizeDouble(ask + MathMax(pTP * _Point, minStopDist), _Digits) : 0;
+            ResetLastError();
+            if(trade.Buy(pLot, pSymbol, ask, slPrice, tpPrice, "Scalar AI Buy"))
+              {
+               ulong orderTicket = (ulong)trade.ResultOrder();
+               Print("[TRADE] BUY SUCCESS on ", pSymbol, "! Ticket: ", orderTicket, " Lot: ", pLot, " Ask: ", ask, " SL: ", slPrice, " TP: ", tpPrice);
+               EaLogPush("SUCCESS", "BUY executed on " + pSymbol + " Lot: " + DoubleToString(pLot, 2));
+               ReportExecutionResult("BUY", pTicket, orderTicket, true, "");
+              }
+            else
+              {
+               Print("[TRADE] BUY FAILED on ", pSymbol, ". RetCode: ", trade.ResultRetcode());
+               EaLogPush("ERROR", "BUY failed. RetCode: " + IntegerToString(trade.ResultRetcode()));
+               ReportExecutionResult("BUY", pTicket, 0, false, "RetCode: " + IntegerToString(trade.ResultRetcode()));
+              }
+           }
+         else
+           {
+            ReportExecutionResult("BUY", pTicket, 0, false, "Max concurrent trades reached");
+           }
+        }
+      else if(action == "SELL")
+        {
+         int buyCount = 0, sellCount = 0;
+         CountPositions(buyCount, sellCount);
+
+         if(buyCount > 0)
+           {
+            Print("[SIGNAL] Anti-hedging lock: SELL blocked by active BUY on ", pSymbol);
+            EaLogPush("WARN", "SELL blocked: opposite BUY active");
+            ReportExecutionResult("SELL", pTicket, 0, false, "Opposite BUY position active");
+           }
+         else if(sellCount < GetEffectiveMaxTrades())
+           {
+            double slPrice = (pSL > 0) ? NormalizeDouble(bid + MathMax(pSL * _Point, minStopDist), _Digits) : 0;
+            double tpPrice = (pTP > 0) ? NormalizeDouble(bid - MathMax(pTP * _Point, minStopDist), _Digits) : 0;
+            ResetLastError();
+            if(trade.Sell(pLot, pSymbol, bid, slPrice, tpPrice, "Scalar AI Sell"))
+              {
+               ulong orderTicket = (ulong)trade.ResultOrder();
+               Print("[TRADE] SELL SUCCESS on ", pSymbol, "! Ticket: ", orderTicket, " Lot: ", pLot, " Bid: ", bid, " SL: ", slPrice, " TP: ", tpPrice);
+               EaLogPush("SUCCESS", "SELL executed on " + pSymbol + " Lot: " + DoubleToString(pLot, 2));
+               ReportExecutionResult("SELL", pTicket, orderTicket, true, "");
+              }
+            else
+              {
+               Print("[TRADE] SELL FAILED on ", pSymbol, ". RetCode: ", trade.ResultRetcode());
+               EaLogPush("ERROR", "SELL failed. RetCode: " + IntegerToString(trade.ResultRetcode()));
+               ReportExecutionResult("SELL", pTicket, 0, false, "RetCode: " + IntegerToString(trade.ResultRetcode()));
+              }
+           }
+         else
+           {
+            ReportExecutionResult("SELL", pTicket, 0, false, "Max concurrent trades reached");
+           }
+        }
+      else if(action == "CLOSE_ALL")
+        {
+         Print("[COMMAND] CLOSE_ALL received. Liquidating positions on ", _Symbol);
+         CloseAllPositions();
+         ReportExecutionResult("CLOSE_ALL", pTicket, 0, true, "");
+        }
+      else if(action == "CLOSE_BY_TICKET")
+        {
+         Print("[COMMAND] Closing position ticket #", pTicket);
+         ClosePositionByTicket(pTicket);
+         ReportExecutionResult("CLOSE_BY_TICKET", pTicket, pTicket, true, "");
+        }
+      else if(action == "MODIFY_POSITION" || action == "UPDATE_SL_TP")
+        {
+         Print("[COMMAND] Modifying SL/TP for position ticket #", pTicket, " SL pts: ", pSL, " TP pts: ", pTP);
+         ModifyPosition(pTicket, pSL, pTP);
+        }
+      else if(action == "CONFIG_UPDATE")
+        {
+         ApplyRuntimeConfigUpdate(cmdObj);
+         ReportExecutionResult("CONFIG_UPDATE", pTicket, 0, true, "");
+        }
+     }
+
+   if(processedCount > 0)
+     {
+      Print("[COMMANDS] Processed ", processedCount, " remote trade command(s).");
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Modify position Stop Loss and Take Profit                        |
+//+------------------------------------------------------------------+
+void ModifyPosition(ulong ticket, double slPoints, double tpPoints)
+  {
+   if(PositionsTotal() <= 0) return;
+
+   int stopsLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minStopDist = stopsLevel * _Point;
+
+   ulong targetTicket = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
-      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket <= 0) continue;
+      if(posTicket == ticket && PositionGetString(POSITION_SYMBOL) == _Symbol)
         {
-         trade.PositionClose((ulong)PositionGetInteger(POSITION_TICKET));
+         targetTicket = posTicket;
+         break;
+        }
+     }
+
+   if(targetTicket == 0)
+     {
+      // Fallback: match open position for this EA on this symbol
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         ulong posTicket = PositionGetTicket(i);
+         if(posTicket <= 0) continue;
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
+           {
+            targetTicket = posTicket;
+            break;
+           }
+        }
+     }
+
+   if(targetTicket == 0) return;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket == targetTicket)
+        {
+         double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         long posType = PositionGetInteger(POSITION_TYPE);
+         double currentSL = PositionGetDouble(POSITION_SL);
+         double currentTP = PositionGetDouble(POSITION_TP);
+
+         double newSL = currentSL;
+         double newTP = currentTP;
+
+         if(posType == POSITION_TYPE_BUY)
+           {
+            if(slPoints > 0) newSL = NormalizeDouble(openPrice - MathMax(slPoints * _Point, minStopDist), _Digits);
+            if(tpPoints > 0) newTP = NormalizeDouble(openPrice + MathMax(tpPoints * _Point, minStopDist), _Digits);
+           }
+         else if(posType == POSITION_TYPE_SELL)
+           {
+            if(slPoints > 0) newSL = NormalizeDouble(openPrice - MathMax(slPoints * _Point, minStopDist), _Digits);
+            if(tpPoints > 0) newTP = NormalizeDouble(openPrice - MathMax(tpPoints * _Point, minStopDist), _Digits);
+           }
+
+         ResetLastError();
+         if(trade.PositionModify(posTicket, newSL, newTP))
+           {
+            Print("[MODIFY] Successfully updated position #", posTicket, " SL: ", newSL, " TP: ", newTP);
+            EaLogPush("SUCCESS", "Position #" + IntegerToString((long)posTicket) + " SL/TP modified");
+            ReportExecutionResult("MODIFY_POSITION", ticket, posTicket, true, "");
+           }
+         else
+           {
+            Print("[MODIFY] Failed to modify position #", posTicket, ". RetCode: ", trade.ResultRetcode());
+            ReportExecutionResult("MODIFY_POSITION", ticket, posTicket, false, "RetCode: " + IntegerToString(trade.ResultRetcode()));
+           }
+         return;
         }
      }
   }
 
 //+------------------------------------------------------------------+
-//| Process Remote Pending Command Sync                              |
+//| Close all positions belonging to this EA                         |
 //+------------------------------------------------------------------+
-void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask)
+void CloseAllPositions()
   {
-   string dq = CharToString(34);
-   string actionKey = dq + "pendingAction" + dq + ":" + dq;
-   
-   int actionPos = StringFind(jsonResponse, actionKey);
-   if(actionPos >= 0)
+   int closedCount = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
-      int start = actionPos + StringLen(actionKey);
-      int end = StringFind(jsonResponse, dq, start);
-      if(end > start)
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
         {
-         string cmd = StringSubstr(jsonResponse, start, end - start);
-         if(cmd != "NONE")
+         if(trade.PositionClose(ticket))
            {
-            Print("[REMOTE ORDER] Checked pending command from server: ", cmd);
-            
-            double pLot = InpLotSize;
-            string lotKey = dq + "pendingLot" + dq + ":";
-            int lotPos = StringFind(jsonResponse, lotKey);
-            if(lotPos >= 0)
+            closedCount++;
+           }
+        }
+     }
+   if(closedCount > 0)
+     {
+      Print("[CLOSE] Closed ", closedCount, " position(s) on ", _Symbol);
+      EaLogPush("INFO", "Liquidated " + IntegerToString(closedCount) + " position(s)");
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Close specific position by ticket                                |
+//+------------------------------------------------------------------+
+void ClosePositionByTicket(ulong ticket)
+  {
+   if(PositionsTotal() <= 0) return;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket <= 0) continue;
+      if(posTicket == ticket)
+        {
+         trade.PositionClose(posTicket);
+         Print("[CLOSE] Closed position ticket #", ticket);
+         EaLogPush("INFO", "Closed position #" + IntegerToString((long)ticket));
+         return;
+        }
+     }
+
+   // Fallback: match by symbol and magic number if only 1 position
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket <= 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
+        {
+         trade.PositionClose(posTicket);
+         Print("[CLOSE] Closed position ticket #", posTicket, " (requested site ticket: #", ticket, ")");
+         EaLogPush("INFO", "Closed position #" + IntegerToString((long)posTicket));
+         return;
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Count active positions with our magic number                     |
+//+------------------------------------------------------------------+
+void CountPositions(int &buyCount, int &sellCount)
+  {
+   buyCount = 0;
+   sellCount = 0;
+   for(int i = 0; i < PositionsTotal(); i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == glMagicNumber)
+        {
+         long posType = PositionGetInteger(POSITION_TYPE);
+         if(posType == POSITION_TYPE_BUY) buyCount++;
+         else if(posType == POSITION_TYPE_SELL) sellCount++;
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Manage trailing stop logic                                        |
+//+------------------------------------------------------------------+
+void ManageTrailingStop(double bid, double ask)
+  {
+   double trailPts = GetEffectiveTrailingStop();
+   if(trailPts <= 0) return;
+
+   double stepPts = GetEffectiveTrailingStep();
+   int stopsLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minStopDist = stopsLevel * _Point;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != glMagicNumber) continue;
+
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      long posType = PositionGetInteger(POSITION_TYPE);
+
+      if(posType == POSITION_TYPE_BUY)
+        {
+         if((bid - openPrice) > (trailPts * _Point))
+           {
+            double newSL = NormalizeDouble(bid - trailPts * _Point, _Digits);
+            if((currentSL == 0 || (newSL - currentSL) >= (stepPts * _Point)) && (bid - newSL) >= minStopDist)
               {
-               int lotStart = lotPos + StringLen(lotKey);
-               int lotEnd = StringFind(jsonResponse, ",", lotStart);
-               if(lotEnd < 0) lotEnd = StringFind(jsonResponse, "}", lotStart);
-               if(lotEnd > lotStart) {
-                  pLot = StringToDouble(StringSubstr(jsonResponse, lotStart, lotEnd - lotStart));
-               }
+               if(trade.PositionModify(ticket, newSL, currentTP))
+                 {
+                  Print("[TRAILING STOP] BUY #", ticket, " SL updated to ", newSL);
+                  EaLogPush("INFO", "Trailing SL updated for BUY #" + IntegerToString((long)ticket));
+                 }
               }
-              
-            double pSL = InpStopLossPts;
-            string slKey = dq + "pendingSL" + dq + ":";
-            int slPos = StringFind(jsonResponse, slKey);
-            if(slPos >= 0)
+           }
+        }
+      else if(posType == POSITION_TYPE_SELL)
+        {
+         if((openPrice - ask) > (trailPts * _Point))
+           {
+            double newSL = NormalizeDouble(ask + trailPts * _Point, _Digits);
+            if((currentSL == 0 || (currentSL - newSL) >= (stepPts * _Point)) && (newSL - ask) >= minStopDist)
               {
-               int slStart = slPos + StringLen(slKey);
-               int slEnd = StringFind(jsonResponse, ",", slStart);
-               if(slEnd < 0) slEnd = StringFind(jsonResponse, "}", slStart);
-               if(slEnd > slStart) {
-                  pSL = StringToDouble(StringSubstr(jsonResponse, slStart, slEnd - slStart));
-               }
-              }
-              
-            double pTP = InpTakeProfitPts;
-            string tpKey = dq + "pendingTP" + dq + ":";
-            int tpPos = StringFind(jsonResponse, tpKey);
-            if(tpPos >= 0)
-              {
-               int tpStart = tpPos + StringLen(tpKey);
-               int tpEnd = StringFind(jsonResponse, ",", tpStart);
-               if(tpEnd < 0) tpEnd = StringFind(jsonResponse, "}", tpStart);
-               if(tpEnd > tpStart) {
-                  pTP = StringToDouble(StringSubstr(jsonResponse, tpStart, tpEnd - tpStart));
-               }
-              }
-              
-            if(cmd == "BUY")
-              {
-               int buyCount = 0, sellCount = 0;
-               CountPositions(buyCount, sellCount);
-               if(sellCount > 0)
+               if(trade.PositionModify(ticket, newSL, currentTP))
                  {
-                  Print("[REMOTE ORDER REJECTED] Cannot BUY because an opposite active SELL position exists on ", _Symbol);
+                  Print("[TRAILING STOP] SELL #", ticket, " SL updated to ", newSL);
+                  EaLogPush("INFO", "Trailing SL updated for SELL #" + IntegerToString((long)ticket));
                  }
-               else if(buyCount == 0)
-                 {
-                  double slPrice = (pSL > 0) ? NormalizeDouble(bid - pSL * _Point, _Digits) : 0;
-                  double tpPrice = (pTP > 0) ? NormalizeDouble(ask + pTP * _Point, _Digits) : 0;
-                  ResetLastError();
-                  if(trade.Buy(pLot, _Symbol, ask, slPrice, tpPrice, "Scalar AI Remote Buy"))
-                    {
-                     Print("[REMOTE ORDER SUCCESS] BUY order executed on ", _Symbol, "! Lot: ", pLot, " SL: ", slPrice, " TP: ", tpPrice);
-                    }
-                  else
-                    {
-                     Print("[REMOTE ORDER FAILED] BUY execution failed! Error: ", _LastError);
-                    }
-                 }
-               else
-                 {
-                  Print("[REMOTE ORDER REJECTED] Active BUY position already exists on ", _Symbol);
-                 }
-              }
-            else if(cmd == "SELL")
-              {
-               int buyCount = 0, sellCount = 0;
-               CountPositions(buyCount, sellCount);
-               if(buyCount > 0)
-                 {
-                  Print("[REMOTE ORDER REJECTED] Cannot SELL because an opposite active BUY position exists on ", _Symbol);
-                 }
-               else if(sellCount == 0)
-                 {
-                  double slPrice = (pSL > 0) ? NormalizeDouble(ask + pSL * _Point, _Digits) : 0;
-                  double tpPrice = (pTP > 0) ? NormalizeDouble(bid - pTP * _Point, _Digits) : 0;
-                  ResetLastError();
-                  if(trade.Sell(pLot, _Symbol, bid, slPrice, tpPrice, "Scalar AI Remote Sell"))
-                    {
-                     Print("[REMOTE ORDER SUCCESS] SELL order executed on ", _Symbol, "! Lot: ", pLot, " SL: ", slPrice, " TP: ", tpPrice);
-                    }
-                  else
-                    {
-                     Print("[REMOTE ORDER FAILED] SELL execution failed! Error: ", _LastError);
-                    }
-                 }
-               else
-                 {
-                  Print("[REMOTE ORDER REJECTED] Active SELL position already exists on ", _Symbol);
-                 }
-              }
-            else if(cmd == "CLOSE_ALL")
-              {
-               Print("[REMOTE COMMAND] Received CLOSE_ALL signal for ", _Symbol, ". Liquidating open positions.");
-               CloseAllPositions();
               }
            }
         }
      }
+  }
+
+//+------------------------------------------------------------------+
+//| Report execution result back to web app                          |
+//+------------------------------------------------------------------+
+void ReportExecutionResult(string action, ulong siteTicket, ulong mt5Ticket, bool success, string error)
+  {
+   string url = InpWebServerUrl + "/api/ea/confirm";
+   string headers = "Content-Type: application/json\\r\\n";
+   int timeout = 5000;
+   string payload = "{\\"action\\":\\"" + action + "\\"" +
+                    ",\\"ticket\\":" + IntegerToString((long)siteTicket) +
+                    ",\\"mt5Ticket\\":" + IntegerToString((long)mt5Ticket) +
+                    ",\\"success\\":" + (success ? "true" : "false") +
+                    ",\\"error\\":\\"" + EscapeJsonString(error) + "\\"" +
+                    ",\\"symbol\\":\\"" + _Symbol + "\\"" +
+                    ",\\"magic\\":" + IntegerToString(glMagicNumber) + "}";
+
+   char post[], result[];
+   string resultHeaders;
+   int postLen = StringLen(payload);
+   StringToCharArray(payload, post, 0, postLen, CP_UTF8);
+
+   ResetLastError();
+   WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
+  }
+
+//+------------------------------------------------------------------+
+//| Sync positions with web app                                      |
+//+------------------------------------------------------------------+
+void SyncPositions()
+  {
+   string url = InpWebServerUrl + "/api/ea/positions";
+   string headers = "Content-Type: application/json\\r\\n";
+   int timeout = 5000;
+
+   string positionsArray = "[";
+   int posCount = 0;
+
+   for(int i = 0; i < PositionsTotal(); i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != glMagicNumber) continue;
+
+      if(posCount > 0) StringAdd(positionsArray, ",");
+
+      double volume = PositionGetDouble(POSITION_VOLUME);
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl = PositionGetDouble(POSITION_SL);
+      double tp = PositionGetDouble(POSITION_TP);
+      double profit = PositionGetDouble(POSITION_PROFIT);
+      long type = PositionGetInteger(POSITION_TYPE);
+      string typeStr = (type == POSITION_TYPE_BUY) ? "BUY" : "SELL";
+      string openTime = TimeToString((datetime)PositionGetInteger(POSITION_TIME), TIME_DATE|TIME_SECONDS);
+
+      string posObj = "{\\"ticket\\":" + IntegerToString((long)ticket) +
+                      ",\\"type\\":\\"" + typeStr + "\\"" +
+                      ",\\"volume\\":" + DoubleToString(volume, 2) +
+                      ",\\"openPrice\\":" + DoubleToString(openPrice, _Digits) +
+                      ",\\"sl\\":" + DoubleToString(sl, _Digits) +
+                      ",\\"tp\\":" + DoubleToString(tp, _Digits) +
+                      ",\\"profit\\":" + DoubleToString(profit, 2) +
+                      ",\\"openTime\\":\\"" + openTime + "\\"}";
+
+      StringAdd(positionsArray, posObj);
+      posCount++;
+     }
+   StringAdd(positionsArray, "]");
+
+   string payload = "{\\"symbol\\":\\"" + _Symbol + "\\",\\"magic\\":" + IntegerToString(glMagicNumber) + ",\\"positions\\":" + positionsArray + "}";
+
+   char post[], result[];
+   string resultHeaders;
+   int postLen = StringLen(payload);
+   StringToCharArray(payload, post, 0, postLen, CP_UTF8);
+
+   ResetLastError();
+   WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
+  }
+
+//+------------------------------------------------------------------+
+//| Helper: fetch updated EA code from server                        |
+//+------------------------------------------------------------------+
+string FetchEaCodeFromServer()
+  {
+   string url = InpWebServerUrl + "/api/ea/code";
+   string headers = "Content-Type: application/json\\r\\n";
+   char post[], result[];
+   string resultHeaders;
+   int timeout = 10000;
+
+   ResetLastError();
+   ArrayResize(post, 0);
+   int res = WebRequest("GET", url, headers, timeout, post, result, resultHeaders);
+   if(res == 200)
+     {
+      return CharArrayToString(result);
+     }
+   return "";
+  }
+
+//+------------------------------------------------------------------+
+//| Helper: write EA code to MQL5/Files for easy recompile           |
+//+------------------------------------------------------------------+
+bool SaveUpdateFile(string code)
+  {
+   string filePath = "ScalarAI_Update.mq5";
+   int handle = FileOpen(filePath, FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(handle == INVALID_HANDLE)
+     {
+      return false;
+     }
+   FileWriteString(handle, code);
+   FileClose(handle);
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//| Check for EA code updates from server                            |
+//+------------------------------------------------------------------+
+void CheckForEaUpdate()
+  {
+   if(glUpdateAvailable) return;
+
+   string url = InpWebServerUrl + "/api/ea/version";
+   string headers = "Content-Type: application/json\\r\\n";
+   char post[], result[];
+   string resultHeaders;
+   int timeout = 5000;
+
+   ResetLastError();
+   ArrayResize(post, 0);
+   int res = WebRequest("GET", url, headers, timeout, post, result, resultHeaders);
+   if(res != 200) return;
+
+   string jsonResponse = CharArrayToString(result);
+   string versionKey = "\\"version\\":\\"";
+   int versionPos = StringFind(jsonResponse, versionKey);
+   if(versionPos < 0) return;
+
+   int versionStart = versionPos + StringLen(versionKey);
+   int versionEnd = StringFind(jsonResponse, "\\"", versionStart);
+   if(versionEnd < versionStart) return;
+
+   string serverVersion = StringSubstr(jsonResponse, versionStart, versionEnd - versionStart);
+   if(serverVersion != "" && serverVersion != glEAVersion)
+     {
+      glServerVersion = serverVersion;
+      glUpdateAvailable = true;
+      Print("[UPDATE] New EA version available on server: ", serverVersion, " (Current: ", glEAVersion, ")");
+
+      string newCode = FetchEaCodeFromServer();
+      if(newCode != "")
+        {
+         if(SaveUpdateFile(newCode))
+           {
+            Print("[UPDATE] Updated code saved to MQL5/Files/ScalarAI_Update.mq5");
+            glLastDiagMsg = "UPDATE v" + serverVersion + " READY in MQL5/Files/ScalarAI_Update.mq5";
+           }
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Apply runtime config update from server                          |
+//+------------------------------------------------------------------+
+void ApplyRuntimeConfigUpdate(const string &jsonConfig)
+  {
+   string dq = CharToString(34);
+
+   // Parse lotSize
+   string lotKey = dq + "lotSize" + dq + ":";
+   int lotPos = StringFind(jsonConfig, lotKey);
+   if(lotPos >= 0)
+     {
+      int start = lotPos + StringLen(lotKey);
+      int end = StringFind(jsonConfig, ",", start);
+      if(end < 0) end = StringFind(jsonConfig, "}", start);
+      if(end > start) glRuntimeLotSize = StringToDouble(StringSubstr(jsonConfig, start, end - start));
+     }
+
+   // Parse stopLossPoints
+   string slKey = dq + "stopLossPoints" + dq + ":";
+   int slPos = StringFind(jsonConfig, slKey);
+   if(slPos >= 0)
+     {
+      int start = slPos + StringLen(slKey);
+      int end = StringFind(jsonConfig, ",", start);
+      if(end < 0) end = StringFind(jsonConfig, "}", start);
+      if(end > start) glRuntimeSL = StringToDouble(StringSubstr(jsonConfig, start, end - start));
+     }
+
+   // Parse takeProfitPoints
+   string tpKey = dq + "takeProfitPoints" + dq + ":";
+   int tpPos = StringFind(jsonConfig, tpKey);
+   if(tpPos >= 0)
+     {
+      int start = tpPos + StringLen(tpKey);
+      int end = StringFind(jsonConfig, ",", start);
+      if(end < 0) end = StringFind(jsonConfig, "}", start);
+      if(end > start) glRuntimeTP = StringToDouble(StringSubstr(jsonConfig, start, end - start));
+     }
+
+   // Parse trailingStopPoints
+   string tsKey = dq + "trailingStopPoints" + dq + ":";
+   int tsPos = StringFind(jsonConfig, tsKey);
+   if(tsPos >= 0)
+     {
+      int start = tsPos + StringLen(tsKey);
+      int end = StringFind(jsonConfig, ",", start);
+      if(end < 0) end = StringFind(jsonConfig, "}", start);
+      if(end > start) glRuntimeTrailingStop = StringToDouble(StringSubstr(jsonConfig, start, end - start));
+     }
+
+   // Parse maxTrades
+   string maxKey = dq + "maxTrades" + dq + ":";
+   int maxPos = StringFind(jsonConfig, maxKey);
+   if(maxPos >= 0)
+     {
+      int start = maxPos + StringLen(maxKey);
+      int end = StringFind(jsonConfig, ",", start);
+      if(end < 0) end = StringFind(jsonConfig, "}", start);
+      if(end > start) glRuntimeMaxTrades = (int)StringToInteger(StringSubstr(jsonConfig, start, end - start));
+     }
+
+   glRuntimeConfigLoaded = true;
+   Print("[CONFIG] Runtime configuration updated: Lot=", glRuntimeLotSize, " SL=", glRuntimeSL, " TP=", glRuntimeTP, " Trail=", glRuntimeTrailingStop);
+  }
+
+//+------------------------------------------------------------------+
+//| Effective parameter getters with runtime overrides                |
+//+------------------------------------------------------------------+
+double GetEffectiveLotSize()
+  {
+   if(glRuntimeConfigLoaded && glRuntimeLotSize > 0) return glRuntimeLotSize;
+   return InpLotSize;
+  }
+
+double GetEffectiveSL()
+  {
+   if(glRuntimeConfigLoaded && glRuntimeSL > 0) return glRuntimeSL;
+   return ${stopLossPoints};
+  }
+
+double GetEffectiveTP()
+  {
+   if(glRuntimeConfigLoaded && glRuntimeTP > 0) return glRuntimeTP;
+   return ${takeProfitPoints};
+  }
+
+double GetEffectiveTrailingStop()
+  {
+   if(glRuntimeConfigLoaded && glRuntimeTrailingStop > 0) return glRuntimeTrailingStop;
+   return ${useTrailingStop ? trailingStopPoints : 0};
+  }
+
+double GetEffectiveTrailingStep()
+  {
+   if(glRuntimeConfigLoaded && glRuntimeTrailingStep > 0) return glRuntimeTrailingStep;
+   return 10;
+  }
+
+int GetEffectiveMaxTrades()
+  {
+   if(glRuntimeConfigLoaded && glRuntimeMaxTrades > 0) return glRuntimeMaxTrades;
+   return InpMaxTrades;
+  }
+
+//+------------------------------------------------------------------+
+//| EA Log Buffer helpers                                             |
+//+------------------------------------------------------------------+
+void EaLogPush(string level, string message)
+  {
+   string entry = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + " [" + level + "] " + message;
+   if(glEaLogCount < GL_EA_LOG_MAX)
+     {
+      glEaLogBuffer[glEaLogCount] = entry;
+      glEaLogCount++;
+     }
+   else
+     {
+      for(int i = 1; i < GL_EA_LOG_MAX; i++)
+        {
+         glEaLogBuffer[i - 1] = glEaLogBuffer[i];
+        }
+      glEaLogBuffer[GL_EA_LOG_MAX - 1] = entry;
+     }
+  }
+
+string EscapeJsonString(string str)
+  {
+   StringReplace(str, "\\\\", "\\\\\\\\");
+   StringReplace(str, "\\"", "\\\\\\"");
+   StringReplace(str, "\\r", " ");
+   StringReplace(str, "\\n", " ");
+   return str;
+  }
+
+void ShipEaLogsToServer()
+  {
+   if(glEaLogCount <= 0) return;
+
+   string url = InpWebServerUrl + "/api/ea/logs";
+   string headers = "Content-Type: application/json\\r\\n";
+   int timeout = 3000;
+
+   string logsArray = "[";
+   for(int i = 0; i < glEaLogCount; i++)
+     {
+      if(i > 0) StringAdd(logsArray, ",");
+      string safeMsg = EscapeJsonString(glEaLogBuffer[i]);
+      string logObj = "{\\"level\\":\\"INFO\\",\\"message\\":\\"" + safeMsg + "\\",\\"timestamp\\":\\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\\"}";
+      StringAdd(logsArray, logObj);
+     }
+   StringAdd(logsArray, "]");
+
+   string payload = "{\\"logs\\":" + logsArray + "}";
+
+   char post[], result[];
+   string resultHeaders;
+   int postLen = StringLen(payload);
+   StringToCharArray(payload, post, 0, postLen, CP_UTF8);
+
+   ResetLastError();
+   WebRequest("POST", url, headers, timeout, post, result, resultHeaders);
+   glEaLogCount = 0;
   }
 
 //+------------------------------------------------------------------+
@@ -748,31 +1318,29 @@ void ProcessPendingRemoteCommand(string jsonResponse, double bid, double ask)
 void UpdateChartDisplay(double bid, double ask)
   {
    string connStatus = (glLastSyncTime > 0) ? "CONNECTED & IN SYNC" : "OFFLINE / DISCONNECTED";
-   string tradeStatus = glTradingActive ? "ACTIVE & EXECUTING" : "STOPPED / MONITORING ONLY";
-   
-   string termAlgoEnabled = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES (Terminal Button is ON)" : "NO (CLICK ALGO TRADING BUTTON ON MT5 TOOLBAR!)";
-   string eaTradeAllowed = MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES (EA Trade is ALLOWED)" : "NO (Allow Algorithmic Trading checkbox in EA Properties is OFF!)";
-   
+   string tradeStatus = glTradingActive ? "ACTIVE & EXECUTING (SERVER AUTHORITATIVE)" : "STOPPED / MONITORING ONLY";
+
+   string termAlgoEnabled = TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES (ALGO TRADING IS ON)" : "NO (CLICK ALGO TRADING BUTTON ON MT5 TOOLBAR!)";
+   string eaTradeAllowed  = MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES (ALLOWED)" : "NO (CHECK 'Allow Algo Trading' IN EA PROPERTIES!)";
+
    Comment("==============================================\\n" +
            "       SCALAR AI MULTI-ASSET TRADING PLATFORM \\n" +
            "==============================================\\n" +
-           "  Active Symbol  : " + _Symbol + " (" + IntegerToString(_Digits) + " Digits)\\n" +
-           "  Active Strategy: " + glStrategyMode + "\\n" +
-           "  Trading Status : " + tradeStatus + "\\n" +
-           "  Trading Mode   : " + (InpTradingMode == MODE_SCALPING ? "SCALPING" : "SWING TRADING") + "\\n" +
-           "  Server API Link: " + connStatus + "\\n" +
-           "  Last Sync Time : " + TimeToString(glLastSyncTime, TIME_DATE|TIME_SECONDS) + "\\n" +
+           "  Active Symbol   : " + _Symbol + " (" + IntegerToString(_Digits) + " Digits)\\n" +
+           "  Strategy Mode   : " + glStrategyMode + "\\n" +
+           "  Trading Status  : " + tradeStatus + "\\n" +
+           "  Server API Link : " + connStatus + "\\n" +
+           "  Last Sync Time  : " + TimeToString(glLastSyncTime, TIME_DATE|TIME_SECONDS) + "\\n" +
            "==============================================\\n" +
-           "  [LIVE DIAGNOSTIC STATUS]\\n" +
+           "  [MT5 TERMINAL PERMISSIONS]\\n" +
            "  1. Toolbar Algo Button Active : " + termAlgoEnabled + "\\n" +
-           "  2. Master EA Trade Allowed    : " + eaTradeAllowed + "\\n" +
+           "  2. EA Trading Allowed In Props: " + eaTradeAllowed + "\\n" +
            "  3. Server Response HTTP Code  : " + IntegerToString(glLastWebResCode) + " (Expected: 200)\\n" +
-           "  4. Internal MT5 Error Code    : " + IntegerToString(glLastWebErrCode) + " (Expected: 0)\\n" +
-           "  5. DIAGNOSIS MESSAGE          : " + glLastDiagMsg + "\\n" +
+           "  4. Status Message             : " + glLastDiagMsg + "\\n" +
            "==============================================\\n" +
-           "  [ACCOUNT METRICS]\\n" +
+           "  [ACCOUNT TELEMETRY]\\n" +
            "  Bid: " + DoubleToString(bid, _Digits) + " | Ask: " + DoubleToString(ask, _Digits) + "\\n" +
-           "  Login: " + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + " | " + AccountInfoString(ACCOUNT_COMPANY) + "\\n" +
+           "  Broker: " + AccountInfoString(ACCOUNT_COMPANY) + " | Login: " + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "\\n" +
            "  Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + " | Equity: $" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + "\\n" +
            "==============================================");
   }

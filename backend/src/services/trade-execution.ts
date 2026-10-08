@@ -92,25 +92,27 @@ export function calculateBollingerBands(prices: number[], period: number = 15, n
 
 export async function evaluateSimulatedStrategy(state: TradeState, callbacks: AppCallbacks): Promise<void> {
   const MIN_SAFETY_CALIBRATION_THRESHOLD = 20;
-  if (state.aiKnowledgeBase.totalObservations < MIN_SAFETY_CALIBRATION_THRESHOLD) return;
+  if (state.tradeConfig.selectedStrategy === "AI_ADAPTIVE" && state.aiKnowledgeBase.totalObservations < MIN_SAFETY_CALIBRATION_THRESHOLD) return;
   if (getSymbolState(state.symbolStates, state.activeSymbol).ticks.length < 5) return;
 
   const ticks = getSymbolState(state.symbolStates, state.activeSymbol).ticks;
   const openTrades = state.tradesList.filter((t: TradeRecord) => t.status === "OPEN");
+  const symbolEntry = getSymbolState(state.symbolStates, state.activeSymbol);
+  const pointVal = symbolEntry.connection.symbolTickSize || (symbolEntry.connection.symbolDigits !== null && symbolEntry.connection.symbolDigits !== undefined ? Math.pow(10, -symbolEntry.connection.symbolDigits) : 0.1);
 
   openTrades.forEach((trade: TradeRecord) => {
-    const currentPrice = getSymbolState(state.symbolStates, state.activeSymbol).currentPrice;
+    const currentPrice = getSymbolState(state.symbolStates, trade.symbol || state.activeSymbol).currentPrice;
     let priceDiff = trade.type === "BUY" ? currentPrice - trade.entryPrice : trade.entryPrice - currentPrice;
-    const pointsDiff = Math.abs(priceDiff) * 100;
+    const pointsDiff = Math.abs(priceDiff) / (pointVal > 0 ? pointVal : 0.1);
     if (pointsDiff >= state.tradeConfig.takeProfitPoints && priceDiff > 0) {
-      closeSimulatedPosition(state, trade, `TAKE PROFIT reached on ${state.activeSymbol} limit (+${pointsDiff.toFixed(1)} pts).`, callbacks);
+      closeSimulatedPosition(state, trade, `TAKE PROFIT reached on ${trade.symbol || state.activeSymbol} (+${pointsDiff.toFixed(1)} pts).`, callbacks);
     } else if (pointsDiff >= state.tradeConfig.stopLossPoints && priceDiff < 0) {
-      closeSimulatedPosition(state, trade, `STOP LOSS reached on ${state.activeSymbol} risk boundary (-${pointsDiff.toFixed(1)} pts).`, callbacks);
+      closeSimulatedPosition(state, trade, `STOP LOSS reached on ${trade.symbol || state.activeSymbol} (-${pointsDiff.toFixed(1)} pts).`, callbacks);
     } else if (state.tradeConfig.useTrailingStop && priceDiff > 0) {
-      const distancePoints = priceDiff * 100;
+      const distancePoints = pointsDiff;
       if (distancePoints > state.tradeConfig.trailingStopPoints) {
-        const atr = calculateATR(state.symbolStates, state.activeSymbol, 10);
-        const atrPoints = atr * 100;
+        const atr = calculateATR(state.symbolStates, trade.symbol || state.activeSymbol, 10);
+        const atrPoints = atr / (pointVal > 0 ? pointVal : 0.1);
         const profitLockPoints = distancePoints * 0.5;
         const potentialRetracement = distancePoints - profitLockPoints;
         if (potentialRetracement < atrPoints) {
@@ -249,13 +251,13 @@ export function closeSimulatedPosition(state: TradeState, trade: TradeRecord, re
   } catch {
     // quiet persistence
   }
-  callbacks.addLog("SERVER", "SUCCESS", `Simulated Trade #${trade.ticket} [${trade.symbol || state.activeSymbol}] CLOSED. Profit: ${finalProfit > 0 ? "+" : ""}$${finalProfit}`);
-  const closePayload = { action: "CLOSE_ALL", symbol: state.activeSymbol, volume: trade.lotSize, sl: 0, tp: 0, ticket: trade.ticket };
+  callbacks.addLog("SERVER", "SUCCESS", `Trade #${trade.ticket} [${trade.symbol || state.activeSymbol}] CLOSED. Profit: ${finalProfit > 0 ? "+" : ""}$${finalProfit}`);
+  const closePayload = { action: "CLOSE_BY_TICKET", symbol: trade.symbol || state.activeSymbol, volume: trade.lotSize, sl: 0, tp: 0, ticket: trade.ticket };
   state.pendingBridgeOrders.push({ ...closePayload, id: trade.id, timestamp: Date.now() });
   const closeCommand: EaCommand = {
     id: crypto.randomUUID(),
-    action: "CLOSE_ALL",
-    symbol: state.activeSymbol,
+    action: "CLOSE_BY_TICKET",
+    symbol: trade.symbol || state.activeSymbol,
     lot: trade.lotSize,
     sl: 0,
     tp: 0,

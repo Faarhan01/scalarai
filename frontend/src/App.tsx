@@ -122,6 +122,20 @@ export default function App() {
   const [strategiesList, setStrategiesList] = useState<any[]>([]);
   const [telemetryStream, setTelemetryStream] = useState<any[]>([]);
 
+  // Trade Detail Modal State
+  const [modalSl, setModalSl] = useState<string>("");
+  const [modalTp, setModalTp] = useState<string>("");
+  const [tradeActionLoading, setTradeActionLoading] = useState<boolean>(false);
+  const [tradeActionSuccess, setTradeActionSuccess] = useState<string>("");
+
+  useEffect(() => {
+    if (selectedTradeForModal) {
+      setModalSl(selectedTradeForModal.sl ? String(selectedTradeForModal.sl) : "");
+      setModalTp(selectedTradeForModal.tp ? String(selectedTradeForModal.tp) : "");
+      setTradeActionSuccess("");
+    }
+  }, [selectedTradeForModal]);
+
   // Session elapsed counter
   const { elapsedTime } = useElapsedTimer();
 

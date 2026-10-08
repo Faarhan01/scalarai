@@ -143,20 +143,28 @@ export function buildContext(ticks: Tick[], knowledge: AiKnowledgeBase, strategy
 }
 
 export function evaluateTrendFollowing(ctx: StrategyContext, config: TradeConfig): TradeSignal {
-  const { rsi, fastEma, slowEma, atr } = ctx;
+  const { rsi, fastEma, slowEma, atr, velocity } = ctx;
   
-  // Trend strength filter: require meaningful EMA separation relative to volatility
   const emaSeparation = Math.abs(fastEma - slowEma);
-  const minSeparation = atr * 0.15;
-  if (emaSeparation < minSeparation) return { type: "HOLD", reason: "EMA separation too weak for reliable trend" };
-  
-  if (fastEma > slowEma && rsi < 70) {
-    if (ctx.activeSellExists) return { type: "HOLD", reason: "BUY blocked: opposite SELL lock active" };
-    return { type: "BUY", reason: `EMA Golden Cross (${ctx.fastEma.toFixed(2)} > ${ctx.slowEma.toFixed(2)}, sep ${emaSeparation.toFixed(2)}). RSI: ${rsi.toFixed(1)}`, confidence: 0.75 };
+  if (emaSeparation < 0.00001 && Math.abs(velocity) < 0.0001) {
+    return { type: "HOLD", reason: "Market flat - awaiting directional momentum" };
   }
-  if (fastEma < slowEma && rsi > 30) {
+  
+  if (fastEma >= slowEma && rsi < 75) {
+    if (ctx.activeSellExists) return { type: "HOLD", reason: "BUY blocked: opposite SELL lock active" };
+    return {
+      type: "BUY",
+      reason: `Trend Following Alignment: Fast EMA (${fastEma.toFixed(2)}) >= Slow EMA (${slowEma.toFixed(2)}), RSI: ${rsi.toFixed(1)}${velocity > 0 ? `, Speed: +${velocity.toFixed(3)}` : ""}`,
+      confidence: 0.8
+    };
+  }
+  if (fastEma <= slowEma && rsi > 25) {
     if (ctx.activeBuyExists) return { type: "HOLD", reason: "SELL blocked: opposite BUY lock active" };
-    return { type: "SELL", reason: `EMA Death Cross (${ctx.fastEma.toFixed(2)} < ${ctx.slowEma.toFixed(2)}, sep ${emaSeparation.toFixed(2)}). RSI: ${rsi.toFixed(1)}`, confidence: 0.75 };
+    return {
+      type: "SELL",
+      reason: `Trend Following Alignment: Fast EMA (${fastEma.toFixed(2)}) <= Slow EMA (${slowEma.toFixed(2)}), RSI: ${rsi.toFixed(1)}${velocity < 0 ? `, Speed: ${velocity.toFixed(3)}` : ""}`,
+      confidence: 0.8
+    };
   }
   return { type: "HOLD", reason: "No trend signal" };
 }

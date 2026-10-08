@@ -57,7 +57,17 @@ async function startServer() {
     }
   }, 3600000);
 
-  registerEaRoutes(app, store.getFullStatusPayload.bind(store), () => store.config, store.updateMarket.bind(store), store.getPendingEaCommands.bind(store), store.handleEaConfirmation.bind(store), store.handleEaPositionsReport.bind(store), undefined, store.handleEaLogs.bind(store));
+  registerEaRoutes(
+    app,
+    store.getFullStatusPayload.bind(store),
+    () => store.config,
+    store.updateMarket.bind(store),
+    store.getPendingEaCommands.bind(store),
+    store.handleEaConfirmation.bind(store),
+    store.handleEaPositionsReport.bind(store),
+    store.queueEaConfigUpdate.bind(store),
+    store.handleEaLogs.bind(store)
+  );
   registerMarketRoutes(
     app,
     store.updateMarket.bind(store),
@@ -81,7 +91,20 @@ async function startServer() {
     },
     process.env.SCALARAI_MCP_API_KEY
   );
-  registerTradeRoutes(app, (isActive: boolean) => store.toggleTrading(isActive), () => store.resetStats(), process.env.SCALARAI_MCP_API_KEY);
+  registerTradeRoutes(
+    app,
+    {
+      toggleTrade: (isActive: boolean) => store.toggleTrading(isActive),
+      resetStats: () => store.resetStats(),
+      getTrades: () => store.trades,
+      placeTrade: store.placeTrade.bind(store),
+      closeTrade: store.closeTrade.bind(store),
+      closeAllTrades: store.closeAllTrades.bind(store),
+      modifyTrade: store.modifyTrade.bind(store),
+    },
+    undefined,
+    process.env.SCALARAI_MCP_API_KEY
+  );
   registerAiRoutes(app, () => ({
     status: store.getAiKnowledgeBase().totalObservations >= 20 ? "optimized" : "calibrating",
     message: store.getAiKnowledgeBase().totalObservations >= 20 ? "Quantitative baseline calibrated." : "AI is analyzing market speed baseline... Awaiting sufficient expert data stream from MetaTrader 5 terminal.",
