@@ -5,6 +5,7 @@ import {
   Download,
   Terminal,
   Settings,
+  Cpu,
 } from "lucide-react";
 import {
   StrategyMode,
@@ -37,6 +38,7 @@ import {
   Badge,
   Button,
   AppShell,
+  BridgeConsole,
 } from "./components";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useChartData } from "./hooks/useChartData";
@@ -104,7 +106,7 @@ export default function App() {
   const [pingLatency, setPingLatency] = useState<number | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [filterLogLevel, setFilterLogLevel] = useState<string>("ALL");
-  const [currentNavTab, setCurrentNavTab] = useState<"home" | "risk" | "downloads" | "logs" | "settings">("home");
+  const [currentNavTab, setCurrentNavTab] = useState<"home" | "risk" | "bridge" | "downloads" | "logs" | "settings">("home");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showEma, setShowEma] = useState<boolean>(true);
@@ -448,6 +450,7 @@ export default function App() {
           tabs={[
             { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
             { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy },
+            { id: "bridge", label: "MCP Bridge 2", icon: Cpu, badge: "AI Ready" },
             { id: "downloads", label: "Downloads Center", icon: Download },
             { id: "logs", label: "System Logs", icon: Terminal, badge: `${logs.length}` },
             { id: "settings", label: "Settings", icon: Settings },
@@ -628,6 +631,17 @@ export default function App() {
             <div className="max-w-2xl mx-auto w-full">
               <KnowledgeBase strategiesList={strategiesList} />
             </div>
+          </div>
+        )}
+
+        {/* Tab 3: MCP Bridge 2 Console (Zero-Download External AI Control) */}
+        {currentNavTab === "bridge" && (
+          <div className="space-y-6 animate-fade-in">
+            <BridgeConsole
+              activeSymbol={activeSymbol}
+              isBridgeConnected={isBridgeConnected}
+              onTradeActionComplete={fetchStatus}
+            />
           </div>
         )}
 

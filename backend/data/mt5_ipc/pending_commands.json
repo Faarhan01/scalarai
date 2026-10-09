@@ -1,0 +1,350 @@
+[
+  {
+    "id": "1791537506615r3xv0",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "symbol": "Step Index",
+      "type": "BUY",
+      "volume": 0.2,
+      "openPrice": 1250.2,
+      "currentPrice": 1250.2,
+      "sl": 1235.2,
+      "tp": 1280.2,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:18:26.615Z",
+      "comment": "Automated MCP Unit Test Execution",
+      "magic": 20261009
+    },
+    "timestamp": 1791537506615,
+    "status": "pending"
+  },
+  {
+    "id": "17915375066842l3gu",
+    "type": "MODIFY_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "sl": 200,
+      "tp": 500
+    },
+    "timestamp": 1791537506684,
+    "status": "pending"
+  },
+  {
+    "id": "1791537506690e1di2",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791537506690,
+    "status": "pending"
+  },
+  {
+    "id": "1791537506696t75k9",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100002,
+      "symbol": "Step Index",
+      "type": "BUY",
+      "volume": 0.1,
+      "openPrice": 1250.2,
+      "currentPrice": 1250.2,
+      "sl": 1235.2,
+      "tp": 1280.2,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:18:26.696Z",
+      "comment": "ScalarAI Bridge2 (20261009)",
+      "magic": 20261009
+    },
+    "timestamp": 1791537506696,
+    "status": "pending"
+  },
+  {
+    "id": "1791537506696i4jsh",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100003,
+      "symbol": "Step Index",
+      "type": "SELL",
+      "volume": 0.1,
+      "openPrice": 1250,
+      "currentPrice": 1250,
+      "sl": 1265,
+      "tp": 1220,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:18:26.696Z",
+      "comment": "ScalarAI Bridge2 (20261009)",
+      "magic": 20261009
+    },
+    "timestamp": 1791537506696,
+    "status": "pending"
+  },
+  {
+    "id": "1791537506697a5953",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100002,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791537506697,
+    "status": "pending"
+  },
+  {
+    "id": "17915375066982g5x8",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100003,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791537506698,
+    "status": "pending"
+  },
+  {
+    "id": "179153750669824cgv",
+    "type": "CLOSE_ALL",
+    "payload": {
+      "symbol": ""
+    },
+    "timestamp": 1791537506698,
+    "status": "pending"
+  },
+  {
+    "id": "1791537710672vggw2",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "symbol": "Step Index",
+      "type": "BUY",
+      "volume": 0.2,
+      "openPrice": 1250.2,
+      "currentPrice": 1250.2,
+      "sl": 1235.2,
+      "tp": 1280.2,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:21:50.672Z",
+      "comment": "Automated MCP Unit Test Execution",
+      "magic": 20261009
+    },
+    "timestamp": 1791537710672,
+    "status": "pending"
+  },
+  {
+    "id": "17915377106796oz7o",
+    "type": "MODIFY_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "sl": 200,
+      "tp": 500
+    },
+    "timestamp": 1791537710679,
+    "status": "pending"
+  },
+  {
+    "id": "17915377106825xvaz",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791537710682,
+    "status": "pending"
+  },
+  {
+    "id": "1791537710686dmxfv",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100002,
+      "symbol": "Step Index",
+      "type": "BUY",
+      "volume": 0.1,
+      "openPrice": 1250.2,
+      "currentPrice": 1250.2,
+      "sl": 1235.2,
+      "tp": 1280.2,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:21:50.686Z",
+      "comment": "ScalarAI Bridge2 (20261009)",
+      "magic": 20261009
+    },
+    "timestamp": 1791537710686,
+    "status": "pending"
+  },
+  {
+    "id": "1791537710686j6s8a",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100003,
+      "symbol": "Step Index",
+      "type": "SELL",
+      "volume": 0.1,
+      "openPrice": 1250,
+      "currentPrice": 1250,
+      "sl": 1265,
+      "tp": 1220,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:21:50.686Z",
+      "comment": "ScalarAI Bridge2 (20261009)",
+      "magic": 20261009
+    },
+    "timestamp": 1791537710686,
+    "status": "pending"
+  },
+  {
+    "id": "1791537710687ac3m1",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100002,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791537710687,
+    "status": "pending"
+  },
+  {
+    "id": "1791537710687xh2vq",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100003,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791537710687,
+    "status": "pending"
+  },
+  {
+    "id": "1791537710687c3ts8",
+    "type": "CLOSE_ALL",
+    "payload": {
+      "symbol": ""
+    },
+    "timestamp": 1791537710687,
+    "status": "pending"
+  },
+  {
+    "id": "1791538166880dfvbs",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "symbol": "Step Index",
+      "type": "BUY",
+      "volume": 0.2,
+      "openPrice": 1250.2,
+      "currentPrice": 1250.2,
+      "sl": 1235.2,
+      "tp": 1280.2,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:29:26.880Z",
+      "comment": "Automated MCP Unit Test Execution",
+      "magic": 20261009
+    },
+    "timestamp": 1791538166880,
+    "status": "pending"
+  },
+  {
+    "id": "1791538166930utjpm",
+    "type": "MODIFY_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "sl": 200,
+      "tp": 500
+    },
+    "timestamp": 1791538166930,
+    "status": "pending"
+  },
+  {
+    "id": "179153816693594pct",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100001,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791538166935,
+    "status": "pending"
+  },
+  {
+    "id": "1791538166938pfs32",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100002,
+      "symbol": "Step Index",
+      "type": "BUY",
+      "volume": 0.1,
+      "openPrice": 1250.2,
+      "currentPrice": 1250.2,
+      "sl": 1235.2,
+      "tp": 1280.2,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:29:26.938Z",
+      "comment": "ScalarAI Bridge2 (20261009)",
+      "magic": 20261009
+    },
+    "timestamp": 1791538166938,
+    "status": "pending"
+  },
+  {
+    "id": "17915381669394wkp9",
+    "type": "NEW_ORDER",
+    "payload": {
+      "ticket": 100003,
+      "symbol": "Step Index",
+      "type": "SELL",
+      "volume": 0.1,
+      "openPrice": 1250,
+      "currentPrice": 1250,
+      "sl": 1265,
+      "tp": 1220,
+      "slPoints": 150,
+      "tpPoints": 300,
+      "profit": 0,
+      "openTime": "2026-10-09T09:29:26.938Z",
+      "comment": "ScalarAI Bridge2 (20261009)",
+      "magic": 20261009
+    },
+    "timestamp": 1791538166939,
+    "status": "pending"
+  },
+  {
+    "id": "1791538166939f7y3q",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100002,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791538166939,
+    "status": "pending"
+  },
+  {
+    "id": "1791538166940a0kz2",
+    "type": "CLOSE_ORDER",
+    "payload": {
+      "ticket": 100003,
+      "symbol": "Step Index"
+    },
+    "timestamp": 1791538166940,
+    "status": "pending"
+  },
+  {
+    "id": "17915381669402cjg7",
+    "type": "CLOSE_ALL",
+    "payload": {
+      "symbol": ""
+    },
+    "timestamp": 1791538166940,
+    "status": "pending"
+  }
+]

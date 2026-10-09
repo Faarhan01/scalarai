@@ -39,3 +39,4 @@ export { WebRequestTest } from "./settings/WebRequestTest";
 // Downloads & Logs
 export { DownloadsCenter } from "./downloads/DownloadsCenter";
 export { LogsViewer } from "./logs/LogsViewer";
+export { BridgeConsole } from "./bridge/BridgeConsole";

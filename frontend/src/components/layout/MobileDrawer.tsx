@@ -9,6 +9,7 @@ import {
   Wifi,
   WifiOff,
   Sliders,
+  Cpu,
 } from "lucide-react";
 import type { TradeConfig, SystemLog, EAConnectionDetails } from "../../types";
 
@@ -158,6 +159,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
           {[
             { id: "home", label: "Live Trading", icon: Home, badge: `$${currentPrice.toFixed(1)}` },
             { id: "risk", label: "Risk & Strategy", icon: Sliders, badge: config.selectedStrategy },
+            { id: "bridge", label: "MCP Bridge 2", icon: Cpu, badge: "AI Ready" },
             { id: "downloads", label: "Downloads Center", icon: Download },
             { id: "logs", label: "System Logs", icon: Terminal, badge: `${logs.length}` },
             { id: "settings", label: "Settings", icon: Settings },

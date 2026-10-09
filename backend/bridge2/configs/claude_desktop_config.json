@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "scalarai-mt5-bridge": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\YOUR_USER\\ScalarAI\\backend\\bridge2\\index.js",
+        "--mcp"
+      ],
+      "env": {
+        "SCALARAI_SITE_URL": "http://127.0.0.1:3000",
+        "SCALARAI_MCP_API_KEY": "",
+        "MT5_PATH": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+        "DEFAULT_SYMBOL": "Step Index",
+        "DEFAULT_LOT_SIZE": "0.1",
+        "DEFAULT_SL_POINTS": "150",
+        "DEFAULT_TP_POINTS": "300"
+      }
+    }
+  }
+}

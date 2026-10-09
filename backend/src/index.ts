@@ -16,6 +16,7 @@ import { registerMcpRoute } from "./routes/mcp";
 import { registerStatusRoute } from "./routes/status";
 import { registerHealthRoutes } from "./routes/health";
 import { registerStrategyRoutes } from "./routes/strategies";
+import { registerBridge2Routes } from "./routes/bridge2";
 import { createBridgeServer } from "./websockets/bridge";
 import { createDashboardServer } from "./websockets/dashboard";
 import { AppStore } from "./services/app-store";
@@ -126,6 +127,7 @@ async function startServer() {
   );
   registerHealthRoutes(app);
   registerStrategyRoutes(app);
+  registerBridge2Routes(app, store.buildMcpContext(), process.env.SCALARAI_MCP_API_KEY);
 
   app.all("/api/*", (req: Request, res: Response) => {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });

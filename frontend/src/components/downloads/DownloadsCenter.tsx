@@ -270,7 +270,7 @@ export const DownloadsCenter: React.FC<DownloadsCenterProps> = ({
           <div className="card-panel-header">
             <div className="card-panel-title">
               <Terminal className="w-4 h-4 text-indigo-400" />
-              <span>Free Node.js Bridge</span>
+              <span>Node.js Bridge 2 (MCP Enabled)</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${isBridgeConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}></span>
@@ -281,7 +281,7 @@ export const DownloadsCenter: React.FC<DownloadsCenterProps> = ({
           </div>
 
           <p className="text-xs text-slate-300 leading-relaxed font-sans">
-            Local standalone client polling the server for pending trades and routing them seamlessly using native command-line executor processes. No cloud tokens or subscriptions are required!
+            Production Node.js Bridge 2 with native <strong>Model Context Protocol (MCP)</strong> support. Allows any external AI outside this website (Claude Desktop, Cursor, Windsurf, or custom LLM bots) to monitor positions, place trades, and control MT5 directly.
           </p>
 
           <button
@@ -290,14 +290,15 @@ export const DownloadsCenter: React.FC<DownloadsCenterProps> = ({
             className="btn btn-secondary w-full py-3 text-indigo-300 hover:text-white"
           >
             <Download className="w-4 h-4 text-indigo-300" />
-            <span>Download Free Node.js Bridge</span>
+            <span>Download Node.js Bridge 2 + MCP Config</span>
           </button>
 
           <div className="text-[10px] text-slate-400 font-mono space-y-1 bg-slate-900/90 p-3 rounded-xl border border-slate-700/60">
-            <div className="text-indigo-400 font-bold uppercase mb-1">Bridge Requirements:</div>
-            <div>• Node.js &gt;= 18 (LTS)</div>
-            <div>• npm install axios</div>
-            <div>• No subscriptions or secret keys needed</div>
+            <div className="text-indigo-400 font-bold uppercase mb-1">Bridge 2 Features:</div>
+            <div>• Model Context Protocol (MCP 2024-11-05)</div>
+            <div>• Claude Desktop & Cursor auto-config included</div>
+            <div>• 15 tools: place, close, modify, quote, candles</div>
+            <div>• Zero external dependencies required (Node &gt;= 18)</div>
           </div>
         </div>
       </div>

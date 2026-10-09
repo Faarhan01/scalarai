@@ -1,33 +1,24 @@
-import { useCallback } from "react";
-
-export interface BridgeDownloadConfig {
-  appEndpoint?: string;
-  mt5Path?: string;
-}
-
-export function useDownloadBridge(config: BridgeDownloadConfig) {
-  const downloadNodejsBridge = useCallback(() => {
-    const origin = config.appEndpoint || getAppBaseUrl();
-
-    const jsBridgeScript = `/**
+#!/usr/bin/env node
+/**
  * =========================================================================
  * 🤖 SCALARAI MT5 BRIDGE 2 (STANDALONE NODE.JS + MCP SERVER) 🤖
  * Version: 2.0.0
- * Protocol: Model Context Protocol (MCP 2024-11-05 JSON-RPC 2.0)
+ * Standard: Model Context Protocol (MCP 2024-11-05 JSON-RPC 2.0)
  * Works out-of-the-box with Claude Desktop, Cursor, Windsurf, or custom AI.
- * Target Platform URL: ${origin}
+ * Zero external dependencies required. Built on standard Node.js libraries.
  * =========================================================================
  */
-const http = require("http");
-const https = require("https");
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const readline = require("readline");
+import http from "http";
+import https from "https";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import readline from "readline";
 
+// --- Configuration ---
 const args = process.argv.slice(2);
-let siteUrl = process.env.SCALARAI_SITE_URL || "${origin}";
-let mt5Path = process.env.MT5_PATH || "${config.mt5Path || ""}";
+let siteUrl = process.env.SCALARAI_SITE_URL || process.env.SCALARAI_URL || "http://127.0.0.1:3000";
+let mt5Path = process.env.MT5_PATH || "";
 let defaultSymbol = process.env.DEFAULT_SYMBOL || "Step Index";
 let defaultLot = parseFloat(process.env.DEFAULT_LOT_SIZE || "0.1");
 let isHttpMode = args.includes("--http");
@@ -39,8 +30,9 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === "--mt5-path" && args[i + 1]) mt5Path = args[++i];
   if (args[i] === "--port" && args[i + 1]) httpPort = parseInt(args[++i], 10);
 }
-siteUrl = siteUrl.replace(/\\/$/, "");
+siteUrl = siteUrl.replace(/\/$/, "");
 
+// --- Auto-discover MT5 Terminal ---
 function resolveTerminalPath() {
   if (mt5Path && fs.existsSync(mt5Path)) return mt5Path;
   const candidates = [
@@ -58,6 +50,7 @@ function resolveTerminalPath() {
 }
 const resolvedTerminal = resolveTerminalPath();
 
+// --- In-Memory State & Simulation Fallback ---
 const positions = new Map();
 let nextTicket = 100001;
 const account = {
@@ -79,6 +72,7 @@ function recalculateEquity() {
   account.freeMargin = Number((account.equity - account.margin).toFixed(2));
 }
 
+// --- MT5 Execution ---
 async function executeMt5Trade({ type, symbol, volume, sl, tp, comment }) {
   const sym = symbol || defaultSymbol;
   const action = (type || "BUY").toUpperCase();
@@ -110,7 +104,7 @@ async function executeMt5Trade({ type, symbol, volume, sl, tp, comment }) {
 
   if (resolvedTerminal) {
     try {
-      const child = spawn(resolvedTerminal, [\`/cmd:trade,action=\${action},symbol=\${sym},volume=\${lot}\`], { detached: true, stdio: "ignore" });
+      const child = spawn(resolvedTerminal, [`/cmd:trade,action=${action},symbol=${sym},volume=${lot}`], { detached: true, stdio: "ignore" });
       child.unref();
     } catch {}
   }
@@ -120,12 +114,12 @@ async function executeMt5Trade({ type, symbol, volume, sl, tp, comment }) {
 
 async function closeMt5Trade(ticket) {
   const t = Number(ticket);
-  if (!positions.has(t)) return { success: false, message: \`Ticket #\${ticket} not found\` };
+  if (!positions.has(t)) return { success: false, message: `Ticket #${ticket} not found` };
   const pos = positions.get(t);
   positions.delete(t);
   account.balance += pos.profit;
   recalculateEquity();
-  return { success: true, ticket: t, message: \`Closed position #\${t}\` };
+  return { success: true, ticket: t, message: `Closed position #${t}` };
 }
 
 async function closeAllMt5Trades(symbol) {
@@ -137,13 +131,14 @@ async function closeAllMt5Trades(symbol) {
     }
   }
   recalculateEquity();
-  return { success: true, closedCount: count, message: \`Liquidated \${count} positions\` };
+  return { success: true, closedCount: count, message: `Liquidated ${count} positions` };
 }
 
+// --- Platform HTTP Requests ---
 function siteRequest(method, endpoint, body = null) {
   return new Promise((resolve) => {
     try {
-      const fullUrl = new URL(\`\${siteUrl}\${endpoint}\`);
+      const fullUrl = new URL(`${siteUrl}${endpoint}`);
       const client = fullUrl.protocol === "https:" ? https : http;
       const req = client.request(
         {
@@ -179,6 +174,7 @@ function siteRequest(method, endpoint, body = null) {
   });
 }
 
+// --- MCP Tools Catalog ---
 const TOOLS = [
   {
     name: "mt5_get_status",
@@ -195,7 +191,9 @@ const TOOLS = [
     description: "List all currently open trading positions in MetaTrader 5 (tickets, symbols, lots, SL/TP, floating profit).",
     inputSchema: {
       type: "object",
-      properties: { symbol: { type: "string", description: "Optional symbol filter" } },
+      properties: {
+        symbol: { type: "string", description: "Optional symbol filter" },
+      },
       required: [],
     },
   },
@@ -206,8 +204,8 @@ const TOOLS = [
       type: "object",
       properties: {
         type: { type: "string", enum: ["BUY", "SELL"], description: "BUY or SELL" },
-        symbol: { type: "string", description: "Symbol name" },
-        volume: { type: "number", description: "Lot size" },
+        symbol: { type: "string", description: "Symbol name (e.g. 'Step Index')" },
+        volume: { type: "number", description: "Lot size (e.g. 0.1)" },
         sl: { type: "number", description: "Stop Loss in points" },
         tp: { type: "number", description: "Take Profit in points" },
         reason: { type: "string", description: "AI strategy rationale" },
@@ -280,7 +278,7 @@ const TOOLS = [
   },
 ];
 
-async function handleToolCall(name, toolArgs) {
+async function handleToolCall(name, args) {
   switch (name) {
     case "mt5_get_status": {
       const siteHealth = await siteRequest("GET", "/api/health");
@@ -303,68 +301,69 @@ async function handleToolCall(name, toolArgs) {
     case "mt5_get_positions": {
       recalculateEquity();
       const list = Array.from(positions.values());
-      const filtered = toolArgs.symbol ? list.filter((p) => p.symbol.toLowerCase() === toolArgs.symbol.toLowerCase()) : list;
+      const filtered = args.symbol ? list.filter((p) => p.symbol.toLowerCase() === args.symbol.toLowerCase()) : list;
       return { count: filtered.length, positions: filtered };
     }
     case "mt5_place_trade": {
-      const mt5Res = await executeMt5Trade(toolArgs);
+      const mt5Res = await executeMt5Trade(args);
       const siteRes = await siteRequest("POST", "/api/trades", {
-        type: toolArgs.type,
-        symbol: toolArgs.symbol || defaultSymbol,
-        lotSize: toolArgs.volume || defaultLot,
-        sl: toolArgs.sl,
-        tp: toolArgs.tp,
-        reason: toolArgs.reason || "MCP AI Signal",
+        type: args.type,
+        symbol: args.symbol || defaultSymbol,
+        lotSize: args.volume || defaultLot,
+        sl: args.sl,
+        tp: args.tp,
+        reason: args.reason || "MCP AI Signal",
       });
       return { status: "executed", mt5: mt5Res, scalarAi: siteRes };
     }
     case "mt5_close_trade": {
-      const mt5Res = await closeMt5Trade(toolArgs.ticket);
-      const siteRes = await siteRequest("POST", \`/api/trades/\${toolArgs.ticket}/close\`);
-      return { status: "closed", ticket: toolArgs.ticket, mt5: mt5Res, scalarAi: siteRes };
+      const mt5Res = await closeMt5Trade(args.ticket);
+      const siteRes = await siteRequest("POST", `/api/trades/${args.ticket}/close`);
+      return { status: "closed", ticket: args.ticket, mt5: mt5Res, scalarAi: siteRes };
     }
     case "mt5_close_all_trades": {
-      const mt5Res = await closeAllMt5Trades(toolArgs.symbol);
-      const siteRes = await siteRequest("POST", "/api/trades/close-all", toolArgs.symbol ? { symbol: toolArgs.symbol } : {});
+      const mt5Res = await closeAllMt5Trades(args.symbol);
+      const siteRes = await siteRequest("POST", "/api/trades/close-all", args.symbol ? { symbol: args.symbol } : {});
       return { status: "liquidated", mt5: mt5Res, scalarAi: siteRes };
     }
     case "mt5_modify_trade": {
-      const t = Number(toolArgs.ticket);
+      const t = Number(args.ticket);
       if (positions.has(t)) {
         const p = positions.get(t);
-        if (toolArgs.sl !== undefined) p.slPoints = Number(toolArgs.sl);
-        if (toolArgs.tp !== undefined) p.tpPoints = Number(toolArgs.tp);
+        if (args.sl !== undefined) p.slPoints = Number(args.sl);
+        if (args.tp !== undefined) p.tpPoints = Number(args.tp);
       }
-      const siteRes = await siteRequest("POST", \`/api/trades/\${toolArgs.ticket}/modify\`, { sl: toolArgs.sl, tp: toolArgs.tp });
-      return { status: "modified", ticket: toolArgs.ticket, scalarAi: siteRes };
+      const siteRes = await siteRequest("POST", `/api/trades/${args.ticket}/modify`, { sl: args.sl, tp: args.tp });
+      return { status: "modified", ticket: args.ticket, scalarAi: siteRes };
     }
     case "mt5_get_market_price": {
       const status = await siteRequest("GET", "/api/status");
-      const sym = toolArgs.symbol || defaultSymbol;
+      const sym = args.symbol || defaultSymbol;
       const price = status.currentPrice || 1250.0;
       return { symbol: sym, price, bid: price - 0.1, ask: price + 0.1, spread: 0.2, time: new Date().toISOString() };
     }
     case "mt5_get_candles": {
-      return siteRequest("GET", \`/api/market/candles?symbol=\${encodeURIComponent(toolArgs.symbol || defaultSymbol)}&limit=\${toolArgs.limit || 50}\`);
+      return siteRequest("GET", `/api/market/candles?symbol=${encodeURIComponent(args.symbol || defaultSymbol)}&limit=${args.limit || 50}`);
     }
     case "scalarai_get_system_status": {
       return siteRequest("GET", "/api/status");
     }
     case "scalarai_toggle_automated_trading": {
-      return siteRequest("POST", "/api/settings", { isActive: !!toolArgs.isActive });
+      return siteRequest("POST", "/api/settings", { isActive: !!args.isActive });
     }
     default:
-      return { error: \`Tool \${name} not found\` };
+      return { error: `Tool ${name} not found` };
   }
 }
 
+// --- Mode Execution ---
 if (isHttpMode) {
   const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     if (req.method === "OPTIONS") return res.writeHead(204).end();
 
-    const url = new URL(req.url, \`http://\${req.headers.host}\`);
+    const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === "/mcp" && req.method === "POST") {
       let b = "";
       req.on("data", (c) => (b += c));
@@ -395,15 +394,16 @@ if (isHttpMode) {
     res.end(JSON.stringify({ status: "ok", bridge: "scalarai-mt5-bridge2", mcp: "/mcp" }));
   });
   server.listen(httpPort, () => {
-    console.error(\`[BRIDGE2-HTTP] Server running on http://localhost:\${httpPort} (MCP at /mcp)\`);
+    console.error(`[BRIDGE2-HTTP] Server running on http://localhost:${httpPort} (MCP at /mcp)`);
   });
 } else if (isDaemonMode) {
-  console.error(\`[BRIDGE2-DAEMON] Polling and sync started on \${siteUrl}...\`);
+  console.error(`[BRIDGE2-DAEMON] Polling and sync started on ${siteUrl}...`);
   setInterval(async () => {
     const list = Array.from(positions.values());
     if (list.length > 0) await siteRequest("POST", "/api/ea/positions", { positions: list });
   }, 3000);
 } else {
+  // Stdio MCP mode for Claude Desktop / Cursor
   console.error("[MCP-BRIDGE2] Stdio server active. Listening for external AI requests...");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
   rl.on("line", async (line) => {
@@ -411,97 +411,17 @@ if (isHttpMode) {
     try {
       const msg = JSON.parse(line.trim());
       if (msg.method === "initialize") {
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "scalarai-mt5-bridge2", version: "2.0.0" } } }) + "\\n");
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "scalarai-mt5-bridge2", version: "2.0.0" } } }) + "\n");
       } else if (msg.method === "tools/list") {
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { tools: TOOLS } }) + "\\n");
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { tools: TOOLS } }) + "\n");
       } else if (msg.method === "tools/call") {
         const data = await handleToolCall(msg.params?.name, msg.params?.arguments || {});
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] } }) + "\\n");
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] } }) + "\n");
       } else if (msg.method === "ping") {
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }) + "\\n");
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }) + "\n");
       }
     } catch (err) {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: err.message } }) + "\\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: err.message } }) + "\n");
     }
   });
-}
-`;
-
-    const packageJsonContent = `{
-  "name": "scalarai-mt5-bridge2",
-  "version": "2.0.0",
-  "description": "ScalarAI MetaTrader 5 Bridge with MCP AI Control",
-  "main": "mt5_bridge2_mcp.js",
-  "scripts": {
-    "start": "node mt5_bridge2_mcp.js",
-    "mcp": "node mt5_bridge2_mcp.js",
-    "http": "node mt5_bridge2_mcp.js --http --port 5100",
-    "daemon": "node mt5_bridge2_mcp.js --daemon"
-  }
-}
-`;
-
-    const claudeConfigContent = `{
-  "mcpServers": {
-    "scalarai-mt5": {
-      "command": "node",
-      "args": ["mt5_bridge2_mcp.js"],
-      "env": {
-        "SCALARAI_SITE_URL": "${origin}",
-        "MT5_PATH": "${config.mt5Path || "terminal64.exe"}"
-      }
-    }
-  }
-}
-`;
-
-    const jsBlob = new Blob([jsBridgeScript], { type: "text/plain;charset=utf-8" });
-    const jsUrl = URL.createObjectURL(jsBlob);
-    const jsLink = document.createElement("a");
-    jsLink.href = jsUrl;
-    jsLink.setAttribute("download", "mt5_bridge2_mcp.js");
-    document.body.appendChild(jsLink);
-    jsLink.click();
-    document.body.removeChild(jsLink);
-    URL.revokeObjectURL(jsUrl);
-
-    setTimeout(() => {
-      const pkgBlob = new Blob([packageJsonContent], { type: "application/json;charset=utf-8" });
-      const pkgUrl = URL.createObjectURL(pkgBlob);
-      const pkgLink = document.createElement("a");
-      pkgLink.href = pkgUrl;
-      pkgLink.setAttribute("download", "package.json");
-      document.body.appendChild(pkgLink);
-      pkgLink.click();
-      document.body.removeChild(pkgLink);
-      URL.revokeObjectURL(pkgUrl);
-    }, 200);
-
-    setTimeout(() => {
-      const cfgBlob = new Blob([claudeConfigContent], { type: "application/json;charset=utf-8" });
-      const cfgUrl = URL.createObjectURL(cfgBlob);
-      const cfgLink = document.createElement("a");
-      cfgLink.href = cfgUrl;
-      cfgLink.setAttribute("download", "claude_desktop_config.json");
-      document.body.appendChild(cfgLink);
-      cfgLink.click();
-      document.body.removeChild(cfgLink);
-      URL.revokeObjectURL(cfgUrl);
-    }, 400);
-  }, [config.appEndpoint, config.mt5Path]);
-
-  return { downloadNodejsBridge };
-}
-
-function getAppBaseUrl(): string {
-  const protocol = window.location.protocol;
-  const host = window.location.host;
-  const appEndpoint = (document.querySelector('meta[name="scalarai-app-endpoint"]') as HTMLMetaElement | null)?.content;
-  if (appEndpoint && appEndpoint.length > 0) return appEndpoint;
-  const parts = host.split(":");
-  if (parts[0] === "localhost" || parts[0] === "127.0.0.1") {
-    const port = parts[1] || "3000";
-    return `${protocol}//localhost:${port}`;
-  }
-  return `${protocol}//${host}`;
 }

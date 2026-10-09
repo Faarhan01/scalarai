@@ -1,0 +1,33 @@
+{
+  "name": "scalarai-mt5-bridge2",
+  "version": "2.0.0",
+  "description": "Production Node.js Bridge for MetaTrader 5 with Model Context Protocol (MCP) support for external AI agents",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "scalarai-bridge2": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "mcp": "node index.js --mcp",
+    "mcp:stdio": "node index.js --mcp",
+    "mcp:http": "node index.js --http --port 5100",
+    "daemon": "node index.js --daemon",
+    "test": "node test.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "metatrader5",
+    "mt5",
+    "algorithmic-trading",
+    "ai-agent",
+    "claude-desktop",
+    "cursor"
+  ],
+  "author": "Scalar AI",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
