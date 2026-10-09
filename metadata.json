@@ -1,0 +1,9 @@
+{
+  "name": "Scalar AI - Multi-Asset Trading Platform & MetaTrader 5 Engine",
+  "description": "Algorithmic trading platform for MetaTrader 5 featuring trend-following execution, automated risk controls, dynamic SL/TP & trailing stop management, real-time telemetry streaming, and MCP AI agent control.",
+  "prompt": "Full-stack trading terminal and MT5 EA generator with real-time telemetry, trend following strategies, and MCP agent controls.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
