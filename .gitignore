@@ -1,0 +1,29 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+backend/data/*.sqlite-shm
+backend/data/*.sqlite-wal
+backend/data/scalarai.sqlite
+
+# Preserve gateway and ea folders
+!gateway/
+!gateway/**
+!ea/
+!ea/**
+
+# Python bytecode from backend/mt5
+__pycache__/
+*.py[cod]
+
+# Local backups made before clearing or replacing data files
+*.bak
+
+# Artifacts strategyforge.py writes at run time
+backend/mt5/tools/run_ini/
+backend/mt5/tools/out/
+backend/mt5/tools/reports/

@@ -1,0 +1,9 @@
+{
+  "name": "Trader site",
+  "description": "A website for making trades",
+  "prompt": "Full-stack trading terminal and MT5 EA generator with real-time telemetry, trend following strategies, and MCP agent controls.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
