@@ -21,6 +21,8 @@ import {
   StrategyTemplateRow,
   StrategyVersionRow,
   StrategySymbolPerformanceRow,
+  PatternResultRow,
+  IndicatorLibraryRow,
 } from "../types";
 
 export class ScalarAiDb {
@@ -458,7 +460,7 @@ export class ScalarAiDb {
     const logCount = (this.db.prepare(`SELECT COUNT(*) as count FROM system_logs`).get() as { count: number }).count;
     const tradeCount = (this.db.prepare(`SELECT COUNT(*) as count FROM trades`).get() as { count: number }).count;
     
-    const dbPath = process.cwd() + "/backend/data/scalarai.sqlite";
+    const dbPath = process.cwd() + "/backend/src/db/scalarai.sqlite";
     const fs = require("fs");
     const dbSizeBytes = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
     
@@ -468,35 +470,62 @@ export class ScalarAiDb {
   // Market candles
   insertCandle(candle: MarketCandleRow): void {
     this.db.prepare(
-      `INSERT INTO market_candles (symbol, time, open, high, low, close, volume, direction, minute_bucket) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO market_candles (symbol, timeframe, time, open, high, low, close, volume, spread, direction, minute_bucket)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(symbol, timeframe, time) DO UPDATE SET
+         open=excluded.open, high=excluded.high, low=excluded.low,
+         close=excluded.close, volume=excluded.volume, spread=excluded.spread,
+         direction=excluded.direction, minute_bucket=excluded.minute_bucket`
     ).run(
       candle.symbol,
+      candle.timeframe || "M1",
       candle.time,
       candle.open,
       candle.high,
       candle.low,
       candle.close,
       candle.volume ?? null,
+      candle.spread ?? 0,
       candle.direction,
       candle.minute_bucket
     );
   }
 
+  /**
+   * Batch insert as an UPSERT.
+   *
+   * This was a plain INSERT with no uniqueness behind it, so ingesting the same
+   * history twice appended a second copy of every bar. The knowledgebase then
+   * scanned each bar repeatedly: pattern occurrences were counted multiple
+   * times and the forward-return sample held repeated values. Measured on
+   * XAGUSD, one symbol had 78 copies of every bar.
+   *
+   * Upserting also fixes stale snapshots. A bar that was still forming when it
+   * was ingested keeps its partial close and volume; re-ingesting replaces it
+   * with the settled values.
+   */
   insertCandlesBatch(candles: MarketCandleRow[]): void {
     if (!candles || candles.length === 0) return;
     const stmt = this.db.prepare(
-      `INSERT INTO market_candles (symbol, time, open, high, low, close, volume, direction, minute_bucket) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO market_candles (symbol, timeframe, time, open, high, low, close, volume, spread, direction, minute_bucket)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(symbol, timeframe, time) DO UPDATE SET
+         open=excluded.open, high=excluded.high, low=excluded.low,
+         close=excluded.close, volume=excluded.volume, spread=excluded.spread,
+         direction=excluded.direction, minute_bucket=excluded.minute_bucket`
     );
     const insertMany = this.db.transaction((items: MarketCandleRow[]) => {
       for (const item of items) {
         stmt.run(
           item.symbol,
+          item.timeframe || "M1",
           item.time,
           item.open,
           item.high,
           item.low,
           item.close,
           item.volume ?? null,
+          item.spread ?? 0,
           item.direction,
           item.minute_bucket
         );
@@ -519,9 +548,21 @@ export class ScalarAiDb {
     }
   }
 
-  getCandles(symbol: string, from?: number, to?: number, limit = 1000): MarketCandleRow[] {
+  /**
+   * Candles for a symbol, oldest first.
+   *
+   * `timeframe` narrows to one series. The table holds M1, M15 and H1 bars for
+   * the same symbol, so a caller that wants to analyse M15 must say so --
+   * otherwise it gets a mix of three bar sizes and every statistic computed
+   * over it is meaningless.
+   */
+  getCandles(symbol: string, from?: number, to?: number, limit = 1000, timeframe?: string): MarketCandleRow[] {
     let query = `SELECT * FROM market_candles WHERE symbol = ?`;
     const params: unknown[] = [symbol];
+    if (timeframe) {
+      query += ` AND timeframe = ?`;
+      params.push(timeframe);
+    }
     if (from !== undefined) {
       query += ` AND time >= ?`;
       params.push(from);
@@ -533,6 +574,29 @@ export class ScalarAiDb {
     query += ` ORDER BY time ASC LIMIT ?`;
     params.push(Math.min(limit, 10000));
     return this.db.prepare(query).all(...params) as MarketCandleRow[];
+  }
+
+  /** Which timeframes a symbol has candles for. */
+  getCandleTimeframes(symbol: string): string[] {
+    const rows = this.db.prepare(
+      `SELECT DISTINCT timeframe FROM market_candles WHERE symbol = ? ORDER BY timeframe`
+    ).all(symbol) as Array<{ timeframe: string }>;
+    return rows.map((r) => r.timeframe);
+  }
+
+  /** Median spread in points across a symbol's candles. */
+  getMedianSpread(symbol: string, timeframe?: string): number {
+    let sql = `SELECT spread FROM market_candles WHERE symbol = ? AND spread > 0`;
+    const params: unknown[] = [symbol];
+    if (timeframe) {
+      sql += ` AND timeframe = ?`;
+      params.push(timeframe);
+    }
+    const spreads = (this.db.prepare(sql).all(...params) as Array<{ spread: number }>)
+      .map((r) => r.spread)
+      .sort((a, b) => a - b);
+    if (spreads.length === 0) return 0;
+    return spreads[Math.floor(spreads.length / 2)];
   }
 
   getLatestCandle(symbol: string): MarketCandleRow | undefined {
@@ -715,7 +779,76 @@ export class ScalarAiDb {
     return this.db.prepare(`SELECT * FROM strategy_symbol_performance WHERE strategy_id = ?`).all(strategyId) as StrategySymbolPerformanceRow[];
   }
 
-  // Database instance accessor
+  // ── Pattern results ──────────────────────────────────────────────────
+  insertPatternResult(result: PatternResultRow): void {
+    this.db.prepare(
+      `INSERT INTO pattern_results (id, symbol, timeframe, pattern_name, pattern_category, occurrences, forward_return_mean, forward_return_sd, t_statistic, p_value, win_rate, expectancy, net_after_cost, spread_points, verdict, null_comparison, split_half_agree, split_half_t1, split_half_t2, min_trades_threshold, bars_analyzed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      result.id, result.symbol, result.timeframe, result.pattern_name,
+      result.pattern_category, result.occurrences, result.forward_return_mean,
+      result.forward_return_sd, result.t_statistic, result.p_value,
+      result.win_rate, result.expectancy, result.net_after_cost,
+      result.spread_points, result.verdict, result.null_comparison,
+      result.split_half_agree, result.split_half_t1 ?? null,
+      result.split_half_t2 ?? null, result.min_trades_threshold,
+      result.bars_analyzed
+    );
+  }
+
+  getPatternResults(symbol?: string, timeframe?: string, verdict?: string, limit = 50): PatternResultRow[] {
+    let query = `SELECT * FROM pattern_results`;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (symbol) { clauses.push(`symbol = ?`); params.push(symbol); }
+    if (timeframe) { clauses.push(`timeframe = ?`); params.push(timeframe); }
+    if (verdict) { clauses.push(`verdict = ?`); params.push(verdict); }
+    if (clauses.length > 0) query += ` WHERE ${clauses.join(' AND ')}`;
+    query += ` ORDER BY created_at DESC LIMIT ?`;
+    params.push(Math.min(limit, 200));
+    return this.db.prepare(query).all(...params) as PatternResultRow[];
+  }
+
+  getPatternResultById(id: string): PatternResultRow | undefined {
+    return this.db.prepare(`SELECT * FROM pattern_results WHERE id = ?`).get(id) as PatternResultRow | undefined;
+  }
+
+  deletePatternResult(id: string): void {
+    this.db.prepare(`DELETE FROM pattern_results WHERE id = ?`).run(id);
+  }
+
+  // ── Indicator library ────────────────────────────────────────────────
+  insertIndicatorLibrary(indicator: IndicatorLibraryRow): void {
+    this.db.prepare(
+      `INSERT INTO indicator_library (id, name, category, formula, is_builtin) VALUES (?, ?, ?, ?, ?)`
+    ).run(indicator.id, indicator.name, indicator.category, indicator.formula, indicator.is_builtin);
+  }
+
+  getAllIndicatorLibrary(): IndicatorLibraryRow[] {
+    return this.db.prepare(`SELECT * FROM indicator_library ORDER BY created_at DESC`).all() as IndicatorLibraryRow[];
+  }
+
+  getIndicatorLibraryById(id: string): IndicatorLibraryRow | undefined {
+    return this.db.prepare(`SELECT * FROM indicator_library WHERE id = ?`).get(id) as IndicatorLibraryRow | undefined;
+  }
+
+  upsertIndicatorLibrary(indicator: IndicatorLibraryRow): void {
+    this.db.prepare(
+      `INSERT INTO indicator_library (id, name, category, formula, is_builtin) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, category = excluded.category, formula = excluded.formula`
+    ).run(indicator.id, indicator.name, indicator.category, indicator.formula, indicator.is_builtin);
+  }
+
+  // ── Pattern → strategy links ─────────────────────────────────────────
+  insertPatternStrategyLink(link: { id: string; pattern_result_id: string; strategy_id: string; weight: number }): void {
+    this.db.prepare(
+      `INSERT INTO pattern_strategy_links (id, pattern_result_id, strategy_id, weight) VALUES (?, ?, ?, ?)`
+    ).run(link.id, link.pattern_result_id, link.strategy_id, link.weight);
+  }
+
+  getPatternLinksForStrategy(strategyId: string): Array<{ id: string; pattern_result_id: string; strategy_id: string; weight: number }> {
+    return this.db.prepare(`SELECT * FROM pattern_strategy_links WHERE strategy_id = ?`).all(strategyId) as any[];
+  }
+
+  // ── Database instance accessor ────────────────────────────────────────
   getDbInstance(): InstanceType<typeof Database> {
     return this.db;
   }

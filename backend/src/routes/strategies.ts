@@ -1,7 +1,7 @@
 import { Request, Response, Application } from "express";
 import { scalarAiDb } from "../db";
 import { StrategyMode, StrategyRow, TradeRecord } from "../types";
-import { STRATEGY_TEMPLATES, getStrategyTemplateById } from "../services/strategy-templates";
+import { STRATEGY_TEMPLATES, getStrategyTemplateById } from "../knowledgebase/strategies/templates";
 
 export function registerStrategyRoutes(app: Application) {
   app.get("/api/strategies", (req: Request, res: Response) => {

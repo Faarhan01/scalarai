@@ -242,6 +242,72 @@ CREATE INDEX IF NOT EXISTS idx_backtest_results_symbol ON backtest_results(symbo
 CREATE INDEX IF NOT EXISTS idx_strategy_versions_strategy ON strategy_versions(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_strategy_symbol_performance ON strategy_symbol_performance(strategy_id, symbol);
 
+-- ── pattern results ──────────────────────────────────────────────────────
+-- Every pattern test run is recorded here with statistical verdict.
+-- This replaces hardcoded confidence scores with measured edge.
+
+CREATE TABLE IF NOT EXISTS pattern_results (
+  id TEXT PRIMARY KEY,
+  symbol TEXT NOT NULL DEFAULT 'Step Index',
+  timeframe TEXT NOT NULL DEFAULT 'M15',
+  pattern_name TEXT NOT NULL,
+  pattern_category TEXT NOT NULL DEFAULT 'candlestick',
+  occurrences INTEGER NOT NULL DEFAULT 0,
+  forward_return_mean REAL NOT NULL DEFAULT 0,
+  forward_return_sd REAL NOT NULL DEFAULT 0,
+  t_statistic REAL NOT NULL DEFAULT 0,
+  p_value REAL NOT NULL DEFAULT 1,
+  win_rate REAL NOT NULL DEFAULT 0,
+  expectancy REAL NOT NULL DEFAULT 0,
+  net_after_cost REAL NOT NULL DEFAULT 0,
+  spread_points REAL NOT NULL DEFAULT 0,
+  verdict TEXT NOT NULL DEFAULT 'INCONCLUSIVE' CHECK (verdict IN ('EDGE','NO EDGE','INCONCLUSIVE')),
+  null_comparison TEXT NOT NULL DEFAULT '{}',
+  split_half_agree INTEGER NOT NULL DEFAULT 0,
+  split_half_t1 REAL,
+  split_half_t2 REAL,
+  min_trades_threshold INTEGER NOT NULL DEFAULT 30,
+  bars_analyzed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_results_symbol_tf ON pattern_results(symbol, timeframe);
+CREATE INDEX IF NOT EXISTS idx_pattern_results_verdict ON pattern_results(verdict);
+CREATE INDEX IF NOT EXISTS idx_pattern_results_created ON pattern_results(created_at);
+
+-- ── indicator library ────────────────────────────────────────────────────
+-- Reusable indicator definitions with parameter schemas.
+
+CREATE TABLE IF NOT EXISTS indicator_library (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'custom',
+  formula TEXT NOT NULL DEFAULT '{}',
+  is_builtin INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_indicator_library_category ON indicator_library(category);
+
+-- ── pattern-to-strategy links ─────────────────────────────────────────────
+-- Which patterns fed into which strategy versions.
+
+CREATE TABLE IF NOT EXISTS pattern_strategy_links (
+  id TEXT PRIMARY KEY,
+  pattern_result_id TEXT NOT NULL,
+  strategy_id TEXT NOT NULL,
+  weight REAL NOT NULL DEFAULT 1.0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (pattern_result_id) REFERENCES pattern_results(id),
+  FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_strategy_links_strategy ON pattern_strategy_links(strategy_id);
+
+-- ── enhanced backtest_results (ALTER TABLE, guarded) ─────────────────────
+-- These are applied at runtime in migrate.ts, not here, because ALTER TABLE
+-- on existing columns would fail. See migrate.ts for the guarded ALTERs.
+
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_open_time ON trades(open_time);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);

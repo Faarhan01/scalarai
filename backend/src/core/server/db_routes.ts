@@ -25,7 +25,7 @@ export function registerDbRoutes(app: Application) {
         ticks: ticksCount,
         candles: candlesCount,
         logs: logsCount,
-        dbPath: "backend/data/scalarai.sqlite",
+        dbPath: "backend/src/db/scalarai.sqlite",
       });
     } catch (err: any) {
       return error(res, err.message, 500);

@@ -1,5 +1,6 @@
 import { TradeRecord, TradeConfig, FullStatusPayload, EaCommand, EaConfirmation, EaPosition } from "../../types";
-import { Bar } from "../../services/research-engine";
+import { Bar } from "backend/knowledgebase/core/common";
+
 
 export interface AccountInfo {
   login: string;

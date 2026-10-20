@@ -34,7 +34,7 @@ export const config: AppConfig = {
   port: Number(process.env.PORT) || 4000,
   host: process.env.HOST || "0.0.0.0",
   env: process.env.NODE_ENV || "development",
-  databasePath: process.env.DATABASE_PATH || path.resolve(process.cwd(), "backend", "data", "scalarai.sqlite"),
+  databasePath: process.env.DATABASE_PATH || path.resolve(process.cwd(), "backend", "src", "db", "scalarai.sqlite"),
   defaultSymbol: process.env.DEFAULT_SYMBOL || "Step Index",
   symbols: [
     { symbol: "Step Index", category: "Synthetic Indices", digits: 1, point: 0.1, spread: 0.2 },

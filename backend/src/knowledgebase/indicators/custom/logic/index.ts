@@ -1,0 +1,2 @@
+// Custom indicator logic.
+export {};

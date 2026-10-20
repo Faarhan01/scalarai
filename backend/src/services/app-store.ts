@@ -4,12 +4,12 @@ import { scalarAiDb } from "../db";
 import { persistAiKnowledge, persistAiStrategy, persistSettings, persistEaConnection, loadStateFromDb, persistLog } from "./state-persistence";
 import { evaluateSimulatedStrategy, openSimulatedPosition, closeSimulatedPosition, AppCallbacks, TradeState } from "./trade-execution";
 import { getDefaultTradeConfig, getDefaultAiKnowledgeBase, getDefaultAiSynthesizedStrategy, createSystemLog } from "./defaults";
-import { BacktestEngine, BacktestCandle } from "./strategy-backtest";
+import { BacktestEngine, BacktestCandle } from "../knowledgebase/strategies/backtest";
 import { createActor } from "xstate";
 import { WebSocket } from "ws";
 import { normalizeIp } from "../utils/ip";
 import { tradingMachine, bridgeMachine, calibrationMachine, TradingMachineService, BridgeMachineService, CalibrationMachineService } from "./trading-machine";
-import { ObservationsService } from "./observations";
+import { ObservationsService } from "../knowledgebase/observations";
 import { mt5Bridge } from "../gateway/mt5-bridge";
 
 export class AppStore implements AppStoreReadOnly {
@@ -933,8 +933,8 @@ export class AppStore implements AppStoreReadOnly {
 
   ingestBulkCandles(
     symbolName: string,
-    candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume?: number; direction?: string }>,
-    metadata?: { digits?: number; tickSize?: number }
+    candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume?: number; spread?: number; timeframe?: string; direction?: string }>,
+    metadata?: { digits?: number; tickSize?: number; timeframe?: string }
   ): void {
     const symbol = (symbolName && symbolName.trim()) || this.activeSymbol || "Step Index";
     if (!this.activeSymbol || this.activeSymbol === "") {
@@ -969,12 +969,14 @@ export class AppStore implements AppStoreReadOnly {
         const timeMs = c.time > 1000000000000 ? c.time : c.time * 1000;
         return {
           symbol,
+          timeframe: c.timeframe || metadata?.timeframe || "M1",
           time: timeMs,
           open: c.open,
           high: c.high,
           low: c.low,
           close: c.close,
           volume: c.volume ?? 0,
+          spread: c.spread ?? 0,
           direction: (c.direction || (c.close >= c.open ? "up" : "down")) as "up" | "down" | "flat",
           minute_bucket: Math.floor(timeMs / 60000) * 60000,
         };

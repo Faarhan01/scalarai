@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, Application } from "express";
 import { scalarAiDb } from "../db";
-import { mt5Bridge } from "../gateway/mt5-bridge";
+import { mt5Bridge, parseTimeframe } from "../gateway/mt5-bridge";
 import { TradeConfig, UpdateMarketPayload, MarketCandleRow, ObservationRow } from "../types";
 import { requireApiKey } from "../middleware/auth";
 
@@ -80,17 +80,20 @@ export function registerMarketRoutes(
           tickSize: body.tickSize !== undefined ? Number(body.tickSize) : undefined,
         });
       } else if (candles.length > 0) {
+        const timeframe = body.timeframe ? String(body.timeframe) : "M1";
         const candleRows = candles.map((c: any) => {
           const timeMs = c.time > 1000000000000 ? Number(c.time) : Number(c.time) * 1000;
           return {
             symbol,
+            timeframe: c.timeframe || timeframe,
             time: timeMs,
             open: Number(c.open),
             high: Number(c.high),
             low: Number(c.low),
             close: Number(c.close),
             volume: c.volume !== undefined ? Number(c.volume) : 0,
-            direction: (c.direction || (Number(c.close) >= Number(c.open) ? "up" : "down")) as "up" | "down" | "flat",
+            spread: c.spread !== undefined ? Number(c.spread) : 0,
+            direction: (c.direction || (Number(c.close) > Number(c.open) ? "up" : Number(c.close) < Number(c.open) ? "down" : "flat")) as "up" | "down" | "flat",
             minute_bucket: Math.floor(timeMs / 60000) * 60000,
           };
         });
@@ -150,8 +153,9 @@ export function registerMarketRoutes(
       const from = req.query.from ? new Date(req.query.from as string).getTime() : undefined;
       const to = req.query.to ? new Date(req.query.to as string).getTime() : undefined;
       const limit = Math.min(Number(req.query.limit) || 1000, 10000);
+      const timeframe = req.query.timeframe ? String(req.query.timeframe) : undefined;
 
-      const rows = scalarAiDb.getCandles(symbol, from, to, limit);
+      const rows = scalarAiDb.getCandles(symbol, from, to, limit, timeframe);
       let candles = rows.map((row: MarketCandleRow) => ({
         time: row.time,
         open: row.open,
@@ -159,13 +163,19 @@ export function registerMarketRoutes(
         low: row.low,
         close: row.close,
         volume: row.volume,
+        spread: row.spread ?? 0,
         direction: row.direction,
       }));
 
       // If database has insufficient bars, fetch real candlestick rates from MT5 via the bridge
       if (candles.length < 5) {
         try {
-          const ratesRes = await mt5Bridge.getRates(symbol, 1, Math.min(limit, 300));
+          // Fetch the timeframe that was asked for. This used to be hardcoded
+          // to M1, so a request for M15 that fell through to the bridge was
+          // answered with M1 bars labelled M15.
+          const requestedTf = req.query.timeframe ? String(req.query.timeframe) : "M1";
+          const tfNum = parseTimeframe(requestedTf);
+          const ratesRes = await mt5Bridge.getRates(symbol, tfNum, Math.min(limit, 300));
           if (ratesRes && ratesRes.success && Array.isArray(ratesRes.rates) && ratesRes.rates.length > 0) {
             candles = ratesRes.rates.map((r: any) => ({
               time: typeof r.time === "number" ? (r.time < 10000000000 ? r.time * 1000 : r.time) : Date.now(),
@@ -174,19 +184,25 @@ export function registerMarketRoutes(
               low: r.low,
               close: r.close,
               volume: r.tick_volume || r.volume || 100,
-              direction: (r.close >= r.open ? "BUY" : "SELL") as "BUY" | "SELL",
+              spread: r.spread ?? 0,
+              // The column is CHECK'd against 'up'/'down'/'flat'. "BUY"/"SELL"
+              // was written here, which the constraint rejects -- so this path
+              // could not insert a single row.
+              direction: (r.close > r.open ? "up" : r.close < r.open ? "down" : "flat") as "up" | "down" | "flat",
             }));
             scalarAiDb.insertCandlesBatch(
               candles.map((c) => ({
                 symbol,
+                timeframe: requestedTf,
                 time: c.time,
                 open: c.open,
                 high: c.high,
                 low: c.low,
                 close: c.close,
                 volume: c.volume ?? null,
-                direction: c.direction,
-                minute_bucket: Math.floor(c.time / 60000) * 60,
+                spread: c.spread ?? 0,
+                direction: (c.close > c.open ? "up" : c.close < c.open ? "down" : "flat") as "up" | "down" | "flat",
+                minute_bucket: Math.floor(c.time / 60000) * 60000,
               }))
             );
             if (ingestBulkCandles) {

@@ -82,12 +82,30 @@ export function registerGatewayRoutes(app: Application, gateway: GatewayManager)
   app.get("/api/gateway/bridge/symbols", async (req: Request, res: Response) => {
     try {
       const group = req.query.group as string | undefined;
+      const cached = gateway.getCachedBrokerSymbols();
+
+      // Serve the catalogue from cache and refresh it in the background.
+      // Reading all 731 symbols from the broker takes about 640 ms, and doing
+      // that on every request put the cost on the bridge worker and made the
+      // symbol page feel broken. The background sync keeps the cache warm.
+      if (cached && cached.length > 0) {
+        if (gateway.brokerSymbolsAgeMs() > 20000) {
+          gateway.refreshBrokerSymbolsInBackground();
+        }
+        return res.json({
+          success: true,
+          count: cached.length,
+          symbols: cached,
+          source: "cache",
+          age_ms: Math.round(gateway.brokerSymbolsAgeMs()),
+        });
+      }
+
       const result = await mt5Bridge.getSymbols(group);
       if (result && result.success && Array.isArray(result.symbols) && result.symbols.length > 0) {
         gateway.setCachedBrokerSymbols(result.symbols);
         return res.json(result);
       }
-      const cached = gateway.getCachedBrokerSymbols();
       if (cached && cached.length > 0) {
         return res.json({ success: true, count: cached.length, symbols: cached, source: "cached" });
       }
@@ -298,6 +316,16 @@ export function registerGatewayRoutes(app: Application, gateway: GatewayManager)
   });
 
   // 14. Closed Deals History Sync
+  // OHLCV bars pushed by the EA
+  app.post("/api/gateway/bars", (req: Request, res: Response) => {
+    try {
+      const result = gateway.handleBars(req.body);
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post("/api/gateway/history", (req: Request, res: Response) => {
     try {
       const result = gateway.handleHistory(req.body);

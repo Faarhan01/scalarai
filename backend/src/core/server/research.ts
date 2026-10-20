@@ -1,17 +1,10 @@
 import { Application, Request, Response } from "express";
 import { AppStore } from "../../services/app-store";
 import { scalarAiDb } from "../../db";
-import {
-  sma,
-  ema,
-  rsi,
-  atr,
-  bollinger,
-  macd,
-  scanCandlePatterns,
-  runBacktest,
-  Bar,
-} from "../../services/research-engine";
+import { Bar } from "backend/knowledgebase/core/common";
+import { sma, ema, rsi, atr, bollinger, macd } from "backend/knowledgebase/indicators/indicators";
+import { scanCandlePatterns } from "backend/knowledgebase/patterns/patterns";
+import { runBacktest } from "backend/knowledgebase/strategies/research-backtest";
 import { parseSymbol } from "./validation";
 import { ok, error } from "./responses";
 import { config } from "../config";
@@ -330,6 +323,88 @@ export function registerResearchRoutes(app: Application, store: AppStore) {
 
   app.post("/api/research/patterns/scan", handlePatternScan);
   app.post("/api/research/pattern-scan", handlePatternScan);
+
+  // Knowledge pattern results (stored in pattern_results table)
+  app.get("/api/knowledge/patterns", (req: Request, res: Response) => {
+    const symbol = req.query.symbol as string | undefined;
+    const timeframe = req.query.timeframe as string | undefined;
+    const verdict = req.query.verdict as string | undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const results = scalarAiDb.getPatternResults(symbol, timeframe, verdict, limit);
+    return ok(res, { count: results.length, results });
+  });
+
+  app.post("/api/knowledge/check-pattern", async (req: Request, res: Response) => {
+    try {
+      const { symbol, timeframe = "M15", pattern_name, bars = 1000, forward_bars = 5, cost_points = 0, min_trades = 30 } = req.body || {};
+      const sym = parseSymbol(symbol, store.getActiveSymbol() || config.defaultSymbol);
+
+      let dbCandles = scalarAiDb.getCandles(sym, undefined, undefined, Math.min(Number(bars), 5000));
+      if (dbCandles.length < 10) {
+        try {
+          const ratesRes = await mt5Bridge.getRates(sym, 1, Math.min(Number(bars), 500));
+          if (ratesRes && ratesRes.success && Array.isArray(ratesRes.rates) && ratesRes.rates.length > 0) {
+            store.ingestBulkCandles(sym, ratesRes.rates.map((r: any) => ({
+              time: typeof r.time === "number" ? (r.time < 10000000000 ? r.time * 1000 : r.time) : Date.now(),
+              open: r.open, high: r.high, low: r.low, close: r.close,
+              volume: r.tick_volume || r.volume || 100,
+            })));
+            dbCandles = scalarAiDb.getCandles(sym, undefined, undefined, Math.min(Number(bars), 5000));
+          }
+        } catch { /* quiet */ }
+      }
+
+      const candleBars = dbCandles.map((c: any) => ({
+        time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 100,
+      }));
+
+      if (candleBars.length < 10) {
+        return ok(res, { success: false, error: "Insufficient bar data" });
+      }
+
+      const { checkPattern } = await import("../../knowledgebase/patterns/pattern-checker");
+      const result = checkPattern({
+        symbol: sym,
+        timeframe,
+        pattern_name: pattern_name || "engulfing",
+        bars: candleBars,
+        forward_bars,
+        cost_points: cost_points,
+        min_trades: min_trades,
+      });
+
+      // Store result
+      const id = `pat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      scalarAiDb.insertPatternResult({
+        id,
+        symbol: result.symbol,
+        timeframe: result.timeframe,
+        pattern_name: result.pattern_name,
+        pattern_category: "candlestick",
+        occurrences: result.occurrences,
+        forward_return_mean: result.forward_return_mean,
+        forward_return_sd: result.forward_return_sd,
+        t_statistic: result.t_statistic,
+        p_value: result.p_value,
+        win_rate: result.win_rate,
+        expectancy: result.expectancy,
+        net_after_cost: result.net_after_cost,
+        spread_points: result.spread_points,
+        verdict: result.verdict,
+        null_comparison: JSON.stringify(result.null_comparison),
+        split_half_agree: result.split_half_agree ? 1 : 0,
+        split_half_t1: result.split_half_t1,
+        split_half_t2: result.split_half_t2,
+        min_trades_threshold: result.min_trades_threshold,
+        bars_analyzed: result.bars_analyzed,
+        created_at: new Date().toISOString(),
+      });
+
+      return ok(res, { success: true, id, ...result });
+    } catch (err: any) {
+      return error(res, err.message, 500);
+    }
+  });
 
   // 5. Indicator Calculation (handles both /api/research/indicator/calculate and /api/research/indicator)
   const handleIndicatorCalc = async (req: Request, res: Response) => {

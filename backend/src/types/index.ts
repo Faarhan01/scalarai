@@ -299,6 +299,53 @@ export interface ObservationInsights {
   suggestedStrategies: string[];
 }
 
+// ── Pattern results ──────────────────────────────────────────────────────
+
+export interface PatternResultRow {
+  id: string;
+  symbol: string;
+  timeframe: string;
+  pattern_name: string;
+  pattern_category: string;
+  occurrences: number;
+  forward_return_mean: number;
+  forward_return_sd: number;
+  t_statistic: number;
+  p_value: number;
+  win_rate: number;
+  expectancy: number;
+  net_after_cost: number;
+  spread_points: number;
+  verdict: 'EDGE' | 'NO EDGE' | 'INCONCLUSIVE';
+  null_comparison: string; // JSON
+  split_half_agree: number;
+  split_half_t1?: number;
+  split_half_t2?: number;
+  min_trades_threshold: number;
+  bars_analyzed: number;
+  created_at: string;
+}
+
+export interface IndicatorLibraryRow {
+  id: string;
+  name: string;
+  category: string;
+  formula: string; // JSON
+  is_builtin: number;
+  created_at: string;
+}
+
+export interface PatternCheckParams {
+  symbol: string;
+  timeframe: string;
+  pattern_name: string;
+  pattern_category?: string;
+  bars: number;
+  forward_bars: number;
+  cost_points?: number;
+  min_trades?: number;
+}
+
 export interface McpContext {
   getStatus: () => FullStatusPayload;
   getAiStudyFeed: () => Promise<AiStudyFeedPayload>;
@@ -517,11 +564,13 @@ export interface MarketCandleRow {
   id?: number;
   symbol: string;
   time: number;
+  timeframe?: string;
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number | null;
+  spread?: number | null;
   direction: "up" | "down" | "flat";
   minute_bucket: number;
   created_at?: string;

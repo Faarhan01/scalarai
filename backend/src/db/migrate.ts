@@ -4,7 +4,7 @@ import path from "path";
 import { getDefaultTradeConfig, getDefaultAiKnowledgeBase, getDefaultAiSynthesizedStrategy } from "../services/defaults";
 import { StrategyMode } from "../types";
 
-const DB_PATH = path.join(process.cwd(), "backend", "data", "scalarai.sqlite");
+const DB_PATH = path.join(process.cwd(), "backend", "src", "db", "scalarai.sqlite");
 
 export function openDb(): InstanceType<typeof Database> {
   const dir = path.dirname(DB_PATH);
@@ -23,6 +23,38 @@ export function migrate(db: InstanceType<typeof Database>): void {
   // Migration for existing tables: safely add symbol columns if missing
   try { db.exec("ALTER TABLE trades ADD COLUMN symbol TEXT NOT NULL DEFAULT 'Step Index'"); } catch {}
   try { db.exec("ALTER TABLE market_ticks ADD COLUMN symbol TEXT NOT NULL DEFAULT 'Step Index'"); } catch {}
+  // Enhanced backtest_results: cost & split-half fields
+  try { db.exec("ALTER TABLE backtest_results ADD COLUMN spread_points REAL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE backtest_results ADD COLUMN net_after_cost REAL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE backtest_results ADD COLUMN split_half_agree INTEGER DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE backtest_results ADD COLUMN null_beaten INTEGER DEFAULT 0"); } catch {}
+
+  // ── market_candles: fidelity fixes ─────────────────────────────────────
+  //
+  // Two things the raw bridge rows carry that the table did not:
+  //   spread    — the per-bar spread in points. Without it the knowledgebase
+  //               cannot cost a pattern honestly; it has to take the spread
+  //               from a hand-passed parameter instead of the real data.
+  //   timeframe — the table had no timeframe, so M1, M15 and H1 bars for the
+  //               same symbol landed in one pile and mixed.
+  try { db.exec("ALTER TABLE market_candles ADD COLUMN spread REAL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE market_candles ADD COLUMN timeframe TEXT NOT NULL DEFAULT 'M1'"); } catch {}
+
+  // Duplicates: re-ingesting the same history appended a fresh copy every
+  // time, because there was nothing to conflict against. The knowledgebase
+  // then scanned the same bar repeatedly — every pattern occurrence was
+  // counted multiple times and the forward-return sample held repeated
+  // values. Keep the newest snapshot of each bar and make the key unique.
+  try {
+    db.exec(`DELETE FROM market_candles WHERE id NOT IN (
+      SELECT MAX(id) FROM market_candles GROUP BY symbol, timeframe, time
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_market_candles_unique
+             ON market_candles(symbol, timeframe, time)`);
+  } catch (e) {
+    console.error("[db] market_candles dedupe/unique index failed:", e);
+  }
+
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS deals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

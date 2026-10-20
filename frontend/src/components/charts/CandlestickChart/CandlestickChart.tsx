@@ -178,7 +178,10 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           const lastIndex = visibleCandles.length - 1;
           if (lastIndex < 0) return null;
           const lastCandle = visibleCandles[lastIndex];
-          const lastClose = lastCandle.close;
+          // Track the live price, not the last stored close. The dot used to
+          // sit still while the price line moved away from it, which read as a
+          // frozen chart.
+          const lastClose = currentPrice > 0 ? currentPrice : lastCandle.close;
           const lastOpen = lastCandle.open;
           const x = LEFT_AXIS_WIDTH + lastIndex * CANDLE_STEP + CANDLE_WIDTH / 2;
           const y = CHART_PADDING + (1 - (lastClose - minPrice) / priceRange) * chartHeight;

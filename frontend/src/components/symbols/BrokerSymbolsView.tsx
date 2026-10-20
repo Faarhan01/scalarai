@@ -37,11 +37,25 @@ export interface BrokerSymbolItem {
   currency_margin?: string;
 }
 
+export interface LiveSymbolPrice {
+  price?: number;
+  tickCount?: number;
+}
+
 export interface BrokerSymbolsViewProps {
   activeSymbol: string;
   onSwitchSymbol: (symbol: string) => void;
   isBridgeConnected: boolean;
   onNavigateToTrade?: () => void;
+  /**
+   * Live prices per symbol, from the server's symbol states.
+   *
+   * The broker catalogue only carries bid/ask for the symbols MT5 is
+   * actively quoting -- 39 of 731 on this account. Everything else came back
+   * as zero and the card showed "--". The server tracks a live price for the
+   * active symbol, so that one is filled in from here.
+   */
+  livePrices?: Record<string, LiveSymbolPrice>;
 }
 
 export const BrokerSymbolsView: React.FC<BrokerSymbolsViewProps> = ({
@@ -49,6 +63,7 @@ export const BrokerSymbolsView: React.FC<BrokerSymbolsViewProps> = ({
   onSwitchSymbol,
   isBridgeConnected,
   onNavigateToTrade,
+  livePrices,
 }) => {
   const [symbols, setSymbols] = useState<BrokerSymbolItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -105,6 +120,18 @@ export const BrokerSymbolsView: React.FC<BrokerSymbolsViewProps> = ({
   useEffect(() => {
     fetchBrokerSymbols();
   }, [fetchBrokerSymbols]);
+
+  // Keep the catalogue live. The server caches the symbol list for five
+  // minutes, but the quotes inside it move constantly, so the page refreshes
+  // on a timer while the bridge is connected. Without this the prices on
+  // screen were whatever was true when the tab opened.
+  useEffect(() => {
+    if (!isBridgeConnected) return;
+    const id = setInterval(() => {
+      fetchBrokerSymbols(true);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isBridgeConnected, fetchBrokerSymbols]);
 
   // Derive categories from symbol paths
   const categories = useMemo(() => {
@@ -262,7 +289,17 @@ export const BrokerSymbolsView: React.FC<BrokerSymbolsViewProps> = ({
           {filteredSymbols.map((sym) => {
             const isCurrentActive =
               sym.name.toLowerCase() === (activeSymbol || "").toLowerCase();
-            const spreadPoints = sym.spread !== undefined ? sym.spread : (sym.ask && sym.bid && sym.point ? ((sym.ask - sym.bid) / sym.point).toFixed(1) : "--");
+            // Live price for this symbol, if the server is tracking it.
+            const live = livePrices?.[sym.name];
+            const livePrice = live && live.price && live.price > 0 ? live.price : 0;
+            const bid = sym.bid && sym.bid > 0 ? sym.bid : livePrice;
+            const ask = sym.ask && sym.ask > 0 ? sym.ask : livePrice;
+            const spreadPoints =
+              sym.spread !== undefined && sym.spread !== null
+                ? sym.spread
+                : ask && bid && sym.point
+                ? ((ask - bid) / sym.point).toFixed(1)
+                : "--";
 
             return (
               <div
@@ -302,22 +339,14 @@ export const BrokerSymbolsView: React.FC<BrokerSymbolsViewProps> = ({
                     <div>
                       <span className="text-[10px] text-slate-500 uppercase font-mono block">Bid</span>
                       <span className="text-xs font-mono font-bold text-slate-200">
-                        {sym.bid && sym.bid > 0
-                          ? sym.bid.toFixed(sym.digits ?? 2)
-                          : isCurrentActive
-                          ? "Live"
-                          : "--"}
+                        {bid && bid > 0 ? bid.toFixed(sym.digits ?? 2) : "--"}
                       </span>
                     </div>
 
                     <div>
                       <span className="text-[10px] text-slate-500 uppercase font-mono block">Ask</span>
                       <span className="text-xs font-mono font-bold text-slate-200">
-                        {sym.ask && sym.ask > 0
-                          ? sym.ask.toFixed(sym.digits ?? 2)
-                          : isCurrentActive
-                          ? "Live"
-                          : "--"}
+                        {ask && ask > 0 ? ask.toFixed(sym.digits ?? 2) : "--"}
                       </span>
                     </div>
 

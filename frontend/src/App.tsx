@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Home,
   Sliders,
@@ -331,9 +331,11 @@ export default function App() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
-    fetch(`/api/market/candles?symbol=${encodeURIComponent(activeSymbol)}&limit=1000`, {
-      signal: controller.signal,
-    })
+    fetch(
+      `/api/market/candles?symbol=${encodeURIComponent(activeSymbol)}` +
+        `&timeframe=${encodeURIComponent(chartTimeframe)}&limit=1000`,
+      { signal: controller.signal },
+    )
       .then((res) => res.json())
       .then((data) => {
         if (data.candles && Array.isArray(data.candles)) {
@@ -351,7 +353,7 @@ export default function App() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [activeSymbol]);
+  }, [activeSymbol, chartTimeframe]);
 
   // Poll AI study feed periodically
   const aiStudy = useAiStudyFeed(sendWsMessage);
@@ -390,7 +392,10 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
-          setCandles(data.candles);
+          // Merge rather than replace. Replacing dropped every bar that was
+          // already loaded, so a refresh briefly emptied the chart and the
+          // price line jumped.
+          setCandles((prev) => mergeCandles(prev, data.candles).slice(-2000));
           const latest = data.candles[data.candles.length - 1];
           if (latest?.close && currentPrice <= 0) {
             setCurrentPrice(latest.close);
@@ -424,8 +429,20 @@ export default function App() {
     }
   };
 
-  // Compute Chart Data via Hook
-  const chartData = useChartData(candles, history, 80);
+  // Compute Chart Data via Hook. The live price is passed in so the last bar
+  // and the price line follow the tick stream.
+  const chartData = useChartData(candles, history, 80, currentPrice);
+
+  // Live prices per symbol, for the Broker Symbols page. The broker
+  // catalogue only carries quotes for the symbols MT5 is actively quoting, so
+  // the server's tracked price fills the gap for the active symbol.
+  const livePrices = useMemo(() => {
+    const map: Record<string, { price?: number; tickCount?: number }> = {};
+    for (const s of symbolStates) {
+      map[s.symbol] = { price: s.currentPrice, tickCount: s.tickCount };
+    }
+    return map;
+  }, [symbolStates]);
 
   return (
     <AppShell>
@@ -497,6 +514,7 @@ export default function App() {
               activeSymbol={activeSymbol}
               onSwitchSymbol={switchSymbol}
               isBridgeConnected={isBridgeConnected}
+              livePrices={livePrices}
               onNavigateToTrade={() => setCurrentNavTab("home")}
             />
           </div>

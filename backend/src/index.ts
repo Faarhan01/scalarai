@@ -182,6 +182,14 @@ async function startServer() {
     console.log(`Step Index Scalper full-stack server running on http://localhost:${PORT}`);
   });
 
+  // One port. The Gateway EA's InpServerUrl default and the chart profile
+  // that carries the saved input both point here, and MT5's WebRequest
+  // allowlist needs this exact URL.
+  //
+  // A second listener on the old port (3000) was tried while the allowlist
+  // entry was unverified, but the EA and the site have no reason to differ,
+  // and two ports is one more thing to keep in sync.
+
   const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
 
   createBridgeServer(

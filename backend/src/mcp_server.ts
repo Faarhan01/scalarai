@@ -1,10 +1,13 @@
 import { Request, Response } from "express";
 import { McpContext, StrategyMode, TradeRecord, SystemLog } from "./types";
 import { scalarAiDb } from "./db";
-import { evaluateStrategyBacktest } from "./services/strategy";
-import { BacktestEngine } from "./services/strategy-backtest";
-import { updateKnowledgeBaseFromTelemetry, formatKnowledgeBase } from "./services/knowledge";
-import { analyzeMarket, analyzeStrategyPerformance, suggestStrategyOptimizations, recommendStrategyForConditions } from "./services/strategy-research";
+import { evaluateStrategyBacktest } from "./knowledgebase/strategies/strategy";
+import { BacktestEngine } from "./knowledgebase/strategies/backtest";
+import { updateKnowledgeBaseFromTelemetry, formatKnowledgeBase, getKnowledgeSummary, formatKnowledgeSummary, recordPatternResult, getPatternStats } from "./knowledgebase/knowledge";
+import { checkPattern } from "./knowledgebase/patterns/pattern-checker";
+import { shuffleNull } from "./knowledgebase/core/common";
+import { PatternResultRow } from "./types";
+import { analyzeMarket, analyzeStrategyPerformance, suggestStrategyOptimizations, recommendStrategyForConditions } from "./knowledgebase/strategies/research";
 import { parseTimestamp, parseLimit } from "./utils/time";
 // Static import: these were `require()`d inside tools/call, but this module is
 // ESM (loaded through tsx), so require is not defined and both
@@ -15,7 +18,7 @@ import {
   createStrategyFromTemplate,
   getStrategyTemplateById,
   getStrategiesByCategory,
-} from "./services/strategy-templates";
+} from "./knowledgebase/strategies/templates";
 // Shared StrategyForge result store. research.ts owns the array so the REST
 // routes and MCP are two views of one list rather than two lists that drift.
 import {
@@ -330,6 +333,144 @@ export const TOOLS: McpTool[] = [
         symbol: { type: "string", description: "Optional symbol filter" },
       },
       required: [],
+    },
+  },
+  {
+    name: "run_strategy_tester",
+    description:
+      "Run the native MT5 Strategy Tester for ANY compiled EA (.ex5) installed in the terminal. " +
+      "Launches terminal64.exe with a [Tester] block, waits for completion, and returns the report. " +
+      "Works with any EA, not just StrategyForge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        expert: { type: "string", description: "EA path relative to MQL5/Experts (e.g. Bots\\\\StrategyForge). MT5 prepends 'Experts\\\\' automatically. Any compiled .ex5 works." },
+        symbol: { type: "string", description: "Symbol to test on (default: Step Index)" },
+        period: { type: "string", description: "Timeframe: M1, M5, M15, M30, H1, H4, D1 (default: M15)" },
+        from: { type: "string", description: "Start date YYYY.MM.DD (default: 90 days ago)" },
+        to: { type: "string", description: "End date YYYY.MM.DD (default: today)" },
+        model: { type: "string", description: "Tick model: real-ticks, every-tick, minute-ohlc, open-only, math (default: real-ticks)" },
+        deposit: { type: "number", description: "Initial deposit (default: 10000)" },
+        currency: { type: "string", description: "Account currency (default: USD)" },
+        leverage: { type: "number", description: "Leverage (default: 100)" },
+        inputs: { type: "object", description: "EA input overrides as key-value pairs" },
+        visual: { type: "boolean", description: "Show tester window (default: false)" },
+        shutdown: { type: "boolean", description: "Shutdown terminal after test (default: true)" },
+        timeout: { type: "number", description: "Max wait time in seconds (default: 300)" },
+        tag: { type: "string", description: "Tag for CSV report filename (default: test)" },
+      },
+      required: ["expert"],
+    },
+  },
+  {
+    name: "check_pattern",
+    description:
+      "Run a statistical pattern check on historical bars. Scans for a pattern, " +
+      "computes forward returns, runs Welch's t-test vs baseline, compares against " +
+      "a null (shuffled) baseline, checks split-half agreement, and returns a verdict: " +
+      "EDGE, NO EDGE, or INCONCLUSIVE. Result is stored in pattern_results table.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol to analyze (default: Step Index)" },
+        timeframe: { type: "string", description: "Timeframe: M1, M5, M15, M30, H1, H4, D1 (default: M15)" },
+        pattern_name: { type: "string", description: "Pattern to check: engulfing, hammer, doji, consecutive, inside_bar, double_top" },
+        bars: { type: "number", description: "Number of historical bars to scan (default: 1000)" },
+        forward_bars: { type: "number", description: "Bars forward to measure return (default: 5)" },
+        cost_points: { type: "number", description: "Spread cost in points (default: 0)" },
+        min_trades: { type: "number", description: "Minimum occurrences for verdict (default: 30)" },
+      },
+      required: ["pattern_name"],
+    },
+  },
+  {
+    name: "ingest_history",
+    description:
+      "Pull historical bars from MetaTrader 5 and store them in market_candles " +
+      "so the knowledgebase can test against them. This is how chart history " +
+      "reaches the pattern checker: ingest first, then check_all_patterns.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol to pull (e.g. EURUSD, Step Index)" },
+        timeframe: { type: "string", description: "Timeframe: M1, M5, M15, M30, H1, H4, D1 (default: M15)" },
+        count: { type: "number", description: "Bars to pull (default 1000, max 60000)" },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
+    name: "check_all_patterns",
+    description:
+      "Run EVERY known pattern against one bar set and store each result. " +
+      "This is the batch entry point: one call fetches the history, runs the " +
+      "whole pattern suite, and records a verdict per pattern.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol to analyze (default: Step Index)" },
+        timeframe: { type: "string", description: "Timeframe: M1, M5, M15, M30, H1, H4, D1 (default: M15)" },
+        bars: { type: "number", description: "Number of historical bars (default: 1000)" },
+        forward_bars: { type: "number", description: "Bars forward to measure return (default: 5)" },
+        cost_points: { type: "number", description: "Spread cost in points (default: 0)" },
+        min_trades: { type: "number", description: "Minimum occurrences for verdict (default: 30)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_pattern_results",
+    description:
+      "List stored pattern test results with verdicts. Filter by symbol, timeframe, or verdict.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Optional symbol filter" },
+        timeframe: { type: "string", description: "Optional timeframe filter" },
+        verdict: { type: "string", enum: ["EDGE", "NO EDGE", "INCONCLUSIVE"], description: "Optional verdict filter" },
+        limit: { type: "number", description: "Maximum results (default: 50)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_null_control",
+    description:
+      "Run a null (shuffled) baseline for a symbol/timeframe. Returns the t-statistic " +
+      "and p-value of the shuffled baseline for comparison against pattern results.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Symbol to analyze (default: Step Index)" },
+        timeframe: { type: "string", description: "Timeframe (default: M15)" },
+        bars: { type: "number", description: "Number of bars (default: 1000)" },
+        iterations: { type: "number", description: "Shuffle iterations (default: 1000)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "list_indicators",
+    description: "List all indicator library entries. Optionally filter by category (trend, momentum, volatility, volume, custom).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Optional category filter" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "add_indicator",
+    description: "Add a custom indicator to the indicator library. Formula is a JSON object with parameter names and defaults.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Indicator name" },
+        category: { type: "string", enum: ["trend", "momentum", "volatility", "volume", "custom"], description: "Category" },
+        formula: { type: "object", description: "JSON with parameter names, defaults, and description" },
+      },
+      required: ["name", "category"],
     },
   },
   {
@@ -917,6 +1058,8 @@ export const RESOURCES: McpResource[] = [
   { uri: "scalarai://strategies", name: "Strategy catalogue", description: "Every built-in and custom strategy available, with descriptions.", mimeType: "application/json" },
   { uri: "scalarai://strategy-templates", name: "Strategy templates", description: "Reusable strategy templates with default configuration, by trading style.", mimeType: "application/json" },
   { uri: "scalarai://knowledge/base", name: "AI knowledge base", description: "Long-term market observations: velocity clusters, hourly patterns, peak speeds.", mimeType: "application/json" },
+  { uri: "scalarai://knowledge/patterns", name: "Pattern results", description: "All pattern test results with verdicts (EDGE, NO EDGE, INCONCLUSIVE).", mimeType: "application/json" },
+  { uri: "scalarai://knowledge/edge", name: "Edge patterns", description: "Only patterns with EDGE verdict, sorted by net_after_cost.", mimeType: "application/json" },
   { uri: "scalarai://symbols", name: "Connected symbols", description: "All symbols reporting from the MT5 EA, with price, connection state and tick counts.", mimeType: "application/json" },
   { uri: "scalarai://trades/open", name: "Open positions", description: "Currently open trades with entry, SL/TP and unrealised result.", mimeType: "application/json" },
   { uri: "scalarai://trades/recent", name: "Recent trade history", description: "Most recently closed trades, newest first.", mimeType: "application/json" },
@@ -1147,6 +1290,10 @@ async function readResource(ctx: McpContext, uri: string): Promise<{ contents: A
       return { contents: [{ uri, mimeType: "application/json", text: j(ctx.getAiStrategy()) }] };
     case "scalarai://knowledge/base":
       return { contents: [{ uri, mimeType: "application/json", text: j(ctx.getAiKnowledgeBase()) }] };
+    case "scalarai://knowledge/patterns":
+      return { contents: [{ uri, mimeType: "application/json", text: j(scalarAiDb.getPatternResults()) }] };
+    case "scalarai://knowledge/edge":
+      return { contents: [{ uri, mimeType: "application/json", text: j(scalarAiDb.getPatternResults(undefined, undefined, "EDGE")) }] };
     case "scalarai://symbols":
       return { contents: [{ uri, mimeType: "application/json", text: j(ctx.getSymbols()) }] };
     case "scalarai://trades/open":
@@ -1561,6 +1708,320 @@ async function callTool(ctx: McpContext, params: { name?: string; arguments?: Re
           const limit = typeof args.limit === "number" ? args.limit : 20;
           return toolResult(JSON.stringify({ count: list.length, results: list.slice(0, limit) }, null, 2));
         }
+        case "run_strategy_tester": {
+          const expert = args.expert;
+          if (!expert || typeof expert !== "string") {
+            return toolResult(JSON.stringify({ success: false, error: "expert is required (e.g. 'Bots\\\\StrategyForge')" }, null, 2));
+          }
+          const result = await mt5Bridge.runTester({
+            expert,
+            symbol: args.symbol || undefined,
+            period: args.period || undefined,
+            from: args.from || undefined,
+            to: args.to || undefined,
+            model: args.model || undefined,
+            deposit: typeof args.deposit === "number" ? args.deposit : undefined,
+            currency: args.currency || undefined,
+            leverage: typeof args.leverage === "number" ? args.leverage : undefined,
+            inputs: args.inputs || undefined,
+            visual: args.visual === true,
+            shutdown: args.shutdown !== false,
+            timeout: typeof args.timeout === "number" ? args.timeout : 300,
+            tag: args.tag || "test",
+          });
+          return toolResult(JSON.stringify(result, null, 2));
+        }
+        case "check_pattern": {
+          const symbol = (args.symbol && args.symbol.trim()) || ctx.getStatus().activeSymbol || "Step Index";
+          const timeframe = args.timeframe || "M15";
+          const patternName = args.pattern_name;
+          if (!patternName || typeof patternName !== "string") {
+            return toolResult(JSON.stringify({ success: false, error: "pattern_name is required" }, null, 2));
+          }
+          const bars = typeof args.bars === "number" ? Math.min(args.bars, 5000) : 1000;
+          const forwardBars = typeof args.forward_bars === "number" ? args.forward_bars : 5;
+          const minTrades = typeof args.min_trades === "number" ? args.min_trades : 30;
+
+          // Fetch candles from DB or MT5
+          let candleBars: any[] = [];
+          try {
+            const dbCandles = scalarAiDb.getCandles(symbol, undefined, undefined, bars, timeframe);
+            if (dbCandles && dbCandles.length > 0) {
+              candleBars = dbCandles.map((c: any) => ({
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+                volume: c.volume ?? 0, spread: c.spread ?? 0,
+              }));
+            }
+          } catch (e) {
+            // Fall through to MT5 bridge
+          }
+
+          if (candleBars.length === 0) {
+            try {
+              const ratesRes = await mt5Bridge.getRates(symbol, timeframe, bars);
+              if (ratesRes && ratesRes.success && Array.isArray(ratesRes.rates)) {
+                candleBars = ratesRes.rates.map((r: any) => ({
+                  time: r.time, open: r.open, high: r.high, low: r.low, close: r.close,
+                  volume: r.tick_volume ?? 0, spread: r.spread ?? 0,
+                }));
+              }
+            } catch (e) {
+              // No data available
+            }
+          }
+
+          if (candleBars.length < 10) {
+            return toolResult(JSON.stringify({ success: false, error: "Insufficient bar data for pattern check" }, null, 2));
+          }
+
+          // Cost. When the caller does not say, use the spread the stored bars
+          // actually carry -- the raw bridge rows have it per bar and it was
+          // being thrown away on the way in.
+          const storedSpreads = candleBars.map((c: any) => c.spread ?? 0).filter((s: number) => s > 0).sort((a: number, b: number) => a - b);
+          const medianSpread = storedSpreads.length ? storedSpreads[Math.floor(storedSpreads.length / 2)] : 0;
+          const costPoints = typeof args.cost_points === "number" ? args.cost_points : medianSpread;
+
+          // Run the pattern checker
+          const { checkPattern } = await import("./knowledgebase/patterns/pattern-checker");
+          const result = checkPattern({
+            symbol,
+            timeframe,
+            pattern_name: patternName,
+            bars: candleBars,
+            forward_bars: forwardBars,
+            cost_points: costPoints,
+            min_trades: minTrades,
+          });
+
+          // Store result
+          try {
+            const { recordPatternResult } = await import("./knowledgebase/knowledge");
+            const id = `pat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+            recordPatternResult({
+              id,
+              symbol: result.symbol,
+              timeframe: result.timeframe,
+              pattern_name: result.pattern_name,
+              pattern_category: "candlestick",
+              occurrences: result.occurrences,
+              forward_return_mean: result.forward_return_mean,
+              forward_return_sd: result.forward_return_sd,
+              t_statistic: result.t_statistic,
+              p_value: result.p_value,
+              win_rate: result.win_rate,
+              expectancy: result.expectancy,
+              net_after_cost: result.net_after_cost,
+              spread_points: result.spread_points,
+              verdict: result.verdict,
+              null_comparison: JSON.stringify(result.null_comparison),
+              split_half_agree: result.split_half_agree ? 1 : 0,
+              split_half_t1: result.split_half_t1,
+              split_half_t2: result.split_half_t2,
+              min_trades_threshold: result.min_trades_threshold,
+              bars_analyzed: result.bars_analyzed,
+              created_at: new Date().toISOString(),
+            });
+          } catch (e) {
+            // Storage failed but result is still returned
+          }
+
+          return toolResult(JSON.stringify(result, null, 2));
+        }
+        case "ingest_history": {
+          const symbol = args.symbol;
+          if (!symbol || typeof symbol !== "string") {
+            return toolResult(JSON.stringify({ success: false, error: "symbol is required" }, null, 2));
+          }
+          const timeframe = args.timeframe || "M15";
+          const count = typeof args.count === "number" ? Math.min(args.count, 60000) : 1000;
+
+          const ratesRes = await mt5Bridge.getRates(symbol, timeframe, count);
+          if (!ratesRes || !ratesRes.success || !Array.isArray(ratesRes.rates) || ratesRes.rates.length === 0) {
+            return toolResult(JSON.stringify({
+              success: false,
+              error: ratesRes?.error || "no rates returned from MT5",
+              symbol, timeframe, count,
+            }, null, 2));
+          }
+
+          // The bridge returns seconds; the store uses milliseconds. The
+          // spread comes along too and was being dropped, which is what left
+          // the knowledgebase costing patterns on a hand-passed guess.
+          const rows = ratesRes.rates.map((r: any) => {
+            const timeMs = typeof r.time === "number"
+              ? (r.time < 10000000000 ? r.time * 1000 : r.time)
+              : Date.now();
+            return {
+              symbol,
+              timeframe,
+              time: timeMs,
+              open: r.open,
+              high: r.high,
+              low: r.low,
+              close: r.close,
+              volume: r.tick_volume ?? r.volume ?? 0,
+              spread: r.spread ?? 0,
+              direction: (r.close > r.open ? "up" : r.close < r.open ? "down" : "flat") as "up" | "down" | "flat",
+              minute_bucket: Math.floor(timeMs / 60000) * 60000,
+            };
+          });
+
+          scalarAiDb.insertCandlesBatch(rows);
+
+          const stored = scalarAiDb.getCandles(symbol, undefined, undefined, count, timeframe);
+          return toolResult(JSON.stringify({
+            success: true,
+            symbol,
+            timeframe,
+            requested: count,
+            pulled: ratesRes.rates.length,
+            stored: stored.length,
+            first: rows.length ? new Date(rows[0].time).toISOString() : null,
+            last: rows.length ? new Date(rows[rows.length - 1].time).toISOString() : null,
+          }, null, 2));
+        }
+        case "check_all_patterns": {
+          const symbol = (args.symbol && args.symbol.trim()) || ctx.getStatus().activeSymbol || "Step Index";
+          const timeframe = args.timeframe || "M15";
+          const bars = typeof args.bars === "number" ? Math.min(args.bars, 5000) : 1000;
+          const forwardBars = typeof args.forward_bars === "number" ? args.forward_bars : 5;
+          const minTrades = typeof args.min_trades === "number" ? args.min_trades : 30;
+
+          // Fetch candles once, then run the whole suite against them.
+          let candleBars: any[] = [];
+          try {
+            const dbCandles = scalarAiDb.getCandles(symbol, undefined, undefined, bars, timeframe);
+            if (dbCandles && dbCandles.length > 0) {
+              candleBars = dbCandles.map((c: any) => ({
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+                volume: c.volume ?? 0, spread: c.spread ?? 0,
+              }));
+            }
+          } catch (e) { /* fall through to bridge */ }
+
+          if (candleBars.length < 10) {
+            try {
+              const ratesRes = await mt5Bridge.getRates(symbol, timeframe, bars);
+              if (ratesRes && ratesRes.success && Array.isArray(ratesRes.rates)) {
+                candleBars = ratesRes.rates.map((r: any) => ({
+                  time: r.time, open: r.open, high: r.high, low: r.low, close: r.close,
+                  volume: r.tick_volume ?? 0, spread: r.spread ?? 0,
+                }));
+              }
+            } catch (e) { /* no data */ }
+          }
+
+          if (candleBars.length < 10) {
+            return toolResult(JSON.stringify({ success: false, error: "Insufficient bar data" }, null, 2));
+          }
+
+          // Cost defaults to the spread the bars themselves carry.
+          const storedSpreads = candleBars.map((c: any) => c.spread ?? 0).filter((s: number) => s > 0).sort((a: number, b: number) => a - b);
+          const medianSpread = storedSpreads.length ? storedSpreads[Math.floor(storedSpreads.length / 2)] : 0;
+          const costPoints = typeof args.cost_points === "number" ? args.cost_points : medianSpread;
+
+          const { runPatternSuite } = await import("./knowledgebase/patterns/suite");
+          const suite = runPatternSuite({
+            symbol, timeframe, bars: candleBars,
+            forward_bars: forwardBars, cost_points: costPoints, min_trades: minTrades,
+          });
+
+          // Store every result.
+          const { recordPatternResult } = await import("./knowledgebase/knowledge");
+          for (const r of suite.results) {
+            try {
+              recordPatternResult({
+                id: `pat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+                symbol: r.symbol,
+                timeframe: r.timeframe,
+                pattern_name: r.pattern_name,
+                pattern_category: "candlestick",
+                occurrences: r.occurrences,
+                forward_return_mean: r.forward_return_mean,
+                forward_return_sd: r.forward_return_sd,
+                t_statistic: r.t_statistic,
+                p_value: r.p_value,
+                win_rate: r.win_rate,
+                expectancy: r.expectancy,
+                net_after_cost: r.net_after_cost,
+                spread_points: r.spread_points,
+                verdict: r.verdict,
+                null_comparison: JSON.stringify(r.null_comparison),
+                split_half_agree: r.split_half_agree ? 1 : 0,
+                split_half_t1: r.split_half_t1,
+                split_half_t2: r.split_half_t2,
+                min_trades_threshold: r.min_trades_threshold,
+                bars_analyzed: r.bars_analyzed,
+                created_at: new Date().toISOString(),
+              });
+            } catch (e) { /* storage failed, result still returned */ }
+          }
+
+          return toolResult(JSON.stringify(suite, null, 2));
+        }
+        case "get_pattern_results": {
+          const symbol = args.symbol || undefined;
+          const timeframe = args.timeframe || undefined;
+          const verdict = args.verdict || undefined;
+          const limit = typeof args.limit === "number" ? args.limit : 50;
+          const results = scalarAiDb.getPatternResults(symbol, timeframe, verdict, limit);
+          return toolResult(JSON.stringify({ count: results.length, results }, null, 2));
+        }
+        case "get_null_control": {
+          const symbol = (args.symbol && args.symbol.trim()) || ctx.getStatus().activeSymbol || "Step Index";
+          const timeframe = args.timeframe || "M15";
+          const bars = typeof args.bars === "number" ? Math.min(args.bars, 5000) : 1000;
+          const iterations = typeof args.iterations === "number" ? args.iterations : 1000;
+
+          let candleBars: any[] = [];
+          try {
+            const dbCandles = scalarAiDb.getCandles(symbol, undefined, undefined, bars);
+            if (dbCandles && dbCandles.length > 0) {
+              candleBars = dbCandles.map((c: any) => c.close - (c.open || c.close));
+            }
+          } catch (e) { /* fall through */ }
+
+          if (candleBars.length === 0) {
+            try {
+              const ratesRes = await mt5Bridge.getRates(symbol, timeframe, bars);
+              if (ratesRes && ratesRes.success && Array.isArray(ratesRes.rates)) {
+                candleBars = ratesRes.rates.map((r: any) => r.close - r.open);
+              }
+            } catch (e) { /* no data */ }
+          }
+
+          if (candleBars.length < 10) {
+            return toolResult(JSON.stringify({ success: false, error: "Insufficient bar data" }, null, 2));
+          }
+
+          const { shuffleNull } = await import("./knowledgebase/core/common");
+          const result = shuffleNull(candleBars, iterations);
+          return toolResult(JSON.stringify({ symbol, timeframe, bars: candleBars.length, iterations, ...result }, null, 2));
+        }
+        case "list_indicators": {
+          const category = args.category || undefined;
+          const indicators = scalarAiDb.getAllIndicatorLibrary();
+          const filtered = category ? indicators.filter((i: any) => i.category === category) : indicators;
+          return toolResult(JSON.stringify({ count: filtered.length, indicators: filtered }, null, 2));
+        }
+        case "add_indicator": {
+          const name = args.name;
+          if (!name || typeof name !== "string") {
+            return toolResult(JSON.stringify({ success: false, error: "name is required" }, null, 2));
+          }
+          const category = args.category || "custom";
+          const formula = args.formula ? JSON.stringify(args.formula) : "{}";
+          const id = `ind_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+          scalarAiDb.upsertIndicatorLibrary({
+            id,
+            name,
+            category,
+            formula,
+            is_builtin: 0,
+            created_at: new Date().toISOString(),
+          });
+          return toolResult(JSON.stringify({ success: true, id, name, category }, null, 2));
+        }
         case "get_market_telemetry": {
             const limit = typeof args.limit === "number" ? args.limit : 100;
             const activeSymbol = ctx.getStatus().activeSymbol;
@@ -1633,11 +2094,8 @@ async function callTool(ctx: McpContext, params: { name?: string; arguments?: Re
             return toolResult(JSON.stringify({ success: true, message: "Knowledge base updated from live telemetry", updateResult, knowledgeSummary: formatKnowledgeBase(state2), }, null, 2));
           }
           case "get_knowledge_summary": {
-            const kb = scalarAiDb.getAiKnowledge();
-            if (!kb) {
-              return toolResult("No knowledge base found.");
-            }
-            return toolResult(formatKnowledgeBase(kb));
+            const summary = getKnowledgeSummary();
+            return toolResult(formatKnowledgeSummary(summary));
           }
           case "analyze_market": {
             const activeSymbol = ctx.getStatus().activeSymbol;

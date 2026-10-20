@@ -263,7 +263,10 @@ export class CotradeHandlers {
     } catch {
       // fallback to db
     }
-    const candles = scalarAiDb.getCandles(sym, undefined, undefined, limit);
+    // Fall back to the database. The timeframe has to be carried through, or
+    // the fallback returns every timeframe stored for the symbol mixed
+    // together and the chart draws bars of different sizes on one axis.
+    const candles = scalarAiDb.getCandles(sym, undefined, undefined, limit, tfStr);
     return ok(res, {
       symbol: sym,
       timeframe: tfStr,
@@ -275,6 +278,7 @@ export class CotradeHandlers {
         low: c.low,
         close: c.close,
         volume: c.volume || 100,
+        spread: c.spread ?? 0,
       })),
     });
   };

@@ -21,6 +21,21 @@ export interface GatewayHeartbeatPayload {
   timestamp?: number;
 }
 
+export interface GatewayBarsPayload {
+  symbol: string;
+  timeframe: number;   // MT5 period code
+  count: number;
+  bars: Array<{
+    time: number;       // seconds since epoch
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    spread: number;
+  }>;
+}
+
 export interface GatewayTickPayload {
   symbol: string;
   bid: number;
@@ -49,6 +64,8 @@ export class GatewayManager {
   private lastBridgeSyncTime: number = 0;
   private cachedBridgeStatus: Mt5BridgeStatus | null = null;
   private cachedBrokerSymbols: any[] = [];
+  private brokerSymbolsFetchedAt: number = 0;
+  private brokerSymbolsRefreshing: boolean = false;
 
   constructor(store: AppStore) {
     this.store = store;
@@ -64,7 +81,39 @@ export class GatewayManager {
 
   public setCachedBrokerSymbols(symbols: any[]): void {
     this.cachedBrokerSymbols = symbols;
+    this.brokerSymbolsFetchedAt = Date.now();
     this.store.setBrokerSymbols(symbols);
+  }
+
+  /**
+   * How long ago the catalogue was fetched, in milliseconds.
+   *
+   * The catalogue holds 731 symbols and reading them all from the broker
+   * takes about 640 ms. Serving that on every request meant the symbol page
+   * cost most of a second each time it refreshed, and the cost landed on
+   * the bridge worker rather than on the user.
+   */
+  public brokerSymbolsAgeMs(): number {
+    return this.brokerSymbolsFetchedAt === 0 ? Infinity : Date.now() - this.brokerSymbolsFetchedAt;
+  }
+
+  /**
+   * Refresh the catalogue in the background.
+   *
+   * Fire and forget: the caller gets the cached copy immediately and the
+   * fresh one on the next request.
+   */
+  public refreshBrokerSymbolsInBackground(): void {
+    if (this.brokerSymbolsRefreshing) return;
+    this.brokerSymbolsRefreshing = true;
+    mt5Bridge.getSymbols()
+      .then((res: any) => {
+        if (res && res.success && Array.isArray(res.symbols) && res.symbols.length > 0) {
+          this.setCachedBrokerSymbols(res.symbols);
+        }
+      })
+      .catch(() => { /* keep the cached copy */ })
+      .finally(() => { this.brokerSymbolsRefreshing = false; });
   }
 
   public getActiveSymbol(): string {
@@ -93,18 +142,33 @@ export class GatewayManager {
         const activeSymbol = this.store.getActiveSymbol() || "Step Index";
 
         // 0. Auto-sync broker symbols catalog
-        try {
-          const symsRes = await mt5Bridge.getSymbols();
-          if (symsRes && symsRes.success && Array.isArray(symsRes.symbols) && symsRes.symbols.length > 0) {
-            this.cachedBrokerSymbols = symsRes.symbols;
-            this.store.setBrokerSymbols(symsRes.symbols);
-            const currentActive = this.store.getActiveSymbol();
-            if (!currentActive && symsRes.symbols[0]?.name) {
-              this.store.switchSymbol(symsRes.symbols[0].name);
+        //
+        // Fetching the catalog means pulling every symbol the broker lists
+        // -- 731 of them -- and it took 470 ms. The poll runs every five
+        // seconds, so refetching it every time meant the bridge worker spent
+        // almost all its time listing symbols that never change, and any
+        // other command queued behind that.
+        //
+        // The catalog changes when the account changes or the broker adds
+        // instruments, so a five minute refresh is enough. Everything else in
+        // the poll costs single-digit milliseconds.
+        const CATALOG_TTL_MS = 20 * 1000;
+        const catalogStale = Date.now() - this.brokerSymbolsFetchedAt > CATALOG_TTL_MS;
+        if (catalogStale) {
+          try {
+            const symsRes = await mt5Bridge.getSymbols();
+            if (symsRes && symsRes.success && Array.isArray(symsRes.symbols) && symsRes.symbols.length > 0) {
+              this.cachedBrokerSymbols = symsRes.symbols;
+              this.brokerSymbolsFetchedAt = Date.now();
+              this.store.setBrokerSymbols(symsRes.symbols);
+              const currentActive = this.store.getActiveSymbol();
+              if (!currentActive && symsRes.symbols[0]?.name) {
+                this.store.switchSymbol(symsRes.symbols[0].name);
+              }
             }
+          } catch {
+            // quiet symbol sync
           }
-        } catch {
-          // quiet symbol sync
         }
 
         // 1. Fetch real-time tick from MT5 bridge
@@ -150,6 +214,11 @@ export class GatewayManager {
                 low: r.low,
                 close: r.close,
                 volume: r.tick_volume || r.volume || 100,
+                // The bridge carries the per-bar spread and this is the only
+                // place the live M1 series reaches the database, so dropping
+                // it here left the stored bars with a spread of zero.
+                spread: r.spread ?? 0,
+                timeframe: "M1",
               }))
             );
           }
@@ -264,6 +333,42 @@ export class GatewayManager {
     });
 
     return { received: true, symbol, time: payload.time || Date.now() };
+  }
+
+  /**
+   * Store OHLCV bars pushed by the EA.
+   *
+   * The EA sends MT5's own CopyRates output, so the bars are the real
+   * history the chart is showing -- no second source, no re-derivation.
+   * The period code is MT5's own, which is why the mapping below is
+   * explicit: H1 is 16385, not 16384.
+   */
+  public handleBars(payload: GatewayBarsPayload) {
+    this.lastHeartbeatTime = Date.now();
+    const symbol = payload.symbol || this.store.getActiveSymbol() || "Step Index";
+    const bars = Array.isArray(payload.bars) ? payload.bars : [];
+    if (bars.length === 0) return { received: 0, symbol };
+
+    const TF_NAME: Record<number, string> = {
+      1: "M1", 5: "M5", 15: "M15", 30: "M30",
+      16385: "H1", 16388: "H4", 16408: "D1",
+    };
+    const timeframe = TF_NAME[payload.timeframe] || "M15";
+
+    const candles = bars.map((b: any) => ({
+      // MT5 gives seconds; ingestBulkCandles converts to milliseconds.
+      time: Number(b.time),
+      open: Number(b.open),
+      high: Number(b.high),
+      low: Number(b.low),
+      close: Number(b.close),
+      volume: Number(b.volume ?? 0),
+      spread: Number(b.spread ?? 0),
+      timeframe,
+    }));
+
+    this.store.ingestBulkCandles(symbol, candles);
+    return { received: candles.length, symbol, timeframe };
   }
 
   /**
